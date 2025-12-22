@@ -1415,6 +1415,15 @@ fn get_precedence(op: char) -> Option<u8> {
     }
 }
 
+/// Get keyword operator precedence
+fn get_keyword_precedence(keyword_code: u8) -> Option<u8> {
+    match keyword_code {
+        0x81 => Some(50), // DIV - same as / (integer division)
+        0x83 => Some(50), // MOD - same as / (modulo)
+        _ => None,
+    }
+}
+
 /// Convert operator character to BinaryOperator
 fn char_to_binary_op(op: char) -> Option<BinaryOperator> {
     match op {
@@ -1430,6 +1439,15 @@ fn char_to_binary_op(op: char) -> Option<BinaryOperator> {
     }
 }
 
+/// Convert keyword code to BinaryOperator
+fn keyword_to_binary_op(keyword_code: u8) -> Option<BinaryOperator> {
+    match keyword_code {
+        0x81 => Some(BinaryOperator::IntegerDivide), // DIV
+        0x83 => Some(BinaryOperator::Modulo),        // MOD
+        _ => None,
+    }
+}
+
 /// Parse expression with precedence climbing algorithm
 fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Result<Expression> {
     // Parse the left-hand side (primary expression)
@@ -1437,16 +1455,37 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
 
     // Parse binary operators with precedence
     while *pos < tokens.len() {
-        // Check if current token is a binary operator
-        let op_char = match &tokens[*pos] {
-            Token::Operator(ch) => *ch,
+        // Check if current token is a binary operator (either operator or keyword)
+        let (prec, op) = match &tokens[*pos] {
+            Token::Operator(ch) => {
+                if let Some(p) = get_precedence(*ch) {
+                    if let Some(binary_op) = char_to_binary_op(*ch) {
+                        (p, binary_op)
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            Token::Keyword(code) => {
+                if let Some(p) = get_keyword_precedence(*code) {
+                    if let Some(binary_op) = keyword_to_binary_op(*code) {
+                        (p, binary_op)
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
             _ => break,
         };
 
-        let prec = match get_precedence(op_char) {
-            Some(p) if p >= min_prec => p,
-            _ => break,
-        };
+        // Check precedence
+        if prec < min_prec {
+            break;
+        }
 
         *pos += 1; // consume operator
 
@@ -1454,11 +1493,6 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
         let right = parse_expr_precedence(tokens, pos, prec + 1)?;
 
         // Create binary operation
-        let op = char_to_binary_op(op_char).ok_or(BBCBasicError::SyntaxError {
-            message: format!("Invalid operator: {}", op_char),
-            line: None,
-        })?;
-
         left = Expression::BinaryOp {
             left: Box::new(left),
             op,
@@ -1698,6 +1732,51 @@ mod tests {
             Expression::BinaryOp {
                 left: Box::new(Expression::Integer(2)),
                 op: BinaryOperator::Add,
+                right: Box::new(Expression::Integer(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_power_operator() {
+        // RED: Parse "2 ^ 3" (power/exponentiation)
+        let tokens = vec![Token::Integer(2), Token::Operator('^'), Token::Integer(3)];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(2)),
+                op: BinaryOperator::Power,
+                right: Box::new(Expression::Integer(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_mod_operator() {
+        // RED: Parse "10 MOD 3" (modulo)
+        let tokens = vec![Token::Integer(10), Token::Keyword(0x83), Token::Integer(3)];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(10)),
+                op: BinaryOperator::Modulo,
+                right: Box::new(Expression::Integer(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_div_operator() {
+        // RED: Parse "10 DIV 3" (integer division)
+        let tokens = vec![Token::Integer(10), Token::Keyword(0x81), Token::Integer(3)];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(10)),
+                op: BinaryOperator::IntegerDivide,
                 right: Box::new(Expression::Integer(3)),
             }
         );

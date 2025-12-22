@@ -2900,4 +2900,43 @@ mod tests {
         // Global X should still be 100 (not modified by function)
         assert_eq!(executor.get_variable_int("X").unwrap(), 100);
     }
+
+    #[test]
+    fn test_power_operator() {
+        // RED: Test 2 ^ 3 = 8
+        let mut executor = Executor::new();
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Integer(2)),
+            op: BinaryOperator::Power,
+            right: Box::new(Expression::Integer(3)),
+        };
+        let result = executor.eval_integer(&expr).unwrap();
+        assert_eq!(result, 8);
+    }
+
+    #[test]
+    fn test_modulo_operator() {
+        // RED: Test 10 MOD 3 = 1
+        let mut executor = Executor::new();
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Integer(10)),
+            op: BinaryOperator::Modulo,
+            right: Box::new(Expression::Integer(3)),
+        };
+        let result = executor.eval_integer(&expr).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_integer_divide_operator() {
+        // RED: Test 10 DIV 3 = 3
+        let mut executor = Executor::new();
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::Integer(10)),
+            op: BinaryOperator::IntegerDivide,
+            right: Box::new(Expression::Integer(3)),
+        };
+        let result = executor.eval_integer(&expr).unwrap();
+        assert_eq!(result, 3);
+    }
 }

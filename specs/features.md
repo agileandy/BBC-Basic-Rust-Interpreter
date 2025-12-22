@@ -17,9 +17,9 @@
 - [x] Multiplication (*) - Multiply two numbers
 - [x] Division (/) - Divide two numbers
 - [x] Unary minus (-) - Negate a number
-- [ ] Integer division (DIV) - Integer quotient of division
-- [ ] Modulo (MOD) - Remainder of integer division
-- [ ] Exponentiation (^) - Raise to power
+- [x] Integer division (DIV) - Integer quotient of division
+- [x] Modulo (MOD) - Remainder of integer division
+- [x] Exponentiation (^) - Raise to power
 
 #### Comparison Operators
 - [x] Equal (=) - Test equality
@@ -299,9 +299,9 @@
 - [x] User-defined functions (DEF FN)
 - [x] LOCAL variables
 - [x] ON GOTO/GOSUB
+- [x] Missing operators (MOD/DIV/^)
 - [ ] File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
 - [ ] Error handling (ON ERROR/ERL/ERR)
-- [ ] Missing operators (MOD/DIV/^)
 
 ### Low Priority (Advanced/Legacy)
 - [ ] Graphics commands (PLOT/DRAW/CIRCLE)
