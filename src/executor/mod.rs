@@ -1288,6 +1288,43 @@ impl Executor {
                     }
                 }
             }
+            "UPPER$" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "UPPER$ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let s = self.eval_string(&args[0])?;
+                Ok(s.to_uppercase())
+            }
+            "LOWER$" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "LOWER$ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let s = self.eval_string(&args[0])?;
+                Ok(s.to_lowercase())
+            }
+            "STRING$" => {
+                if args.len() != 2 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "STRING$ requires 2 arguments (count, string)".to_string(),
+                        line: None,
+                    });
+                }
+                let count = self.eval_integer(&args[0])? as usize;
+                let s = self.eval_string(&args[1])?;
+
+                // BBC BASIC STRING$(n, string) repeats first character n times
+                if let Some(first_char) = s.chars().next() {
+                    Ok(first_char.to_string().repeat(count))
+                } else {
+                    Ok(String::new())
+                }
+            }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown string function: {}", name),
                 line: None,
@@ -2852,6 +2889,46 @@ mod tests {
 
         let result = executor.eval_real(&val_real).unwrap();
         assert!((result - 3.14).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_upper_lower_string_functions() {
+        // RED: Test UPPER$, LOWER$, and STRING$ functions
+        let mut executor = Executor::new();
+
+        // Test UPPER$("hello") = "HELLO"
+        let upper_expr = Expression::FunctionCall {
+            name: "UPPER$".to_string(),
+            args: vec![Expression::String("hello".to_string())],
+        };
+        assert_eq!(executor.eval_string(&upper_expr).unwrap(), "HELLO");
+
+        // Test LOWER$("WORLD") = "world"
+        let lower_expr = Expression::FunctionCall {
+            name: "LOWER$".to_string(),
+            args: vec![Expression::String("WORLD".to_string())],
+        };
+        assert_eq!(executor.eval_string(&lower_expr).unwrap(), "world");
+
+        // Test STRING$(5, "*") = "*****"
+        let string_expr = Expression::FunctionCall {
+            name: "STRING$".to_string(),
+            args: vec![
+                Expression::Integer(5),
+                Expression::String("*".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_string(&string_expr).unwrap(), "*****");
+
+        // Test STRING$(3, "ABC") - should repeat first char only
+        let string_expr2 = Expression::FunctionCall {
+            name: "STRING$".to_string(),
+            args: vec![
+                Expression::Integer(3),
+                Expression::String("ABC".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_string(&string_expr2).unwrap(), "AAA");
     }
 
     #[test]
