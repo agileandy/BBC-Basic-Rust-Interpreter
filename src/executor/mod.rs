@@ -1015,8 +1015,8 @@ impl Executor {
                 }
             }
             // Real-only functions should not be called as integers
-            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
-            | "RND" => Err(BBCBasicError::TypeMismatch),
+            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN" | "LOG"
+            | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -1202,6 +1202,48 @@ impl Executor {
                 }
                 let s = self.eval_string(&args[0])?;
                 s.trim().parse::<f64>().or_else(|_| Ok(0.0)) // BBC BASIC returns 0 for non-numeric strings
+            }
+            "SQRT" => {
+                // SQRT is an alias for SQR in BBC BASIC
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "SQRT requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < 0.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.sqrt())
+            }
+            "ACS" => {
+                // ACS(x) = arccosine in radians
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ACS requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < -1.0 || val > 1.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.acos())
+            }
+            "ASN" => {
+                // ASN(x) = arcsine in radians
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ASN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < -1.0 || val > 1.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.asin())
             }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
@@ -2684,6 +2726,52 @@ mod tests {
 
         let result = executor.eval_integer(&int_neg).unwrap();
         assert_eq!(result, -3);
+    }
+
+    #[test]
+    fn test_sqrt_asc_asn_functions() {
+        // RED: Test SQRT (alias for SQR), ACS (arccosine), ASN (arcsine)
+        let mut executor = Executor::new();
+
+        // Test SQRT(16) = 4 (alias for SQR)
+        let sqrt_expr = Expression::FunctionCall {
+            name: "SQRT".to_string(),
+            args: vec![Expression::Integer(16)],
+        };
+        let result = executor.eval_real(&sqrt_expr).unwrap();
+        assert!((result - 4.0).abs() < 0.0001);
+
+        // Test ACS(0.5) ≈ 1.047 radians (60 degrees)
+        let acs_expr = Expression::FunctionCall {
+            name: "ACS".to_string(),
+            args: vec![Expression::Real(0.5)],
+        };
+        let result = executor.eval_real(&acs_expr).unwrap();
+        assert!((result - 1.047).abs() < 0.001);
+
+        // Test ASN(0.5) ≈ 0.524 radians (30 degrees)
+        let asn_expr = Expression::FunctionCall {
+            name: "ASN".to_string(),
+            args: vec![Expression::Real(0.5)],
+        };
+        let result = executor.eval_real(&asn_expr).unwrap();
+        assert!((result - 0.524).abs() < 0.001);
+
+        // Test ACS(1) = 0 (cos(0) = 1)
+        let acs_one = Expression::FunctionCall {
+            name: "ACS".to_string(),
+            args: vec![Expression::Integer(1)],
+        };
+        let result = executor.eval_real(&acs_one).unwrap();
+        assert!((result - 0.0).abs() < 0.0001);
+
+        // Test ASN(0) = 0 (sin(0) = 0)
+        let asn_zero = Expression::FunctionCall {
+            name: "ASN".to_string(),
+            args: vec![Expression::Integer(0)],
+        };
+        let result = executor.eval_real(&asn_zero).unwrap();
+        assert!((result - 0.0).abs() < 0.0001);
     }
 
     #[test]
