@@ -136,6 +136,7 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         // Check statement type before executing
         let is_goto = matches!(statement, bbc_basic_interpreter::Statement::Goto { .. });
         let is_gosub = matches!(statement, bbc_basic_interpreter::Statement::Gosub { .. });
+        let is_return = matches!(statement, bbc_basic_interpreter::Statement::Return);
         let is_end = matches!(statement, bbc_basic_interpreter::Statement::End | bbc_basic_interpreter::Statement::Stop);
         let is_for = matches!(statement, bbc_basic_interpreter::Statement::For { .. });
         let is_next = matches!(statement, bbc_basic_interpreter::Statement::Next { .. });
@@ -157,10 +158,30 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
                 }
             }
         } else if is_gosub {
-            // GOSUB: extract target and jump (but save return point)
+            // GOSUB: save return address (this line) and jump to target
             if let bbc_basic_interpreter::Statement::Gosub { line_number: target } = statement {
+                // Push the current line number so RETURN can come back here
+                executor.push_gosub_return(line_number);
+                
+                // Jump to the target subroutine
                 if !program.goto_line(target) {
                     return Err(format!("Line {} not found (GOSUB)", target));
+                }
+            }
+        } else if is_return {
+            // RETURN: pop return address and jump back
+            match executor.pop_gosub_return() {
+                Ok(return_line) => {
+                    // Jump back to the line that called GOSUB
+                    if program.goto_line(return_line) {
+                        // Move to the line AFTER the GOSUB
+                        program.next_line();
+                    } else {
+                        return Err(format!("Return line {} not found", return_line));
+                    }
+                }
+                Err(_) => {
+                    return Err("RETURN without GOSUB".to_string());
                 }
             }
         } else if is_for {
