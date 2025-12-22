@@ -139,6 +139,8 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_end = matches!(statement, bbc_basic_interpreter::Statement::End | bbc_basic_interpreter::Statement::Stop);
         let is_for = matches!(statement, bbc_basic_interpreter::Statement::For { .. });
         let is_next = matches!(statement, bbc_basic_interpreter::Statement::Next { .. });
+        let is_repeat = matches!(statement, bbc_basic_interpreter::Statement::Repeat);
+        let is_until = matches!(statement, bbc_basic_interpreter::Statement::Until { .. });
 
         // Execute the statement
         executor.execute_statement(&statement)
@@ -177,6 +179,31 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
             } else {
                 // Loop completed - continue to next line
                 program.next_line();
+            }
+        } else if is_repeat {
+            // REPEAT: push this line number for UNTIL to loop back to
+            executor.push_repeat(line_number);
+            program.next_line();
+        } else if is_until {
+            // UNTIL: check condition and loop back if false
+            if let bbc_basic_interpreter::Statement::Until { condition } = statement {
+                match executor.check_until(&condition) {
+                    Ok(Some(repeat_line)) => {
+                        // Condition false - loop back to line AFTER REPEAT
+                        if program.goto_line(repeat_line) {
+                            program.next_line();
+                        } else {
+                            return Err(format!("REPEAT line {} not found", repeat_line));
+                        }
+                    }
+                    Ok(None) => {
+                        // Condition true - exit loop, continue to next line
+                        program.next_line();
+                    }
+                    Err(e) => {
+                        return Err(format!("Error evaluating UNTIL condition: {:?}", e));
+                    }
+                }
             }
         } else {
             // Normal: advance to next line
