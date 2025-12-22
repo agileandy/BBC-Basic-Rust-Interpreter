@@ -448,6 +448,22 @@ impl Executor {
         Ok(())
     }
     
+    /// Collect DATA statement values without executing (for program pre-processing)
+    /// This is used to collect all DATA statements before program execution begins
+    pub fn collect_data(&mut self, statement: &Statement) -> Result<()> {
+        if let Statement::Data { values } = statement {
+            self.data_values.extend(values.iter().cloned());
+        }
+        Ok(())
+    }
+    
+    /// Reset DATA pointer and optionally clear all DATA values
+    /// Called at the start of RUN to prepare for fresh program execution
+    pub fn reset_data(&mut self) {
+        self.data_values.clear();
+        self.data_pointer = 0;
+    }
+    
     /// Execute READ statement - reads data into variables
     fn execute_read(&mut self, variables: &[String]) -> Result<()> {
         for var_name in variables {
@@ -2080,6 +2096,45 @@ mod tests {
         assert!(result.is_err());
         // A% should have been set before error
         assert_eq!(executor.get_variable_int("A%").unwrap(), 10);
+    }
+    
+    #[test]
+    fn test_data_collection_with_goto() {
+        // RED: Test that DATA statements are collected even when skipped by GOTO
+        // This simulates a program like:
+        // 10 GOTO 40
+        // 20 DATA 100, 200, 300
+        // 30 END
+        // 40 READ A%, B%, C%
+        // 50 END
+        
+        let mut executor = Executor::new();
+        
+        // First, we need to "collect" the DATA statement at line 20
+        // even though execution jumps from line 10 to line 40
+        let data_stmt = Statement::Data {
+            values: vec![
+                DataValue::Integer(100),
+                DataValue::Integer(200),
+                DataValue::Integer(300),
+            ],
+        };
+        
+        // In proper implementation, DATA should be collected BEFORE execution
+        // For now, this test will fail because we need a new method to pre-collect DATA
+        
+        // Simulate what should happen: all DATA is collected first
+        executor.collect_data(&data_stmt).unwrap();
+        
+        // Now READ should work even though we never "executed" line 20
+        let read_stmt = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string(), "C%".to_string()],
+        };
+        executor.execute_statement(&read_stmt).unwrap();
+        
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 100);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 200);
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 300);
     }
 }
 
