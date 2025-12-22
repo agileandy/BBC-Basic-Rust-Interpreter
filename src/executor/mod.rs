@@ -9,6 +9,17 @@ use crate::variables::{Variable, VariableStore};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+
+/// File handle for file I/O operations
+#[derive(Debug)]
+enum FileHandle {
+    /// File opened for reading (OPENIN)
+    Input(BufReader<File>),
+    /// File opened for writing (OPENOUT)
+    Output(BufWriter<File>),
+}
 
 /// Local variable frame for procedure/function scoping
 #[derive(Debug, Clone)]
@@ -61,6 +72,8 @@ pub struct Executor {
     for_loops: Vec<(String, i32, i32, u16)>,
     // REPEAT loop stack: stores line numbers of REPEAT statements
     repeat_stack: Vec<u16>,
+    // WHILE loop stack: stores line numbers of WHILE statements
+    while_stack: Vec<u16>,
     // DATA storage: stores all DATA values in program order
     data_values: Vec<DataValue>,
     // DATA pointer: current index in data_values
@@ -77,6 +90,10 @@ pub struct Executor {
     error_handler: Option<u16>,
     // Last error information (for ERL and ERR functions)
     last_error: Option<ErrorInfo>,
+    // Open file handles: handle number -> FileHandle
+    open_files: HashMap<i32, FileHandle>,
+    // Next file handle number to allocate
+    next_file_handle: i32,
     // Output buffer (for testing)
     #[cfg(test)]
     output: String,
@@ -91,6 +108,7 @@ impl Executor {
             return_stack: Vec::new(),
             for_loops: Vec::new(),
             repeat_stack: Vec::new(),
+            while_stack: Vec::new(),
             data_values: Vec::new(),
             data_pointer: 0,
             rng: RefCell::new(rand::thread_rng()),
@@ -99,6 +117,8 @@ impl Executor {
             local_stack: Vec::new(),
             error_handler: None,
             last_error: None,
+            open_files: HashMap::new(),
+            next_file_handle: 1,
             #[cfg(test)]
             output: String::new(),
         }
@@ -154,6 +174,14 @@ impl Executor {
                 // UNTIL is handled as control flow in main.rs
                 Ok(())
             }
+            Statement::While { .. } => {
+                // WHILE is handled as control flow in main.rs
+                Ok(())
+            }
+            Statement::EndWhile => {
+                // ENDWHILE is handled as control flow in main.rs
+                Ok(())
+            }
             Statement::Cls => self.execute_cls(),
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
@@ -181,6 +209,11 @@ impl Executor {
                 self.clear_error_handler();
                 Ok(())
             }
+            Statement::PrintFile { handle, items } => self.execute_print_file(handle, items),
+            Statement::InputFile { handle, variables } => {
+                self.execute_input_file(handle, variables)
+            }
+            Statement::CloseFile { handle } => self.execute_close_file(handle),
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -887,6 +920,39 @@ impl Executor {
                 }
                 Ok(self.get_error_number())
             }
+            "OPENIN" => {
+                // Open file for reading, returns file handle
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "OPENIN requires 1 argument (filename)".to_string(),
+                        line: None,
+                    });
+                }
+                let filename = self.eval_string(&args[0])?;
+                self.open_file_for_reading(&filename)
+            }
+            "OPENOUT" => {
+                // Open file for writing, returns file handle
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "OPENOUT requires 1 argument (filename)".to_string(),
+                        line: None,
+                    });
+                }
+                let filename = self.eval_string(&args[0])?;
+                self.open_file_for_writing(&filename)
+            }
+            "EOF" => {
+                // Test for end of file, returns -1 (TRUE) if EOF, 0 (FALSE) otherwise
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "EOF requires 1 argument (file handle)".to_string(),
+                        line: None,
+                    });
+                }
+                let handle = self.eval_integer(&args[0])?;
+                self.check_eof(handle)
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
             | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -1259,6 +1325,44 @@ impl Executor {
         }
     }
 
+    /// Push a WHILE line number onto the while stack and check condition
+    /// Returns Some(line_number) if condition is TRUE (continue to loop body)
+    /// Returns None if condition is FALSE (skip loop body)
+    pub fn push_while(&mut self, line_number: u16, condition: &Expression) -> Result<Option<u16>> {
+        // Evaluate the condition
+        let result = self.eval_integer(condition)?;
+
+        if result != 0 {
+            // Condition is true - enter loop body
+            self.while_stack.push(line_number);
+            Ok(Some(line_number))
+        } else {
+            // Condition is false - skip loop body
+            Ok(None)
+        }
+    }
+
+    /// Handle ENDWHILE - return the WHILE line if we should loop back
+    pub fn check_endwhile(&mut self, condition: &Expression) -> Result<Option<u16>> {
+        // Evaluate the condition
+        let result = self.eval_integer(condition)?;
+
+        if result != 0 {
+            // Condition is still true - loop back to WHILE
+            // Return the WHILE line number but keep it on stack (don't pop yet)
+            Ok(self.while_stack.last().copied())
+        } else {
+            // Condition is false - exit loop
+            self.while_stack.pop();
+            Ok(None)
+        }
+    }
+
+    /// Get the current WHILE line number without popping (for ENDWHILE to retrieve condition)
+    pub fn check_endwhile_get_while_line(&self) -> Option<u16> {
+        self.while_stack.last().copied()
+    }
+
     /// Push a return address onto the GOSUB stack
     pub fn push_gosub_return(&mut self, line_number: u16) {
         self.return_stack.push(line_number);
@@ -1587,6 +1691,207 @@ impl Executor {
         self.exit_local_scope()?;
 
         Ok(result)
+    }
+
+    /// Open a file for reading (OPENIN)
+    fn open_file_for_reading(&mut self, filename: &str) -> Result<i32> {
+        // Check if we've hit the maximum number of open files (BBC BASIC limit: ~255)
+        if self.open_files.len() >= 255 {
+            return Err(BBCBasicError::TooManyOpenFiles);
+        }
+
+        // Try to open the file
+        let file = File::open(filename)
+            .map_err(|_| BBCBasicError::FileNotFound(filename.to_string()))?;
+        let reader = BufReader::new(file);
+
+        // Allocate a handle
+        let handle = self.next_file_handle;
+        self.next_file_handle += 1;
+
+        // Store the file handle
+        self.open_files.insert(handle, FileHandle::Input(reader));
+
+        Ok(handle)
+    }
+
+    /// Open a file for writing (OPENOUT)
+    fn open_file_for_writing(&mut self, filename: &str) -> Result<i32> {
+        // Check if we've hit the maximum number of open files
+        if self.open_files.len() >= 255 {
+            return Err(BBCBasicError::TooManyOpenFiles);
+        }
+
+        // Try to create/truncate the file
+        let file = File::create(filename)
+            .map_err(|e| BBCBasicError::DiskError(format!("Cannot create file: {}", e)))?;
+        let writer = BufWriter::new(file);
+
+        // Allocate a handle
+        let handle = self.next_file_handle;
+        self.next_file_handle += 1;
+
+        // Store the file handle
+        self.open_files.insert(handle, FileHandle::Output(writer));
+
+        Ok(handle)
+    }
+
+    /// Check if file is at end of file (EOF#)
+    fn check_eof(&mut self, handle: i32) -> Result<i32> {
+        // Get the file handle
+        let file_handle = self
+            .open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Only input files can be tested for EOF
+        match file_handle {
+            FileHandle::Input(reader) => {
+                // Check if we're at EOF by trying to fill the buffer
+                // BBC BASIC EOF# returns -1 (TRUE) if at EOF, 0 (FALSE) otherwise
+                Ok(if reader.fill_buf().map(|b| b.is_empty()).unwrap_or(true) {
+                    -1 // TRUE in BBC BASIC
+                } else {
+                    0 // FALSE in BBC BASIC
+                })
+            }
+            FileHandle::Output(_) => {
+                // Can't check EOF on output files
+                Err(BBCBasicError::BadCall)
+            }
+        }
+    }
+
+    /// Execute PRINT# statement - write to file
+    fn execute_print_file(&mut self, handle_expr: &Expression, items: &[crate::parser::PrintItem]) -> Result<()> {
+        // Evaluate the handle
+        let handle = self.eval_integer(handle_expr)?;
+
+        // Process print items and build output string first (to avoid borrow issues)
+        use crate::parser::PrintItem;
+        let mut output = String::new();
+        
+        for item in items {
+            match item {
+                PrintItem::Expression(expr) => {
+                    output.push_str(&self.format_expression(expr)?);
+                }
+                PrintItem::Tab(_) | PrintItem::Spc(_) => {
+                    // TAB and SPC not typically used in file I/O, but we can support them
+                    // For simplicity, ignore them in file output
+                }
+                PrintItem::Semicolon => {
+                    // Semicolon suppresses newline - do nothing
+                }
+                PrintItem::Comma => {
+                    // Comma outputs a tab
+                    output.push('\t');
+                }
+            }
+        }
+
+        // Add newline unless last item was semicolon
+        if !items.is_empty() {
+            if let Some(last) = items.last() {
+                if !matches!(last, PrintItem::Semicolon) {
+                    output.push('\n');
+                }
+            }
+        } else {
+            output.push('\n');
+        }
+
+        // Now get the file handle and write
+        let file_handle = self
+            .open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Only output files can be written to
+        let writer = match file_handle {
+            FileHandle::Output(writer) => writer,
+            FileHandle::Input(_) => return Err(BBCBasicError::BadCall),
+        };
+
+        // Write the output
+        write!(writer, "{}", output)
+            .map_err(|e| BBCBasicError::DiskError(format!("Write error: {}", e)))?;
+
+        // Flush to ensure data is written
+        writer
+            .flush()
+            .map_err(|e| BBCBasicError::DiskError(format!("Flush error: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Execute INPUT# statement - read from file
+    fn execute_input_file(&mut self, handle_expr: &Expression, variables: &[String]) -> Result<()> {
+        // Evaluate the handle
+        let handle = self.eval_integer(handle_expr)?;
+
+        // Get the file handle
+        let file_handle = self
+            .open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Only input files can be read from
+        let reader = match file_handle {
+            FileHandle::Input(reader) => reader,
+            FileHandle::Output(_) => return Err(BBCBasicError::BadCall),
+        };
+
+        // Read a line from the file
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .map_err(|e| BBCBasicError::DiskError(format!("Read error: {}", e)))?;
+
+        // Remove trailing newline
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+
+        // Parse the line and assign to variables (simplified - just split by commas)
+        let values: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+
+        for (i, var_name) in variables.iter().enumerate() {
+            let value_str = values.get(i).unwrap_or(&"");
+
+            // Assign based on variable type
+            if var_name.ends_with('%') {
+                // Integer variable
+                let value = value_str.parse::<i32>().unwrap_or(0);
+                self.variables.set_integer_var(var_name.clone(), value);
+            } else if var_name.ends_with('$') {
+                // String variable
+                self.variables.set_string_var(var_name.clone(), value_str.to_string())?;
+            } else {
+                // Real variable
+                let value = value_str.parse::<f64>().unwrap_or(0.0);
+                self.variables.set_real_var(var_name.clone(), value);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute CLOSE# statement - close file
+    fn execute_close_file(&mut self, handle_expr: &Expression) -> Result<()> {
+        // Evaluate the handle
+        let handle = self.eval_integer(handle_expr)?;
+
+        // Remove the file handle (this closes the file)
+        self.open_files
+            .remove(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        Ok(())
     }
 }
 
@@ -3125,6 +3430,334 @@ mod tests {
 
         let result = executor.eval_integer(&fn_call).unwrap();
         assert_eq!(result, 18);
+    }
+
+    #[test]
+    fn test_openout_creates_file() {
+        // RED: Test OPENOUT function creates file and returns handle
+        use std::fs;
+        let test_file = "test_openout.txt";
+        
+        // Clean up any existing file
+        let _ = fs::remove_file(test_file);
+        
+        let mut executor = Executor::new();
+        
+        let result = executor.open_file_for_writing(test_file);
+        assert!(result.is_ok());
+        let handle = result.unwrap();
+        assert_eq!(handle, 1); // First handle should be 1
+        
+        // File should exist
+        assert!(fs::metadata(test_file).is_ok());
+        
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_openin_opens_existing_file() {
+        // RED: Test OPENIN function opens existing file
+        use std::fs;
+        let test_file = "test_openin.txt";
+        
+        // Create a test file
+        fs::write(test_file, "test content").unwrap();
+        
+        let mut executor = Executor::new();
+        
+        let result = executor.open_file_for_reading(test_file);
+        assert!(result.is_ok());
+        let handle = result.unwrap();
+        assert_eq!(handle, 1);
+        
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_openin_fails_on_missing_file() {
+        // RED: Test OPENIN returns FileNotFound error
+        let mut executor = Executor::new();
+        
+        let result = executor.open_file_for_reading("nonexistent_file.txt");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BBCBasicError::FileNotFound(_)));
+    }
+
+    #[test]
+    fn test_close_file() {
+        // RED: Test CLOSE# closes a file
+        use std::fs;
+        let test_file = "test_close.txt";
+        
+        // Create a test file
+        fs::write(test_file, "test").unwrap();
+        
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+        
+        // Close the file
+        let handle_expr = Expression::Integer(handle);
+        let result = executor.execute_close_file(&handle_expr);
+        assert!(result.is_ok());
+        
+        // Trying to close again should fail
+        let result = executor.execute_close_file(&handle_expr);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BBCBasicError::ChannelNotOpen(_)));
+        
+        // Clean up
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_print_file_writes_data() {
+        // RED: Test PRINT# writes to file
+        use std::fs;
+        let test_file = "test_print.txt";
+        
+        let _ = fs::remove_file(test_file);
+        
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_writing(test_file).unwrap();
+        
+        // Write some data
+        let handle_expr = Expression::Integer(handle);
+        let items = vec![
+            crate::parser::PrintItem::Expression(Expression::String("Hello".to_string())),
+            crate::parser::PrintItem::Comma,
+            crate::parser::PrintItem::Expression(Expression::String("World".to_string())),
+        ];
+        
+        let result = executor.execute_print_file(&handle_expr, &items);
+        assert!(result.is_ok());
+        
+        // Close the file
+        executor.execute_close_file(&handle_expr).unwrap();
+        
+        // Read back the content
+        let content = fs::read_to_string(test_file).unwrap();
+        assert_eq!(content, "Hello\tWorld\n");
+        
+        // Clean up
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_input_file_reads_data() {
+        // RED: Test INPUT# reads from file
+        use std::fs;
+        let test_file = "test_input.txt";
+        
+        // Create test file with data
+        fs::write(test_file, "42,Hello,3.14").unwrap();
+        
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+        
+        // Read data into variables
+        let handle_expr = Expression::Integer(handle);
+        let variables = vec!["A%".to_string(), "B$".to_string(), "C".to_string()];
+        
+        let result = executor.execute_input_file(&handle_expr, &variables);
+        assert!(result.is_ok());
+        
+        // Check the variables were set
+        assert_eq!(executor.variables.get_integer_var("A%").unwrap(), 42);
+        assert_eq!(executor.variables.get_string_var("B$").unwrap(), "Hello");
+        assert!((executor.variables.get_real_var("C").unwrap() - 3.14).abs() < 0.001);
+        
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_eof_function() {
+        // RED: Test EOF# function
+        use std::fs;
+        let test_file = "test_eof.txt";
+        
+        // Create a small test file
+        fs::write(test_file, "one line\n").unwrap();
+        
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+        
+        // Not at EOF initially
+        let eof = executor.check_eof(handle).unwrap();
+        assert_eq!(eof, 0); // FALSE
+        
+        // Read the line
+        let handle_expr = Expression::Integer(handle);
+        let variables = vec!["LINE$".to_string()];
+        executor.execute_input_file(&handle_expr, &variables).unwrap();
+        
+        // Now at EOF
+        let eof = executor.check_eof(handle).unwrap();
+        assert_eq!(eof, -1); // TRUE
+        
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_multiple_file_handles() {
+        // RED: Test opening multiple files simultaneously
+        use std::fs;
+        let file1 = "test_multi1.txt";
+        let file2 = "test_multi2.txt";
+        
+        fs::write(file1, "File 1").unwrap();
+        let _ = fs::remove_file(file2);
+        
+        let mut executor = Executor::new();
+        
+        // Open two files
+        let handle1 = executor.open_file_for_reading(file1).unwrap();
+        let handle2 = executor.open_file_for_writing(file2).unwrap();
+        
+        assert_eq!(handle1, 1);
+        assert_eq!(handle2, 2);
+        
+        // Both should be open
+        assert!(executor.open_files.contains_key(&handle1));
+        assert!(executor.open_files.contains_key(&handle2));
+        
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(file1);
+        let _ = fs::remove_file(file2);
+    }
+
+    #[test]
+    fn test_while_loop_helpers() {
+        // RED: Test WHILE...ENDWHILE helper methods
+        use crate::parser::BinaryOperator;
+        let mut executor = Executor::new();
+
+        // Simulate:
+        // 10 X% = 0
+        // 20 WHILE X% < 5
+        // 30 X% = X% + 1
+        // 40 ENDWHILE
+
+        // Initialize X% = 0
+        let init_stmt = Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::Integer(0),
+        };
+        executor.execute_statement(&init_stmt).unwrap();
+
+        // WHILE X% < 5 at line 20
+        let condition = Expression::BinaryOp {
+            left: Box::new(Expression::Variable("X%".to_string())),
+            op: BinaryOperator::LessThan,
+            right: Box::new(Expression::Integer(5)),
+        };
+
+        // First check - X% = 0, should enter loop
+        let result = executor.push_while(20, &condition).unwrap();
+        assert_eq!(result, Some(20), "Should enter loop when X% = 0");
+
+        // Loop several times
+        for expected in 1..=5 {
+            // X% = X% + 1
+            let increment_stmt = Statement::Assignment {
+                target: "X%".to_string(),
+                expression: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Integer(1)),
+                },
+            };
+            executor.execute_statement(&increment_stmt).unwrap();
+
+            // Check ENDWHILE condition
+            if expected < 5 {
+                // Should loop back (X% < 5)
+                let result = executor.check_endwhile(&condition).unwrap();
+                assert_eq!(result, Some(20), "Should loop back when X% = {}", expected);
+            } else {
+                // Should exit loop (X% = 5)
+                let result = executor.check_endwhile(&condition).unwrap();
+                assert_eq!(result, None, "Should exit loop when X% = 5");
+            }
+        }
+
+        // Verify X% final value
+        let x_value = executor.variables.get_integer_var("X%").unwrap();
+        assert_eq!(x_value, 5);
+    }
+
+    #[test]
+    fn test_while_false_condition() {
+        // Test WHILE with false condition (should not enter loop)
+        let mut executor = Executor::new();
+
+        // X% = 10
+        let init_stmt = Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::Integer(10),
+        };
+        executor.execute_statement(&init_stmt).unwrap();
+
+        // WHILE X% < 5 (false, since X% = 10)
+        let condition = Expression::BinaryOp {
+            left: Box::new(Expression::Variable("X%".to_string())),
+            op: BinaryOperator::LessThan,
+            right: Box::new(Expression::Integer(5)),
+        };
+
+        let result = executor.push_while(20, &condition).unwrap();
+        assert_eq!(result, None, "Should not enter loop when condition is false");
+
+        // while_stack should be empty (loop was never entered)
+        assert!(executor.while_stack.is_empty());
+    }
+
+    #[test]
+    fn test_nested_while_loops() {
+        // Test nested WHILE loops
+        let mut executor = Executor::new();
+
+        // Outer: WHILE I% < 3
+        executor.variables.set_integer_var("I%".to_string(), 0);
+        let outer_condition = Expression::BinaryOp {
+            left: Box::new(Expression::Variable("I%".to_string())),
+            op: BinaryOperator::LessThan,
+            right: Box::new(Expression::Integer(3)),
+        };
+
+        // Enter outer loop
+        executor.push_while(10, &outer_condition).unwrap();
+        assert_eq!(executor.while_stack.len(), 1);
+
+        // Inner: WHILE J% < 2
+        executor.variables.set_integer_var("J%".to_string(), 0);
+        let inner_condition = Expression::BinaryOp {
+            left: Box::new(Expression::Variable("J%".to_string())),
+            op: BinaryOperator::LessThan,
+            right: Box::new(Expression::Integer(2)),
+        };
+
+        // Enter inner loop
+        executor.push_while(20, &inner_condition).unwrap();
+        assert_eq!(executor.while_stack.len(), 2);
+
+        // Exit inner loop
+        executor.variables.set_integer_var("J%".to_string(), 2);
+        executor.check_endwhile(&inner_condition).unwrap();
+        assert_eq!(executor.while_stack.len(), 1, "Inner loop should be popped");
+
+        // Exit outer loop
+        executor.variables.set_integer_var("I%".to_string(), 3);
+        executor.check_endwhile(&outer_condition).unwrap();
+        assert_eq!(executor.while_stack.len(), 0, "Outer loop should be popped");
     }
 }
 
