@@ -7,6 +7,8 @@ edition = "2021"
 # For property-based testing
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
+# For random number generation (RND function)
+rand = "0.8"
 
 [dev-dependencies]
 # Additional testing utilities

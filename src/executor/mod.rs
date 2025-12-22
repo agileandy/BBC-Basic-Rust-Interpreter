@@ -6,6 +6,8 @@ use crate::error::{Result, BBCBasicError};
 use crate::parser::{Statement, Expression, DataValue};
 use crate::variables::VariableStore;
 use crate::memory::MemoryManager;
+use rand::Rng;
+use std::cell::RefCell;
 
 /// BBC BASIC statement executor
 #[derive(Debug)]
@@ -20,6 +22,8 @@ pub struct Executor {
     data_values: Vec<DataValue>,
     // DATA pointer: current index in data_values
     data_pointer: usize,
+    // Random number generator for RND function (wrapped in RefCell for interior mutability)
+    rng: RefCell<rand::rngs::ThreadRng>,
     // Output buffer (for testing)
     #[cfg(test)]
     output: String,
@@ -35,6 +39,7 @@ impl Executor {
             for_loops: Vec::new(),
             data_values: Vec::new(),
             data_pointer: 0,
+            rng: RefCell::new(rand::thread_rng()),
             #[cfg(test)]
             output: String::new(),
         }
@@ -883,9 +888,31 @@ impl Executor {
             }
             "RND" => {
                 // RND(n) returns random number
-                // For now, just return 0.5 (deterministic for testing)
-                // TODO: Implement proper random number generation
-                Ok(0.5)
+                // BBC BASIC behavior:
+                // - RND(1) returns random float in range [0, 1)
+                // - RND(n) where n > 1 returns random integer in range [1, n]
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "RND requires exactly 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                
+                let arg_value = self.eval_real(&args[0])?;
+                
+                if (arg_value - 1.0).abs() < 0.0001 {
+                    // RND(1) - return random float [0, 1)
+                    Ok(self.rng.borrow_mut().gen::<f64>())
+                } else if arg_value > 1.0 {
+                    // RND(n) - return random integer [1, n]
+                    let n = arg_value as i32;
+                    let random_int = self.rng.borrow_mut().gen_range(1..=n);
+                    Ok(random_int as f64)
+                } else {
+                    // For other values, BBC BASIC behavior is undefined
+                    // We'll return random [0, 1) as a sensible default
+                    Ok(self.rng.borrow_mut().gen::<f64>())
+                }
             }
             "VAL" => {
                 if args.len() != 1 {
@@ -2135,6 +2162,49 @@ mod tests {
         assert_eq!(executor.get_variable_int("A%").unwrap(), 100);
         assert_eq!(executor.get_variable_int("B%").unwrap(), 200);
         assert_eq!(executor.get_variable_int("C%").unwrap(), 300);
+    }
+    
+    #[test]
+    fn test_rnd_range() {
+        // RED: Test RND(1) returns value between 0 and 1
+        let mut executor = Executor::new();
+        
+        let rnd_expr = Expression::FunctionCall {
+            name: "RND".to_string(),
+            args: vec![Expression::Integer(1)],
+        };
+        
+        // Run RND(1) multiple times to verify it's in range and varies
+        let mut values = Vec::new();
+        for _ in 0..10 {
+            let result = executor.eval_real(&rnd_expr).unwrap();
+            assert!(result >= 0.0 && result < 1.0, "RND(1) should be in range [0, 1)");
+            values.push(result);
+        }
+        
+        // Check that we get at least some variation (not all the same)
+        let first = values[0];
+        let has_variation = values.iter().any(|&v| (v - first).abs() > 0.001);
+        assert!(has_variation, "RND(1) should produce varying values");
+    }
+    
+    #[test]
+    fn test_rnd_integer_range() {
+        // RED: Test RND(n) returns integer between 1 and n
+        let mut executor = Executor::new();
+        
+        let rnd_10 = Expression::FunctionCall {
+            name: "RND".to_string(),
+            args: vec![Expression::Integer(10)],
+        };
+        
+        // Run RND(10) multiple times to verify range
+        for _ in 0..20 {
+            let result = executor.eval_real(&rnd_10).unwrap();
+            let as_int = result as i32;
+            assert!(as_int >= 1 && as_int <= 10, 
+                   "RND(10) should return values 1-10, got {}", result);
+        }
     }
 }
 
