@@ -1205,6 +1205,22 @@ mod tests {
         
         assert_eq!(stmt, Statement::End);
     }
+    
+    #[test]
+    fn test_parse_assignment_with_function() {
+        // Test parsing "X% = ABS(-5)"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("X% = ABS(-5)").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::FunctionCall {
+                name: "ABS".to_string(),
+                args: vec![Expression::Integer(-5)],
+            },
+        });
+    }
 
     #[test]
     fn test_parse_if_then_simple() {

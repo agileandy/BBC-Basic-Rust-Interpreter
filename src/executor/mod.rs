@@ -477,6 +477,9 @@ impl Executor {
                     UnaryOperator::Not => Ok(if val == 0 { -1 } else { 0 }),
                 }
             }
+            Expression::FunctionCall { name, args } => {
+                self.eval_function_int(name, args)
+            }
             _ => Err(BBCBasicError::TypeMismatch),
         }
     }
@@ -525,6 +528,9 @@ impl Executor {
                     UnaryOperator::Not => Ok(if val == 0.0 { -1.0 } else { 0.0 }),
                 }
             }
+            Expression::FunctionCall { name, args } => {
+                self.eval_function_real(name, args)
+            }
             _ => Err(BBCBasicError::TypeMismatch),
         }
     }
@@ -539,6 +545,191 @@ impl Executor {
                     .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone()))
             }
             _ => Err(BBCBasicError::TypeMismatch),
+        }
+    }
+    
+    /// Evaluate a function call returning an integer
+    fn eval_function_int(&self, name: &str, args: &[Expression]) -> Result<i32> {
+        match name {
+            "ABS" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ABS requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_integer(&args[0])?;
+                Ok(val.abs())
+            }
+            "INT" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "INT requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.floor() as i32)
+            }
+            "SGN" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "SGN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_integer(&args[0])?;
+                Ok(if val < 0 { -1 } else if val > 0 { 1 } else { 0 })
+            }
+            _ => {
+                // Try as real function and convert
+                let real_result = self.eval_function_real(name, args)?;
+                Ok(real_result as i32)
+            }
+        }
+    }
+    
+    /// Evaluate a function call returning a real number
+    fn eval_function_real(&self, name: &str, args: &[Expression]) -> Result<f64> {
+        match name {
+            "SIN" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "SIN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.sin())
+            }
+            "COS" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "COS requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.cos())
+            }
+            "TAN" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "TAN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.tan())
+            }
+            "ATN" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ATN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.atan())
+            }
+            "SQR" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "SQR requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < 0.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.sqrt())
+            }
+            "ABS" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ABS requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.abs())
+            }
+            "EXP" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "EXP requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.exp())
+            }
+            "LN" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "LN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val <= 0.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.ln())
+            }
+            "LOG" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "LOG requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val <= 0.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.log10())
+            }
+            "DEG" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "DEG requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.to_degrees())
+            }
+            "RAD" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "RAD requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                Ok(val.to_radians())
+            }
+            "PI" => {
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "PI takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(std::f64::consts::PI)
+            }
+            "RND" => {
+                // RND(n) returns random number
+                // For now, just return 0.5 (deterministic for testing)
+                // TODO: Implement proper random number generation
+                Ok(0.5)
+            }
+            _ => Err(BBCBasicError::SyntaxError {
+                message: format!("Unknown function: {}", name),
+                line: None,
+            }),
         }
     }
     
@@ -1141,6 +1332,160 @@ mod tests {
         
         // Y% should be 2 because condition is false
         assert_eq!(executor.get_variable_int("Y%").unwrap(), 2);
+    }
+    
+    // Built-in function tests
+    
+    #[test]
+    fn test_sin_function() {
+        // RED: Test SIN(0) = 0, SIN(PI/2) = 1
+        let mut executor = Executor::new();
+        
+        let sin_expr = Expression::FunctionCall {
+            name: "SIN".to_string(),
+            args: vec![Expression::Real(0.0)],
+        };
+        
+        let result = executor.eval_real(&sin_expr).unwrap();
+        assert!((result - 0.0).abs() < 0.0001);
+        
+        // SIN(π/2) ≈ 1
+        let sin_pi_2 = Expression::FunctionCall {
+            name: "SIN".to_string(),
+            args: vec![Expression::Real(std::f64::consts::FRAC_PI_2)],
+        };
+        
+        let result = executor.eval_real(&sin_pi_2).unwrap();
+        assert!((result - 1.0).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_cos_function() {
+        // RED: Test COS(0) = 1
+        let mut executor = Executor::new();
+        
+        let cos_expr = Expression::FunctionCall {
+            name: "COS".to_string(),
+            args: vec![Expression::Real(0.0)],
+        };
+        
+        let result = executor.eval_real(&cos_expr).unwrap();
+        assert!((result - 1.0).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_abs_function() {
+        // RED: Test ABS(-5) = 5, ABS(3.5) = 3.5
+        let mut executor = Executor::new();
+        
+        let abs_int = Expression::FunctionCall {
+            name: "ABS".to_string(),
+            args: vec![Expression::Integer(-5)],
+        };
+        
+        let result = executor.eval_integer(&abs_int).unwrap();
+        assert_eq!(result, 5);
+        
+        let abs_real = Expression::FunctionCall {
+            name: "ABS".to_string(),
+            args: vec![Expression::Real(-3.5)],
+        };
+        
+        let result = executor.eval_real(&abs_real).unwrap();
+        assert!((result - 3.5).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_sqr_function() {
+        // RED: Test SQR(16) = 4, SQR(2) ≈ 1.414
+        let mut executor = Executor::new();
+        
+        let sqr_expr = Expression::FunctionCall {
+            name: "SQR".to_string(),
+            args: vec![Expression::Integer(16)],
+        };
+        
+        let result = executor.eval_real(&sqr_expr).unwrap();
+        assert!((result - 4.0).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_int_function() {
+        // RED: Test INT(3.7) = 3, INT(-2.3) = -3
+        let mut executor = Executor::new();
+        
+        let int_expr = Expression::FunctionCall {
+            name: "INT".to_string(),
+            args: vec![Expression::Real(3.7)],
+        };
+        
+        let result = executor.eval_integer(&int_expr).unwrap();
+        assert_eq!(result, 3);
+        
+        // INT floors toward negative infinity
+        let int_neg = Expression::FunctionCall {
+            name: "INT".to_string(),
+            args: vec![Expression::Real(-2.3)],
+        };
+        
+        let result = executor.eval_integer(&int_neg).unwrap();
+        assert_eq!(result, -3);
+    }
+    
+    #[test]
+    fn test_sgn_function() {
+        // RED: Test SGN(-5) = -1, SGN(0) = 0, SGN(10) = 1
+        let mut executor = Executor::new();
+        
+        let sgn_neg = Expression::FunctionCall {
+            name: "SGN".to_string(),
+            args: vec![Expression::Integer(-5)],
+        };
+        assert_eq!(executor.eval_integer(&sgn_neg).unwrap(), -1);
+        
+        let sgn_zero = Expression::FunctionCall {
+            name: "SGN".to_string(),
+            args: vec![Expression::Integer(0)],
+        };
+        assert_eq!(executor.eval_integer(&sgn_zero).unwrap(), 0);
+        
+        let sgn_pos = Expression::FunctionCall {
+            name: "SGN".to_string(),
+            args: vec![Expression::Integer(10)],
+        };
+        assert_eq!(executor.eval_integer(&sgn_pos).unwrap(), 1);
+    }
+    
+    #[test]
+    fn test_pi_constant() {
+        // RED: Test PI ≈ 3.14159
+        let mut executor = Executor::new();
+        
+        let pi_expr = Expression::FunctionCall {
+            name: "PI".to_string(),
+            args: vec![],
+        };
+        
+        let result = executor.eval_real(&pi_expr).unwrap();
+        assert!((result - std::f64::consts::PI).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_function_in_assignment() {
+        // Test that functions work in assignments
+        let mut executor = Executor::new();
+        
+        // X% = ABS(-5)
+        let stmt = Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::FunctionCall {
+                name: "ABS".to_string(),
+                args: vec![Expression::Integer(-5)],
+            },
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        assert_eq!(executor.get_variable_int("X%").unwrap(), 5);
     }
 }
 
