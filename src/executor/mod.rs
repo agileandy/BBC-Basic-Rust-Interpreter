@@ -61,6 +61,12 @@ impl Executor {
             Statement::Return => {
                 self.execute_return()
             }
+            Statement::For { variable, start, end, step } => {
+                self.execute_for(variable, start, end, step.as_ref())
+            }
+            Statement::Next { variables } => {
+                self.execute_next(variables)
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -231,6 +237,71 @@ impl Executor {
             self.return_stack.pop();
             Ok(())
         }
+    }
+    
+    /// Execute FOR statement
+    fn execute_for(&mut self, variable: &str, start: &Expression, end: &Expression, step: Option<&Expression>) -> Result<()> {
+        // Evaluate start, end, and step values
+        let start_val = self.eval_integer(start)?;
+        let end_val = self.eval_integer(end)?;
+        let step_val = if let Some(step_expr) = step {
+            self.eval_integer(step_expr)?
+        } else {
+            1  // Default step is 1
+        };
+        
+        // Set loop variable to start value
+        self.variables.set_integer_var(variable.to_string(), start_val);
+        
+        // Store loop state: (variable, end_value, step_value, loop_line)
+        // loop_line would be the line number in a real program
+        self.for_loops.push((variable.to_string(), end_val, step_val, 0));
+        
+        Ok(())
+    }
+    
+    /// Execute NEXT statement
+    fn execute_next(&mut self, variables: &[String]) -> Result<()> {
+        // If no variables specified, use the most recent FOR loop
+        let var_name = if variables.is_empty() {
+            if let Some((name, _, _, _)) = self.for_loops.last() {
+                name.clone()
+            } else {
+                return Err(BBCBasicError::BadCall);
+            }
+        } else {
+            variables[0].clone()
+        };
+        
+        // Find the matching FOR loop
+        let loop_index = self.for_loops.iter()
+            .rposition(|(name, _, _, _)| name == &var_name)
+            .ok_or(BBCBasicError::BadCall)?;
+        
+        let (_, end_val, step_val, _) = self.for_loops[loop_index];
+        
+        // Get current loop variable value
+        let current_val = self.variables.get_integer_var(&var_name)
+            .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
+        
+        // Increment the loop variable
+        let next_val = current_val + step_val;
+        self.variables.set_integer_var(var_name.clone(), next_val);
+        
+        // Check if loop is complete
+        let loop_complete = if step_val > 0 {
+            next_val > end_val
+        } else {
+            next_val < end_val
+        };
+        
+        if loop_complete {
+            // Remove the loop from the stack
+            self.for_loops.remove(loop_index);
+        }
+        // In a real program, we'd jump back to the FOR statement line if not complete
+        
+        Ok(())
     }
     
     /// Evaluate an expression to an integer value
@@ -624,6 +695,136 @@ mod tests {
         // Should execute without error
         // (Full implementation requires program storage)
         executor.execute_statement(&stmt).unwrap();
+    }
+    
+    #[test]
+    fn test_for_loop_initialization() {
+        // RED: Test FOR I% = 1 TO 10
+        let mut executor = Executor::new();
+        let stmt = Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(1),
+            end: Expression::Integer(10),
+            step: None,
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Loop variable should be set to start value
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 1);
+        
+        // Loop should be on the stack
+        assert_eq!(executor.for_loops.len(), 1);
+        assert_eq!(executor.for_loops[0].0, "I%");
+        assert_eq!(executor.for_loops[0].1, 10);  // end value
+        assert_eq!(executor.for_loops[0].2, 1);   // step value
+    }
+    
+    #[test]
+    fn test_for_loop_with_step() {
+        // RED: Test FOR I% = 10 TO 1 STEP -1
+        let mut executor = Executor::new();
+        let stmt = Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(10),
+            end: Expression::Integer(1),
+            step: Some(Expression::Integer(-1)),
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Loop variable should be set to start value
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 10);
+        
+        // Loop should be on the stack with correct step
+        assert_eq!(executor.for_loops.len(), 1);
+        assert_eq!(executor.for_loops[0].2, -1);  // step value
+    }
+    
+    #[test]
+    fn test_next_statement() {
+        // RED: Test FOR...NEXT loop execution
+        let mut executor = Executor::new();
+        
+        // FOR I% = 1 TO 3
+        let for_stmt = Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(1),
+            end: Expression::Integer(3),
+            step: None,
+        };
+        executor.execute_statement(&for_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 1);
+        
+        // NEXT I%
+        let next_stmt = Statement::Next {
+            variables: vec!["I%".to_string()],
+        };
+        
+        // First NEXT: I% should become 2
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 2);
+        assert_eq!(executor.for_loops.len(), 1);  // Loop still active
+        
+        // Second NEXT: I% should become 3
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 3);
+        assert_eq!(executor.for_loops.len(), 1);  // Loop still active
+        
+        // Third NEXT: I% should become 4, loop should complete
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 4);
+        assert_eq!(executor.for_loops.len(), 0);  // Loop completed and removed
+    }
+    
+    #[test]
+    fn test_next_without_for() {
+        // RED: Test NEXT without FOR should error
+        let mut executor = Executor::new();
+        let stmt = Statement::Next {
+            variables: vec!["I%".to_string()],
+        };
+        
+        let result = executor.execute_statement(&stmt);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BBCBasicError::BadCall));
+    }
+    
+    #[test]
+    fn test_for_loop_countdown() {
+        // RED: Test FOR I% = 5 TO 1 STEP -1
+        let mut executor = Executor::new();
+        
+        let for_stmt = Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(5),
+            end: Expression::Integer(1),
+            step: Some(Expression::Integer(-1)),
+        };
+        executor.execute_statement(&for_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 5);
+        
+        let next_stmt = Statement::Next {
+            variables: vec!["I%".to_string()],
+        };
+        
+        // Countdown: 5, 4, 3, 2, 1
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 4);
+        
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 3);
+        
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 2);
+        
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 1);
+        
+        // One more NEXT should exit the loop
+        executor.execute_statement(&next_stmt).unwrap();
+        assert_eq!(executor.get_variable_int("I%").unwrap(), 0);
+        assert_eq!(executor.for_loops.len(), 0);
     }
 }
 
