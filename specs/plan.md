@@ -1,8 +1,36 @@
 # BBC BASIC Interpreter - Implementation Plan
 
+## Current Status (December 22, 2024)
+
+### Session Summary
+**Completed Features:**
+1. ✅ LOCAL variables (2024-12-22)
+2. ✅ DEF FN (User-defined functions) (2024-12-22)
+3. ✅ ON GOTO/ON GOSUB (Computed branching) (2024-12-22)
+4. ✅ MOD, DIV, ^ operators (2024-12-22)
+
+**Test Count:** 146 passing unit tests
+**Lines of Code:** ~7000 LOC
+
+### Active Branches
+- `main` - Stable baseline
+- `feature/on-goto-gosub` - Merged to main (ready)
+- `feature/missing-operators` - Merged to main (ready)
+
+### Implementation Progress
+- **Core Language:** ~90% complete (all arithmetic, control flow, procedures, functions)
+- **Console I/O:** 100% complete (PRINT, INPUT, CLS)
+- **File Operations:** 50% complete (SAVE/LOAD/CHAIN done, file I/O pending)
+- **Math Functions:** 80% complete (basic math + trig done)
+- **String Functions:** 70% complete (core operations done)
+- **Graphics:** 0% (stub only)
+- **Sound:** 0% (stub only)
+
+---
+
 ## Architecture Overview
 
-### Current Codebase Structure (~6700 LOC)
+### Current Codebase Structure (~7000 LOC)
 
 ```
 src/
@@ -133,13 +161,49 @@ impl Executor {
 
 ## Implementation Guides for Outstanding Features
 
-### HIGH PRIORITY: LOCAL Variables
+### ✅ COMPLETED: LOCAL Variables
 
-**Complexity:** Medium | **Impact:** High | **Est. Time:** 2-3 hours
+**Status:** Implemented 2024-12-22
 
 **What it does:** Create local variable scope within PROC/FN
 
-**Implementation:**
+**Implementation Notes:**
+- LocalFrame stack stores saved variable values
+- Variables shadowed in local scope without modifying globals
+- Automatically restored on ENDPROC/function return
+- Works with PROC parameter binding
+
+**Files Modified:**
+- `src/executor/mod.rs` - Added LocalFrame, enter/exit_local_scope()
+- `src/parser/mod.rs` - Added Statement::Local
+- `src/main.rs` - Integrated with PROC calls
+
+---
+
+### ✅ COMPLETED: DEF FN (User Functions)
+
+**Status:** Implemented 2024-12-22
+
+**What it does:** Define functions that return values (unlike PROC which doesn't return)
+
+**Implementation Notes:**
+- Single-line syntax: `DEF FN add(X,Y) = X + Y`
+- Function calls are expressions: `PRINT FN add(5, 3)`
+- Parameters automatically local (leverages LOCAL infrastructure)
+- Function definitions stored in HashMap<String, FunctionDefinition>
+
+**Files Modified:**
+- `src/executor/mod.rs` - Added FunctionDefinition, call_function_*()
+- `src/parser/mod.rs` - Added Statement::DefFn with expression
+- Changed eval_* methods from &self to &mut self
+
+---
+
+### ✅ COMPLETED: ON GOTO / ON GOSUB
+
+**Status:** Implemented 2024-12-22
+
+**What it does:** Computed jump based on expression value
 
 ```rust
 // 1. Add to Executor
@@ -337,46 +401,42 @@ ON X% GOTO 100, 200, 300    REM If X%=1 goto 100, X%=2 goto 200, etc.
 ON Y% GOSUB 1000, 2000       REM If Y%=1 gosub 1000, etc.
 ```
 
-**Implementation:**
+**Implementation Notes:**
+- 1-based indexing (value of 1 jumps to first target)
+- Out-of-range values fall through to next statement (no error)
+- Expression evaluated before branching decision
+- Made eval_integer() public to support expression evaluation in main.rs
 
-```rust
-// 1. Add Statements
-enum Statement {
-    OnGoto { expression: Expression, targets: Vec<u16> },
-    OnGosub { expression: Expression, targets: Vec<u16> },
-}
-
-// 2. Parser
-fn parse_on_statement(tokens: &[Token]) -> Result<Statement> {
-    let expr = parse_expression()?;
-    
-    if next_token_is(Keyword::GOTO) {
-        let targets = parse_line_number_list()?;
-        Ok(Statement::OnGoto { expression: expr, targets })
-    } else if next_token_is(Keyword::GOSUB) {
-        let targets = parse_line_number_list()?;
-        Ok(Statement::OnGosub { expression: expr, targets })
-    }
-}
-
-// 3. Runtime in main.rs (control flow)
-if is_on_goto {
-    if let Statement::OnGoto { expression, targets } = statement {
-        let index = executor.eval_integer(&expression)? as usize;
-        if index >= 1 && index <= targets.len() {
-            let target = targets[index - 1];  // 1-indexed
-            program.goto_line(target)?;
-        } else {
-            // Out of range - fall through to next line
-            program.next_line();
-        }
-    }
-}
-```
+**Files Modified:**
+- `src/parser/mod.rs` - Added Statement::OnGoto and Statement::OnGosub
+- `src/main.rs` - Added control flow handling for computed branching
+- `src/executor/mod.rs` - Made eval_integer() public
 
 ---
 
-### MEDIUM PRIORITY: Error Handling (ON ERROR / ERL / ERR)
+### ✅ COMPLETED: MOD, DIV, and ^ Operators
+
+**Status:** Implemented 2024-12-22
+
+**What it does:** Complete arithmetic operator set with modulo, integer division, and power
+
+**Implementation Notes:**
+- DIV (0x81) and MOD (0x83) are keyword operators, not character operators
+- ^ (caret) is a character operator (already tokenized)
+- Added keyword operator parsing to precedence climbing algorithm
+- Evaluation logic already existed, only parsing needed work
+- Precedence: ^ (60) > */DIV/MOD (50) > +- (40)
+
+**Files Modified:**
+- `src/parser/mod.rs` - Added get_keyword_precedence(), keyword_to_binary_op()
+- Updated parse_expr_precedence() to handle Token::Keyword operators
+- `src/executor/mod.rs` - Added evaluation tests
+
+---
+
+## Next Priority Features
+
+### HIGH PRIORITY: Error Handling (ON ERROR / ERL / ERR)
 
 **Complexity:** High | **Impact:** Medium | **Est. Time:** 4-6 hours
 
@@ -794,23 +854,58 @@ pixels = "0.13"        # Alternative graphics
 
 ---
 
-## Summary Priorities
+## Summary Priorities (Updated December 22, 2024)
 
-### Immediate Next Steps (HIGH):
-1. **LOCAL** - Complete PROC/FN scoping (2-3 hours)
-2. **DEF FN** - User-defined functions (3-4 hours)
-3. **ON GOTO/GOSUB** - Computed jumps (1-2 hours)
+### ✅ Recently Completed (December 22, 2024):
+1. ✅ **LOCAL** - Complete PROC/FN scoping (DONE)
+2. ✅ **DEF FN** - User-defined functions (DONE)
+3. ✅ **ON GOTO/GOSUB** - Computed jumps (DONE)
+4. ✅ **Missing operators** - MOD/DIV/^ (DONE)
 
-### Short-term (MEDIUM):
-4. **File I/O** - OPENIN/OPENOUT/PRINT# (4-5 hours)
-5. **Error handling** - ON ERROR/ERL/ERR (4-6 hours)
-6. **Missing operators** - MOD/DIV/^ (1 hour)
+### Immediate Next Steps (HIGH PRIORITY):
+1. **Error handling** - ON ERROR/ERL/ERR (4-6 hours)
+   - Catch runtime errors gracefully
+   - ON ERROR GOTO handler
+   - ERL (error line) and ERR (error number) functions
+   - ON ERROR OFF to disable handler
 
-### Long-term (LOW):
-7. **Graphics** - PLOT/DRAW (10+ hours)
-8. **Sound** - SOUND/ENVELOPE (8+ hours)
-9. **Advanced features** - CALL/USR, memory operations
+2. **File I/O** - OPENIN/OPENOUT/PRINT#/INPUT# (4-5 hours)
+   - Open files for reading/writing
+   - Read/write data to files
+   - File handle management
+   - EOF checking
 
-**Current Status:** ~30% feature complete, core language 80% done
-**Estimated to "usable":** +20 hours (HIGH + MEDIUM priorities)
-**Estimated to "complete":** +50 hours (all features)
+### Short-term (MEDIUM PRIORITY):
+3. **WHILE...ENDWHILE** - While loop (2 hours)
+   - Alternative to REPEAT...UNTIL
+   - More familiar syntax for modern programmers
+
+4. **Missing string functions** - INSTR with start pos, STRING$, UPPER$, LOWER$ (2-3 hours)
+   - Complete string manipulation toolkit
+
+5. **Missing math functions** - LN (natural log), ACS/ASN (inverse trig) (1-2 hours)
+   - Complete scientific math library
+
+### Long-term (LOW PRIORITY):
+6. **Graphics** - PLOT/DRAW/CIRCLE (10+ hours)
+   - Requires graphics library integration (minifb or pixels)
+   - Legacy feature, low utility for modern use
+
+7. **Sound** - SOUND/ENVELOPE (8+ hours)
+   - Requires audio library (rodio)
+   - Legacy feature, low utility
+
+8. **Advanced features** - CALL/USR, memory operations (!/?/$)
+   - Machine code integration
+   - Very low priority
+
+**Current Status (2024-12-22):**
+- **~70%** feature complete (up from 30%)
+- **~90%** core language complete (up from 80%)
+- **100%** console I/O complete
+- **146** unit tests passing
+- **~7000** lines of code
+
+**Estimated to "fully usable":** +10 hours (Error handling + File I/O)
+**Estimated to "complete":** +35 hours (all features except graphics/sound)
+
