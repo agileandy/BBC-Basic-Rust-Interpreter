@@ -737,6 +737,19 @@ impl Executor {
                     BinaryOperator::And => Ok(left_val & right_val),
                     BinaryOperator::Or => Ok(left_val | right_val),
                     BinaryOperator::Eor => Ok(left_val ^ right_val),
+                    // Bitwise shift operators
+                    BinaryOperator::LeftShift => {
+                        if right_val < 0 {
+                            return Err(BBCBasicError::IllegalFunction);
+                        }
+                        Ok(left_val << right_val)
+                    }
+                    BinaryOperator::RightShift => {
+                        if right_val < 0 {
+                            return Err(BBCBasicError::IllegalFunction);
+                        }
+                        Ok(left_val >> right_val)
+                    }
                     _ => Err(BBCBasicError::IllegalFunction),
                 }
             }
@@ -2829,6 +2842,44 @@ mod tests {
 
         assert_eq!(executor.eval_integer(&true_expr).unwrap(), -1);
         assert_eq!(executor.eval_integer(&false_expr).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_bitwise_shift_operators() {
+        // RED: Test << (left shift) and >> (right shift) operators
+        let mut executor = Executor::new();
+
+        // Test 5 << 2 = 20 (5 * 4)
+        let left_shift = Expression::BinaryOp {
+            op: BinaryOperator::LeftShift,
+            left: Box::new(Expression::Integer(5)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&left_shift).unwrap(), 20);
+
+        // Test 20 >> 2 = 5 (20 / 4)
+        let right_shift = Expression::BinaryOp {
+            op: BinaryOperator::RightShift,
+            left: Box::new(Expression::Integer(20)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&right_shift).unwrap(), 5);
+
+        // Test 1 << 8 = 256
+        let left_shift_large = Expression::BinaryOp {
+            op: BinaryOperator::LeftShift,
+            left: Box::new(Expression::Integer(1)),
+            right: Box::new(Expression::Integer(8)),
+        };
+        assert_eq!(executor.eval_integer(&left_shift_large).unwrap(), 256);
+
+        // Test -8 >> 2 = -2 (arithmetic right shift preserves sign)
+        let right_shift_negative = Expression::BinaryOp {
+            op: BinaryOperator::RightShift,
+            left: Box::new(Expression::Integer(-8)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&right_shift_negative).unwrap(), -2);
     }
 
     #[test]
