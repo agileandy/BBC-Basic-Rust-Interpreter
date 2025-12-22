@@ -529,6 +529,7 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("VOICE", 0xA1),
     ("STEREO", 0xA2),
     ("OVERLAY", 0xA3),
+    ("ENDWHILE", 0xA4),
 ];
 
 /// Create keyword lookup tables for tokenization

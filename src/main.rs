@@ -209,6 +209,8 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_next = matches!(statement, bbc_basic_interpreter::Statement::Next { .. });
         let is_repeat = matches!(statement, bbc_basic_interpreter::Statement::Repeat);
         let is_until = matches!(statement, bbc_basic_interpreter::Statement::Until { .. });
+        let is_while = matches!(statement, bbc_basic_interpreter::Statement::While { .. });
+        let is_endwhile = matches!(statement, bbc_basic_interpreter::Statement::EndWhile);
         let is_proc_call = matches!(statement, bbc_basic_interpreter::Statement::ProcCall { .. });
         let is_endproc = matches!(statement, bbc_basic_interpreter::Statement::EndProc);
 
@@ -453,6 +455,75 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
                         return Err(format!("Error evaluating UNTIL condition: {:?}", e));
                     }
                 }
+            }
+        } else if is_while {
+            // WHILE: check condition and enter loop if true, skip to ENDWHILE if false
+            if let bbc_basic_interpreter::Statement::While { condition } = statement {
+                match executor.push_while(line_number, &condition) {
+                    Ok(Some(_)) => {
+                        // Condition true - enter loop body
+                        program.next_line();
+                    }
+                    Ok(None) => {
+                        // Condition false - skip to line after ENDWHILE
+                        // Find the matching ENDWHILE by scanning forward
+                        let mut depth = 1;
+                        while depth > 0 {
+                            if program.next_line().is_none() {
+                                return Err("WHILE without matching ENDWHILE".to_string());
+                            }
+                            
+                            let current_line = program.get_current_line().unwrap();
+                            if let Some(line) = program.get_line(current_line) {
+                                if let Ok(stmt) = parse_statement(&line) {
+                                    if matches!(stmt, bbc_basic_interpreter::Statement::While { .. }) {
+                                        depth += 1;
+                                    } else if matches!(stmt, bbc_basic_interpreter::Statement::EndWhile) {
+                                        depth -= 1;
+                                    }
+                                }
+                            }
+                        }
+                        program.next_line(); // Move past ENDWHILE
+                    }
+                    Err(e) => {
+                        return Err(format!("Error evaluating WHILE condition: {:?}", e));
+                    }
+                }
+            }
+        } else if is_endwhile {
+            // ENDWHILE: check condition and loop back if true
+            // Need to retrieve the WHILE condition from the original WHILE statement
+            // Find the matching WHILE by using the while_stack
+            if let Some(while_line) = executor.check_endwhile_get_while_line() {
+                if let Some(line) = program.get_line(while_line) {
+                    if let Ok(bbc_basic_interpreter::Statement::While { condition }) = 
+                        parse_statement(&line) {
+                        match executor.check_endwhile(&condition) {
+                            Ok(Some(while_line_num)) => {
+                                // Condition still true - loop back to line AFTER WHILE
+                                if program.goto_line(while_line_num) {
+                                    program.next_line();
+                                } else {
+                                    return Err(format!("WHILE line {} not found", while_line_num));
+                                }
+                            }
+                            Ok(None) => {
+                                // Condition false - exit loop, continue to next line
+                                program.next_line();
+                            }
+                            Err(e) => {
+                                return Err(format!("Error evaluating WHILE condition at ENDWHILE: {:?}", e));
+                            }
+                        }
+                    } else {
+                        return Err(format!("Could not parse WHILE statement at line {}", while_line));
+                    }
+                } else {
+                    return Err(format!("WHILE line {} not found", while_line));
+                }
+            } else {
+                return Err("ENDWHILE without matching WHILE".to_string());
             }
         } else {
             // Normal: advance to next line

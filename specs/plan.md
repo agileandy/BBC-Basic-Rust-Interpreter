@@ -8,21 +8,24 @@
 2. ✅ DEF FN (User-defined functions) (2024-12-22)
 3. ✅ ON GOTO/ON GOSUB (Computed branching) (2024-12-22)
 4. ✅ MOD, DIV, ^ operators (2024-12-22)
+5. ✅ Error handling (ON ERROR/ERL/ERR) (2024-12-22)
+6. ✅ File I/O (OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF#) (2024-12-22)
+7. ✅ WHILE...ENDWHILE loops (2024-12-22)
 
-**Test Count:** 146 passing unit tests
-**Lines of Code:** ~7000 LOC
+**Test Count:** 169 passing unit tests
+**Lines of Code:** ~7900 LOC
 
 ### Active Branches
 - `main` - Stable baseline
-- `feature/on-goto-gosub` - Merged to main (ready)
-- `feature/missing-operators` - Merged to main (ready)
+- All feature branches merged
 
 ### Implementation Progress
-- **Core Language:** ~90% complete (all arithmetic, control flow, procedures, functions)
+- **Core Language:** ~98% complete (all arithmetic, control flow, procedures, functions, error handling, all loop types)
 - **Console I/O:** 100% complete (PRINT, INPUT, CLS)
-- **File Operations:** 50% complete (SAVE/LOAD/CHAIN done, file I/O pending)
+- **File Operations:** 80% complete (SAVE/LOAD/CHAIN/OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF# done)
 - **Math Functions:** 80% complete (basic math + trig done)
 - **String Functions:** 70% complete (core operations done)
+- **Error Handling:** 75% complete (ON ERROR/ERL/ERR done, ERROR/REPORT pending)
 - **Graphics:** 0% (stub only)
 - **Sound:** 0% (stub only)
 
@@ -436,76 +439,134 @@ ON Y% GOSUB 1000, 2000       REM If Y%=1 gosub 1000, etc.
 
 ## Next Priority Features
 
-### HIGH PRIORITY: Error Handling (ON ERROR / ERL / ERR)
+### ✅ COMPLETED: Error Handling (ON ERROR / ERL / ERR)
 
-**Complexity:** High | **Impact:** Medium | **Est. Time:** 4-6 hours
+**Status:** Implemented 2024-12-22
 
 **What it does:** Catch runtime errors and handle them gracefully
 
-```basic
-10 ON ERROR GOTO 1000      REM Set error handler
-20 X = 1 / 0                REM Would normally crash
-30 PRINT "Continued"
-1000 PRINT "Error "; ERR; " at line "; ERL
-1010 END
-```
+**Implementation Notes:**
+- ErrorInfo structure tracks error number, line, and message
+- ON ERROR GOTO sets error handler line number
+- ON ERROR OFF clears error handler
+- ERL returns line number where error occurred
+- ERR returns error number (BBC BASIC error codes)
+- Runtime loop catches errors and jumps to handler
+- Automatic error code mapping (e.g., DivisionByZero → 18)
 
-**Implementation:**
-
-```rust
-// 1. Add to Executor
-struct Executor {
-    error_handler: Option<u16>,      // Line number of error handler
-    last_error: Option<ErrorInfo>,
-}
-
-struct ErrorInfo {
-    error_number: i32,
-    error_line: u16,
-    message: String,
-}
-
-// 2. Add Statements
-enum Statement {
-    OnError { line_number: u16 },    // ON ERROR GOTO line
-    OnErrorOff,                       // ON ERROR OFF
-}
-
-// 3. Add Functions
-enum Expression {
-    ERL,  // Error line number
-    ERR,  // Error number
-}
-
-// 4. Runtime error handling wrapper in main.rs
-loop {
-    // Execute statement
-    match executor.execute_statement(&statement) {
-        Ok(()) => { /* continue */ }
-        Err(e) => {
-            if let Some(handler_line) = executor.get_error_handler() {
-                // Save error info
-                executor.set_last_error(ErrorInfo {
-                    error_number: e.code(),
-                    error_line: current_line,
-                    message: e.message(),
-                });
-                
-                // Jump to error handler
-                program.goto_line(handler_line)?;
-                continue;
-            } else {
-                // No handler - crash as usual
-                return Err(e);
-            }
-        }
-    }
-}
-```
+**Files Modified:**
+- `src/executor/mod.rs` - Added ErrorInfo struct, error_handler/last_error fields, get/set methods
+- `src/parser/mod.rs` - Added Statement::OnError and Statement::OnErrorOff
+- `src/main.rs` - Integrated error handler into runtime loop with error code mapping
+- Added 7 unit tests for error handling
+- Added test_error_handling.bas integration test
 
 ---
 
-### MEDIUM PRIORITY: File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
+### ✅ COMPLETED: File I/O (OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF#)
+
+**Status:** Implemented 2024-12-22
+
+**What it does:** Read and write data files with file handle management
+
+**BBC BASIC Syntax:**
+```basic
+10 F% = OPENOUT("data.txt")   REM Open for writing
+20 PRINT# F%, "Hello, World!" REM Write to file
+30 PRINT# F%, 42, 3.14        REM Write numbers
+40 CLOSE# F%                   REM Close file
+50 F% = OPENIN("data.txt")    REM Open for reading
+60 INPUT# F%, LINE$           REM Read from file
+70 IF EOF(F%) THEN PRINT "End of file"
+80 CLOSE# F%
+```
+
+**Implementation Notes:**
+- File handles tracked in `HashMap<i32, FileHandle>` in Executor
+- BufReader/BufWriter for efficient I/O operations
+- OPENIN/OPENOUT/EOF are functions (return values)
+- PRINT#/INPUT#/CLOSE# are statements
+- Proper error handling for invalid handles, file not found, etc.
+- Maximum 255 open files (BBC BASIC standard limit)
+- Handle allocation starts at 1, increments automatically
+
+**Files Modified:**
+- `src/lib.rs` - Added `ChannelNotOpen`, `TooManyOpenFiles` error types
+- `src/parser/mod.rs` - Added `PrintFile`, `InputFile`, `CloseFile` statements + parser support
+- `src/executor/mod.rs` - Added complete file I/O implementation (~250 lines)
+  - FileHandle enum (Input/Output with BufReader/BufWriter)
+  - open_file_for_reading(), open_file_for_writing()
+  - execute_print_file(), execute_input_file(), execute_close_file()
+  - check_eof() function
+- Added 13 new tests (8 executor unit tests + 5 parser tests)
+- Created `test_file_io.bas` integration test (43 lines)
+
+**Key Discovery:**
+- Initially forgot parser support - would have been unusable!
+- Parser modifications required to detect `#` after PRINT/INPUT/CLOSE keywords
+- Added parse_print_file_statement(), parse_input_file_statement(), parse_close_file_statement()
+
+---
+
+### ✅ COMPLETED: WHILE...ENDWHILE Loops
+
+**Status:** Implemented 2024-12-22
+
+**What it does:** Loop while a condition is TRUE (alternative to REPEAT...UNTIL)
+
+**BBC BASIC Syntax:**
+```basic
+10 X% = 0
+20 WHILE X% < 5
+30 PRINT "X% = "; X%
+40 X% = X% + 1
+50 ENDWHILE
+```
+
+**Behavior:**
+- Condition evaluated at loop start (pre-condition loop)
+- If TRUE (non-zero), enters loop body
+- If FALSE (zero), skips to after ENDWHILE
+- After ENDWHILE, re-evaluates condition and loops back if still TRUE
+- Supports nested WHILE loops
+
+**Implementation Notes:**
+- WHILE is an **extended statement** token: `ExtendedKeyword(0xC8, 0x95)`
+- ENDWHILE token: `ExtendedKeyword(0xC8, 0xA4)` (newly added)
+- while_stack tracks line numbers of WHILE statements
+- Condition stored in WHILE statement, retrieved at ENDWHILE
+- Skip-to-ENDWHILE logic scans forward, tracking depth for nested loops
+
+**Files Modified:**
+- `src/tokenizer/mod.rs` - Added ENDWHILE token (0xC8, 0xA4) to EXTENDED_STATEMENTS
+- `src/parser/mod.rs` - Added Statement::While and Statement::EndWhile variants
+  - Added parse_while_statement() function
+  - Added ExtendedKeyword handling in parse_statement()
+- `src/executor/mod.rs` - Added WHILE loop management (~50 lines)
+  - Added while_stack: Vec<u16> field
+  - push_while() - Check condition and enter loop
+  - check_endwhile() - Re-evaluate condition and loop back or exit
+  - check_endwhile_get_while_line() - Helper to retrieve WHILE line number
+- `src/main.rs` - Runtime loop integration (~50 lines)
+  - is_while and is_endwhile detection
+  - WHILE: evaluate condition, skip to ENDWHILE if false
+  - ENDWHILE: retrieve WHILE condition, re-evaluate, loop back if true
+- Added 3 unit tests (basic loop, false condition, nested loops)
+- Created `test_while.bas` integration test
+
+**Key Differences from REPEAT...UNTIL:**
+- **WHILE:** Checks condition at START (may never execute)
+- **REPEAT:** Checks condition at END (always executes at least once)
+- **WHILE:** Continues while TRUE
+- **REPEAT:** Continues until TRUE (exits when condition TRUE)
+
+**Implementation Time:** ~2 hours actual (matching estimate)
+**LOC Added:** ~300 lines
+**Tests Added:** +3 unit tests (169 total)
+
+---
+
+### HIGH PRIORITY: File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
 
 **Complexity:** Medium | **Impact:** High | **Est. Time:** 4-5 hours
 
@@ -861,51 +922,53 @@ pixels = "0.13"        # Alternative graphics
 2. ✅ **DEF FN** - User-defined functions (DONE)
 3. ✅ **ON GOTO/GOSUB** - Computed jumps (DONE)
 4. ✅ **Missing operators** - MOD/DIV/^ (DONE)
+5. ✅ **Error handling** - ON ERROR/ERL/ERR (DONE)
+6. ✅ **File I/O** - OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF# (DONE)
+7. ✅ **WHILE...ENDWHILE** - While loops (DONE - 2 hours actual)
 
 ### Immediate Next Steps (HIGH PRIORITY):
-1. **Error handling** - ON ERROR/ERL/ERR (4-6 hours)
-   - Catch runtime errors gracefully
-   - ON ERROR GOTO handler
-   - ERL (error line) and ERR (error number) functions
-   - ON ERROR OFF to disable handler
 
-2. **File I/O** - OPENIN/OPENOUT/PRINT#/INPUT# (4-5 hours)
-   - Open files for reading/writing
-   - Read/write data to files
-   - File handle management
-   - EOF checking
+1. **Missing string functions** - INSTR with start pos, STRING$, UPPER$, LOWER$ (2-3 hours)
+   - Complete string manipulation toolkit
+   - INSTR(string, search, start) - Find substring from position
+   - STRING$(count, char) - Repeat character n times
+   - Add UPPER$ and LOWER$ if not present
+
+2. **Missing math functions** - LN (natural log), ACS/ASN (inverse trig) (1-2 hours)
+   - Complete scientific math library
+   - LN(x) - Natural logarithm (base e)
+   - ACS(x) - Arc cosine (inverse cos)
+   - ASN(x) - Arc sine (inverse sin)
 
 ### Short-term (MEDIUM PRIORITY):
-3. **WHILE...ENDWHILE** - While loop (2 hours)
-   - Alternative to REPEAT...UNTIL
-   - More familiar syntax for modern programmers
 
-4. **Missing string functions** - INSTR with start pos, STRING$, UPPER$, LOWER$ (2-3 hours)
-   - Complete string manipulation toolkit
-
-5. **Missing math functions** - LN (natural log), ACS/ASN (inverse trig) (1-2 hours)
-   - Complete scientific math library
+3. **Enhanced error handling** - ERROR statement, REPORT statement (1 hour)
+   - ERROR num, "message" - Raise custom error
+   - REPORT - Print last error message
 
 ### Long-term (LOW PRIORITY):
-6. **Graphics** - PLOT/DRAW/CIRCLE (10+ hours)
+
+4. **Graphics** - PLOT/DRAW/CIRCLE (10+ hours)
    - Requires graphics library integration (minifb or pixels)
    - Legacy feature, low utility for modern use
 
-7. **Sound** - SOUND/ENVELOPE (8+ hours)
+5. **Sound** - SOUND/ENVELOPE (8+ hours)
    - Requires audio library (rodio)
    - Legacy feature, low utility
 
-8. **Advanced features** - CALL/USR, memory operations (!/?/$)
+6. **Advanced features** - CALL/USR, memory operations (!/?/$)
    - Machine code integration
    - Very low priority
 
-**Current Status (2024-12-22):**
-- **~70%** feature complete (up from 30%)
-- **~90%** core language complete (up from 80%)
+**Current Status (2024-12-22 - End of Session):**
+- **~80%** feature complete (up from 78%)
+- **~98%** core language complete (up from 95%)
 - **100%** console I/O complete
-- **146** unit tests passing
-- **~7000** lines of code
+- **80%** file I/O complete
+- **169** unit tests passing (up from 166, +3 WHILE tests)
+- **~7900** lines of code (up from 7600, +300 LOC)
 
-**Estimated to "fully usable":** +10 hours (Error handling + File I/O)
-**Estimated to "complete":** +35 hours (all features except graphics/sound)
+**Estimated to "fully usable":** ACHIEVED ✅ (Error handling + File I/O + All loop types complete)
+**Estimated to "feature complete":** +3-5 hours (missing string/math functions only)
+**Estimated to "complete":** +30 hours (all features except graphics/sound)
 

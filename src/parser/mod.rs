@@ -158,6 +158,10 @@ pub enum Statement {
     Repeat,
     /// UNTIL statement - ends a REPEAT...UNTIL loop
     Until { condition: Expression },
+    /// WHILE statement - starts a WHILE...ENDWHILE loop
+    While { condition: Expression },
+    /// ENDWHILE statement - ends a WHILE...ENDWHILE loop
+    EndWhile,
     /// CLS statement - clear screen
     Cls,
     /// ON GOTO statement - computed GOTO based on expression value
@@ -174,6 +178,18 @@ pub enum Statement {
     OnError { line_number: u16 },
     /// ON ERROR OFF statement - clear error handler
     OnErrorOff,
+    /// PRINT# statement - write to file
+    PrintFile {
+        handle: Expression,
+        items: Vec<PrintItem>,
+    },
+    /// INPUT# statement - read from file
+    InputFile {
+        handle: Expression,
+        variables: Vec<String>,
+    },
+    /// CLOSE# statement - close file
+    CloseFile { handle: Expression },
     /// Empty statement
     Empty,
 }
@@ -279,7 +295,14 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
     // Check first token to determine statement type
     match &tokens[0] {
         // PRINT statement
-        Token::Keyword(0xF1) => parse_print_statement(&tokens[1..]),
+        Token::Keyword(0xF1) => {
+            // Check if it's PRINT# (file I/O) or regular PRINT
+            if tokens.len() > 1 && matches!(tokens[1], Token::Operator('#')) {
+                parse_print_file_statement(&tokens[2..], line.line_number)
+            } else {
+                parse_print_statement(&tokens[1..])
+            }
+        }
 
         // LET statement (optional keyword)
         Token::Keyword(0xE9) => {
@@ -315,7 +338,14 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         Token::Keyword(0xF8) => Ok(Statement::Return),
 
         // INPUT statement
-        Token::Keyword(0xE8) => parse_input_statement(&tokens[1..]),
+        Token::Keyword(0xE8) => {
+            // Check if it's INPUT# (file I/O) or regular INPUT
+            if tokens.len() > 1 && matches!(tokens[1], Token::Operator('#')) {
+                parse_input_file_statement(&tokens[2..], line.line_number)
+            } else {
+                parse_input_statement(&tokens[1..])
+            }
+        }
 
         // DIM statement
         Token::Keyword(0xDE) => parse_dim_statement(&tokens[1..], line.line_number),
@@ -369,6 +399,31 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // PROC call (PROC followed by identifier)
         Token::Keyword(0xF2) => parse_proc_call(&tokens[1..], line.line_number),
+
+        // CLOSE# statement (file I/O)
+        Token::Keyword(0xD9) => {
+            // CLOSE requires # after it for file I/O
+            if tokens.len() > 1 && matches!(tokens[1], Token::Operator('#')) {
+                parse_close_file_statement(&tokens[2..], line.line_number)
+            } else {
+                Err(BBCBasicError::SyntaxError {
+                    message: "CLOSE requires # (use CLOSE#)".to_string(),
+                    line: line.line_number,
+                })
+            }
+        }
+
+        // Extended statements (0xC8 prefix)
+        Token::ExtendedKeyword(0xC8, extended_token) => match extended_token {
+            // WHILE statement
+            0x95 => parse_while_statement(&tokens[1..], line.line_number),
+            // ENDWHILE statement
+            0xA4 => Ok(Statement::EndWhile),
+            _ => Err(BBCBasicError::SyntaxError {
+                message: format!("Unknown extended statement: {:?}", tokens[0]),
+                line: line.line_number,
+            }),
+        },
 
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
@@ -832,6 +887,205 @@ fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
     Ok(Statement::Input { variables })
 }
 
+/// Parse PRINT# statement (file I/O)
+fn parse_print_file_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // First token should be the file handle expression
+    // Format: PRINT# handle, items...
+    
+    // Find the comma that separates handle from print items
+    let comma_pos = tokens.iter().position(|t| matches!(t, Token::Separator(',')));
+    
+    if comma_pos.is_none() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected comma after file handle in PRINT#".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let comma_pos = comma_pos.unwrap();
+    
+    // Parse handle expression
+    let handle = parse_expression(&tokens[..comma_pos])?;
+    
+    // Parse print items after the comma
+    let items = if comma_pos + 1 < tokens.len() {
+        parse_print_items(&tokens[comma_pos + 1..])?
+    } else {
+        Vec::new()
+    };
+    
+    Ok(Statement::PrintFile { handle, items })
+}
+
+/// Parse INPUT# statement (file I/O)
+fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Format: INPUT# handle, var1, var2, ...
+    
+    // Find the comma that separates handle from variables
+    let comma_pos = tokens.iter().position(|t| matches!(t, Token::Separator(',')));
+    
+    if comma_pos.is_none() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected comma after file handle in INPUT#".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let comma_pos = comma_pos.unwrap();
+    
+    // Parse handle expression
+    let handle = parse_expression(&tokens[..comma_pos])?;
+    
+    // Parse variable list after the comma
+    let mut variables = Vec::new();
+    let mut pos = comma_pos + 1;
+    
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Identifier(name) => {
+                variables.push(name.clone());
+                pos += 1;
+                
+                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
+                    pos += 1; // skip comma
+                }
+            }
+            _ => break,
+        }
+    }
+    
+    if variables.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected at least one variable in INPUT#".to_string(),
+            line: line_number,
+        });
+    }
+    
+    Ok(Statement::InputFile { handle, variables })
+}
+
+/// Parse CLOSE# statement (file I/O)
+fn parse_close_file_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Format: CLOSE# handle
+    
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected file handle after CLOSE#".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Parse handle expression
+    let handle = parse_expression(tokens)?;
+    
+    Ok(Statement::CloseFile { handle })
+}
+
+/// Helper function to parse print items (extracted for reuse)
+fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
+    let mut items = Vec::new();
+    let mut pos = 0;
+
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Separator(';') => {
+                items.push(PrintItem::Semicolon);
+                pos += 1;
+            }
+            Token::Separator(',') => {
+                items.push(PrintItem::Comma);
+                pos += 1;
+            }
+            // Handle TAB(expr)
+            Token::Keyword(0x8A) => {
+                pos += 1; // skip TAB keyword
+                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected '(' after TAB".to_string(),
+                        line: None,
+                    });
+                }
+                pos += 1; // skip '('
+                
+                // Find matching closing paren
+                let mut paren_depth = 1;
+                let start = pos;
+                while pos < tokens.len() && paren_depth > 0 {
+                    match tokens[pos] {
+                        Token::Separator('(') => paren_depth += 1,
+                        Token::Separator(')') => paren_depth -= 1,
+                        _ => {}
+                    }
+                    if paren_depth > 0 {
+                        pos += 1;
+                    }
+                }
+                
+                if paren_depth != 0 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Unmatched parenthesis in TAB".to_string(),
+                        line: None,
+                    });
+                }
+                
+                let expr = parse_expression(&tokens[start..pos])?;
+                items.push(PrintItem::Tab(expr));
+                pos += 1; // skip ')'
+            }
+            // Handle SPC(expr)
+            Token::Keyword(0xB7) => {
+                pos += 1; // skip SPC keyword
+                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected '(' after SPC".to_string(),
+                        line: None,
+                    });
+                }
+                pos += 1; // skip '('
+                
+                // Find matching closing paren
+                let mut paren_depth = 1;
+                let start = pos;
+                while pos < tokens.len() && paren_depth > 0 {
+                    match tokens[pos] {
+                        Token::Separator('(') => paren_depth += 1,
+                        Token::Separator(')') => paren_depth -= 1,
+                        _ => {}
+                    }
+                    if paren_depth > 0 {
+                        pos += 1;
+                    }
+                }
+                
+                if paren_depth != 0 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Unmatched parenthesis in SPC".to_string(),
+                        line: None,
+                    });
+                }
+                
+                let expr = parse_expression(&tokens[start..pos])?;
+                items.push(PrintItem::Spc(expr));
+                pos += 1; // skip ')'
+            }
+            _ => {
+                // Find the next separator (, or ;) or end of tokens
+                let next_sep = tokens[pos..]
+                    .iter()
+                    .position(|t| matches!(t, Token::Separator(',') | Token::Separator(';')))
+                    .map(|p| p + pos)
+                    .unwrap_or(tokens.len());
+                
+                let expr = parse_expression(&tokens[pos..next_sep])?;
+                items.push(PrintItem::Expression(expr));
+                pos = next_sep;
+            }
+        }
+    }
+
+    Ok(items)
+}
+
 /// Parse DIM statement
 fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut arrays = Vec::new();
@@ -1049,6 +1303,21 @@ fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     // Parse the condition expression
     let condition = parse_expression(tokens)?;
     Ok(Statement::Until { condition })
+}
+
+/// Parse WHILE statement
+/// WHILE condition
+fn parse_while_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "WHILE requires a condition".to_string(),
+            line: line_number,
+        });
+    }
+
+    // Parse the condition expression
+    let condition = parse_expression(tokens)?;
+    Ok(Statement::While { condition })
 }
 
 /// Parse DEF statement (DEF PROC or DEF FN)
@@ -2256,5 +2525,130 @@ mod tests {
                 else_part: None,
             }
         );
+    }
+
+    #[test]
+    fn test_parse_print_file_statement() {
+        // Test: PRINT# F%, "Hello"
+        let line = TokenizedLine {
+            line_number: Some(10),
+            tokens: vec![
+                Token::Keyword(0xF1),              // PRINT
+                Token::Operator('#'),              // #
+                Token::Identifier("F%".to_string()),  // F%
+                Token::Separator(','),             // ,
+                Token::String("Hello".to_string()), // "Hello"
+            ],
+        };
+        
+        let stmt = parse_statement(&line).unwrap();
+        
+        match stmt {
+            Statement::PrintFile { handle, items } => {
+                assert!(matches!(handle, Expression::Variable(_)));
+                assert_eq!(items.len(), 1);
+                assert!(matches!(items[0], PrintItem::Expression(Expression::String(_))));
+            }
+            _ => panic!("Expected PrintFile statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_input_file_statement() {
+        // Test: INPUT# F%, A%, B$
+        let line = TokenizedLine {
+            line_number: Some(20),
+            tokens: vec![
+                Token::Keyword(0xE8),              // INPUT
+                Token::Operator('#'),              // #
+                Token::Identifier("F%".to_string()),  // F%
+                Token::Separator(','),             // ,
+                Token::Identifier("A%".to_string()),  // A%
+                Token::Separator(','),             // ,
+                Token::Identifier("B$".to_string()),  // B$
+            ],
+        };
+        
+        let stmt = parse_statement(&line).unwrap();
+        
+        match stmt {
+            Statement::InputFile { handle, variables } => {
+                assert!(matches!(handle, Expression::Variable(_)));
+                assert_eq!(variables.len(), 2);
+                assert_eq!(variables[0], "A%");
+                assert_eq!(variables[1], "B$");
+            }
+            _ => panic!("Expected InputFile statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_close_file_statement() {
+        // Test: CLOSE# F%
+        let line = TokenizedLine {
+            line_number: Some(30),
+            tokens: vec![
+                Token::Keyword(0xD9),              // CLOSE
+                Token::Operator('#'),              // #
+                Token::Identifier("F%".to_string()),  // F%
+            ],
+        };
+        
+        let stmt = parse_statement(&line).unwrap();
+        
+        match stmt {
+            Statement::CloseFile { handle } => {
+                assert!(matches!(handle, Expression::Variable(_)));
+            }
+            _ => panic!("Expected CloseFile statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_openin_function() {
+        // Test: F% = OPENIN("test.txt")
+        use crate::tokenizer::tokenize;
+        let line = tokenize("F% = OPENIN(\"test.txt\")").unwrap();
+        
+        let stmt = parse_statement(&line).unwrap();
+        
+        match stmt {
+            Statement::Assignment { target, expression } => {
+                assert_eq!(target, "F%");
+                // OPENIN(...) is parsed as FunctionCall
+                match &expression {
+                    Expression::FunctionCall { name, args } => {
+                        assert_eq!(name, "OPENIN");
+                        assert_eq!(args.len(), 1);
+                    }
+                    _ => panic!("Expected FunctionCall expression, got {:?}", expression),
+                }
+            }
+            _ => panic!("Expected Assignment statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_openout_function() {
+        // Test: F% = OPENOUT("output.txt")
+        use crate::tokenizer::tokenize;
+        let line = tokenize("F% = OPENOUT(\"output.txt\")").unwrap();
+        
+        let stmt = parse_statement(&line).unwrap();
+        
+        match stmt {
+            Statement::Assignment { target, expression } => {
+                assert_eq!(target, "F%");
+                // OPENOUT(...) is parsed as FunctionCall
+                match &expression {
+                    Expression::FunctionCall { name, args } => {
+                        assert_eq!(name, "OPENOUT");
+                        assert_eq!(args.len(), 1);
+                    }
+                    _ => panic!("Expected FunctionCall expression, got {:?}", expression),
+                }
+            }
+            _ => panic!("Expected Assignment statement, got {:?}", stmt),
+        }
     }
 }

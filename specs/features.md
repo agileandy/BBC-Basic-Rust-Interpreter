@@ -50,7 +50,7 @@
 - [x] FOR...NEXT - Counted loop with optional STEP
 - [x] FOR...TO...STEP - Loop with custom increment
 - [x] REPEAT...UNTIL - Loop until condition true
-- [ ] WHILE...ENDWHILE - Loop while condition true
+- [x] WHILE...ENDWHILE - Loop while condition true
 
 #### Branch Statements
 - [x] GOTO - Unconditional jump to line number
@@ -111,18 +111,18 @@
 - [x] LOAD "filename" - Load program from disk
 - [x] CHAIN "filename" - Load and run program
 - [x] *CAT - Catalog disk files
-- [ ] OPENIN "file" - Open file for reading
-- [ ] OPENOUT "file" - Open file for writing
+- [x] OPENIN "file" - Open file for reading
+- [x] OPENOUT "file" - Open file for writing
 - [ ] OPENUP "file" - Open file for read/write
-- [ ] CLOSE# channel - Close file channel
-- [ ] INPUT# channel, var - Read from file
-- [ ] PRINT# channel, data - Write to file
+- [x] CLOSE# channel - Close file channel
+- [x] INPUT# channel, var - Read from file
+- [x] PRINT# channel, data - Write to file
 - [ ] BGET# channel - Read byte from file
 - [ ] BPUT# channel, byte - Write byte to file
 - [ ] PTR# channel - Get file pointer position
 - [ ] PTR# channel = pos - Set file pointer position
 - [ ] EXT# channel - Get file size
-- [ ] EOF# channel - Test for end of file
+- [x] EOF# channel - Test for end of file
 
 ## Graphics
 
@@ -225,6 +225,8 @@
 - [x] ERR - Error number of last error
 - [ ] REPORT - Print last error message
 - [ ] REPORT$ - Get last error message as string
+- [x] ON ERROR GOTO line - Set error handler
+- [x] ON ERROR OFF - Clear error handler
 
 ### Program Execution
 - [ ] RUN - Run program from start
@@ -300,8 +302,8 @@
 - [x] LOCAL variables
 - [x] ON GOTO/GOSUB
 - [x] Missing operators (MOD/DIV/^)
-- [ ] File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
-- [ ] Error handling (ON ERROR/ERL/ERR)
+- [x] File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
+- [x] Error handling (ON ERROR/ERL/ERR)
 
 ### Low Priority (Advanced/Legacy)
 - [ ] Graphics commands (PLOT/DRAW/CIRCLE)
