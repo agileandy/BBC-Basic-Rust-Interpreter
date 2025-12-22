@@ -1,0 +1,14 @@
+[package]
+name = "bbc-basic-interpreter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# For property-based testing
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
+
+[dev-dependencies]
+# Additional testing utilities
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
