@@ -200,7 +200,7 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_gosub = matches!(statement, bbc_basic_interpreter::Statement::Gosub { .. });
         let is_on_goto = matches!(statement, bbc_basic_interpreter::Statement::OnGoto { .. });
         let is_on_gosub = matches!(statement, bbc_basic_interpreter::Statement::OnGosub { .. });
-        let is_return = matches!(statement, bbc_basic_interpreter::Statement::Return);
+        let is_return = matches!(statement, bbc_basic_interpreter::Statement::Return { .. });
         let is_end = matches!(
             statement,
             bbc_basic_interpreter::Statement::End | bbc_basic_interpreter::Statement::Stop

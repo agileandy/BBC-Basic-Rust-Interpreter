@@ -145,8 +145,17 @@ impl Executor {
                 // GOSUB is handled as control flow in main.rs
                 Ok(())
             }
-            Statement::Return => {
+            Statement::Return { value } => {
                 // RETURN is handled as control flow in main.rs
+                // TODO: Implement return value storage for multi-line functions
+                // Currently, single-line DEF FN uses the expression directly
+                // Multi-line functions with RETURN expression will need:
+                // 1. Function context stack to store return values
+                // 2. Return value retrieval in function call handler
+                if value.is_some() {
+                    // Expression is present but not yet evaluated/stored
+                    // This will be implemented when adding multi-line function support
+                }
                 Ok(())
             }
             Statement::For {
