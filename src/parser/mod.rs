@@ -289,6 +289,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // DIM statement
         Token::Keyword(0xDE) => parse_dim_statement(&tokens[1..], line.line_number),
         
+        // IF statement
+        Token::Keyword(0xE7) => parse_if_statement(&tokens[1..], line.line_number),
+        
         // END statement
         Token::Keyword(0xE0) => Ok(Statement::End),
         
@@ -597,6 +600,65 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
     }
     
     Ok(Statement::Dim { arrays })
+}
+
+/// Parse IF statement
+/// Supports: IF condition THEN statement [ELSE statement]
+fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Find THEN keyword to split condition from then-part
+    let then_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0x8C)))
+        .ok_or(BBCBasicError::SyntaxError {
+            message: "Expected THEN after IF condition".to_string(),
+            line: line_number,
+        })?;
+    
+    // Parse condition (everything before THEN)
+    let condition_tokens = &tokens[..then_pos];
+    let condition = parse_expression(condition_tokens)?;
+    
+    // Find ELSE keyword (if present)
+    let else_pos = tokens[then_pos + 1..].iter().position(|t| matches!(t, Token::Keyword(0x8B)));
+    
+    let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
+        // ELSE found: split then_part and else_part
+        let absolute_else_pos = then_pos + 1 + else_idx;
+        (&tokens[then_pos + 1..absolute_else_pos], Some(&tokens[absolute_else_pos + 1..]))
+    } else {
+        // No ELSE: only then_part
+        (&tokens[then_pos + 1..], None)
+    };
+    
+    // Parse THEN part (single statement for now)
+    let then_part = if then_tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected statement after THEN".to_string(),
+            line: line_number,
+        });
+    } else {
+        // Create a temporary TokenizedLine for parsing
+        let then_line = TokenizedLine::new(line_number, then_tokens.to_vec());
+        vec![parse_statement(&then_line)?]
+    };
+    
+    // Parse ELSE part if present
+    let else_part = if let Some(else_toks) = else_tokens {
+        if else_toks.is_empty() {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected statement after ELSE".to_string(),
+                line: line_number,
+            });
+        }
+        let else_line = TokenizedLine::new(line_number, else_toks.to_vec());
+        Some(vec![parse_statement(&else_line)?])
+    } else {
+        None
+    };
+    
+    Ok(Statement::If {
+        condition,
+        then_part,
+        else_part,
+    })
 }
 
 /// Parse a sequence of tokens into an expression
@@ -1142,5 +1204,86 @@ mod tests {
         let stmt = parse_statement(&line).unwrap();
         
         assert_eq!(stmt, Statement::End);
+    }
+
+    #[test]
+    fn test_parse_if_then_simple() {
+        // RED: Parse "IF X% > 10 THEN PRINT \"Big\""
+        use crate::tokenizer::tokenize;
+        let line = tokenize(r#"IF X% > 10 THEN PRINT "Big""#).unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: BinaryOperator::GreaterThan,
+                right: Box::new(Expression::Integer(10)),
+            },
+            then_part: vec![Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
+            }],
+            else_part: None,
+        });
+    }
+
+    #[test]
+    fn test_parse_if_then_goto() {
+        // RED: Parse "IF A% = 0 THEN GOTO 100"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("IF A% = 0 THEN GOTO 100").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("A%".to_string())),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Integer(0)),
+            },
+            then_part: vec![Statement::Goto { line_number: 100 }],
+            else_part: None,
+        });
+    }
+
+    #[test]
+    fn test_parse_if_then_else() {
+        // RED: Parse "IF X% > 10 THEN PRINT \"Big\" ELSE PRINT \"Small\""
+        use crate::tokenizer::tokenize;
+        let line = tokenize(r#"IF X% > 10 THEN PRINT "Big" ELSE PRINT "Small""#).unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: BinaryOperator::GreaterThan,
+                right: Box::new(Expression::Integer(10)),
+            },
+            then_part: vec![Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
+            }],
+            else_part: Some(vec![Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("Small".to_string()))],
+            }]),
+        });
+    }
+
+    #[test]
+    fn test_parse_if_then_assignment() {
+        // RED: Parse "IF X% < 5 THEN Y% = 0"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("IF X% < 5 THEN Y% = 0").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: BinaryOperator::LessThan,
+                right: Box::new(Expression::Integer(5)),
+            },
+            then_part: vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(0),
+            }],
+            else_part: None,
+        });
     }
 }
