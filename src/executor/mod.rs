@@ -494,9 +494,18 @@ impl Executor {
                     let int_val = self.variables.get_integer_var(name)
                         .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone()))?;
                     Ok(int_val as f64)
+                } else if name.ends_with('$') {
+                    // String variable can't be converted to real
+                    Err(BBCBasicError::TypeMismatch)
                 } else {
-                    self.variables.get_real_var(name)
-                        .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone()))
+                    // Try as real variable first, then as integer
+                    if let Some(real_val) = self.variables.get_real_var(name) {
+                        Ok(real_val)
+                    } else if let Some(int_val) = self.variables.get_integer_var(name) {
+                        Ok(int_val as f64)
+                    } else {
+                        Err(BBCBasicError::NoSuchVariable(name.clone()))
+                    }
                 }
             }
             Expression::BinaryOp { op, left, right } => {
@@ -581,10 +590,15 @@ impl Executor {
                 let val = self.eval_integer(&args[0])?;
                 Ok(if val < 0 { -1 } else if val > 0 { 1 } else { 0 })
             }
+            // Real-only functions should not be called as integers
+            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "RND" => {
+                Err(BBCBasicError::TypeMismatch)
+            }
             _ => {
-                // Try as real function and convert
-                let real_result = self.eval_function_real(name, args)?;
-                Ok(real_result as i32)
+                Err(BBCBasicError::SyntaxError {
+                    message: format!("Unknown function: {}", name),
+                    line: None,
+                })
             }
         }
     }
