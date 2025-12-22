@@ -1,8 +1,8 @@
 use bbc_basic_interpreter::{
-    tokenizer::{tokenize, detokenize},
-    parser::parse_statement,
     executor::Executor,
+    parser::parse_statement,
     program::ProgramStore,
+    tokenizer::{detokenize, tokenize},
 };
 use std::io::{self, Write};
 
@@ -46,7 +46,7 @@ fn main() {
         // Handle special commands
         if input.eq_ignore_ascii_case("run") {
             match run_program(&mut executor, &mut program) {
-                Ok(()) => {},
+                Ok(()) => {}
                 Err(e) => println!("Error: {}", e),
             }
             continue;
@@ -93,16 +93,14 @@ fn main() {
         // CHAIN command (LOAD and RUN)
         if input_upper.starts_with("CHAIN ") {
             match extract_filename(input) {
-                Ok(filename) => {
-                    match load_program(&mut program, &filename) {
-                        Ok(_) => {
-                            if let Err(e) = run_program(&mut executor, &mut program) {
-                                println!("Error: {}", e);
-                            }
+                Ok(filename) => match load_program(&mut program, &filename) {
+                    Ok(_) => {
+                        if let Err(e) = run_program(&mut executor, &mut program) {
+                            println!("Error: {}", e);
                         }
-                        Err(e) => println!("Error: {}", e),
                     }
-                }
+                    Err(e) => println!("Error: {}", e),
+                },
                 Err(e) => println!("Error: {}", e),
             }
             continue;
@@ -118,16 +116,19 @@ fn main() {
 
         // Process the line (either store or execute)
         match process_line(&mut executor, &mut program, input) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => println!("Error: {}", e),
         }
     }
 }
 
-fn process_line(executor: &mut Executor, program: &mut ProgramStore, line: &str) -> Result<(), String> {
+fn process_line(
+    executor: &mut Executor,
+    program: &mut ProgramStore,
+    line: &str,
+) -> Result<(), String> {
     // Tokenize
-    let tokenized = tokenize(line)
-        .map_err(|e| format!("Tokenization error: {:?}", e))?;
+    let tokenized = tokenize(line).map_err(|e| format!("Tokenization error: {:?}", e))?;
 
     // Check if this is a numbered line (program mode) or immediate mode
     if let Some(line_number) = tokenized.line_number {
@@ -143,10 +144,10 @@ fn process_line(executor: &mut Executor, program: &mut ProgramStore, line: &str)
         Ok(())
     } else {
         // Immediate mode: execute immediately
-        let statement = parse_statement(&tokenized)
-            .map_err(|e| format!("Parse error: {:?}", e))?;
+        let statement = parse_statement(&tokenized).map_err(|e| format!("Parse error: {:?}", e))?;
 
-        executor.execute_statement(&statement)
+        executor
+            .execute_statement(&statement)
             .map_err(|e| format!("Runtime error: {:?}", e))?;
 
         Ok(())
@@ -157,23 +158,24 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
     if program.is_empty() {
         return Err("No program to run".to_string());
     }
-    
+
     // CRITICAL: Reset and collect all DATA statements BEFORE execution begins
     // This ensures READ can access DATA regardless of program flow (GOTO, etc.)
     executor.reset_data();
-    
+
     // First pass: collect all DATA statements and procedure definitions
     executor.clear_procedures();
     for (line_number, line) in program.list() {
         let statement = parse_statement(line)
             .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
-        
+
         // Collect DATA statements
         if matches!(statement, bbc_basic_interpreter::Statement::Data { .. }) {
-            executor.collect_data(&statement)
+            executor
+                .collect_data(&statement)
                 .map_err(|e| format!("Error collecting DATA at line {}: {:?}", line_number, e))?;
         }
-        
+
         // Collect procedure definitions
         if let bbc_basic_interpreter::Statement::DefProc { name, params } = statement {
             executor.define_procedure(name, line_number, params);
@@ -185,7 +187,8 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
 
     while let Some(line_number) = program.get_current_line() {
         // Get the line
-        let line = program.get_line(line_number)
+        let line = program
+            .get_line(line_number)
             .ok_or_else(|| format!("Line {} not found", line_number))?;
 
         // Parse the statement
@@ -195,8 +198,13 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         // Check statement type before executing
         let is_goto = matches!(statement, bbc_basic_interpreter::Statement::Goto { .. });
         let is_gosub = matches!(statement, bbc_basic_interpreter::Statement::Gosub { .. });
+        let is_on_goto = matches!(statement, bbc_basic_interpreter::Statement::OnGoto { .. });
+        let is_on_gosub = matches!(statement, bbc_basic_interpreter::Statement::OnGosub { .. });
         let is_return = matches!(statement, bbc_basic_interpreter::Statement::Return);
-        let is_end = matches!(statement, bbc_basic_interpreter::Statement::End | bbc_basic_interpreter::Statement::Stop);
+        let is_end = matches!(
+            statement,
+            bbc_basic_interpreter::Statement::End | bbc_basic_interpreter::Statement::Stop
+        );
         let is_for = matches!(statement, bbc_basic_interpreter::Statement::For { .. });
         let is_next = matches!(statement, bbc_basic_interpreter::Statement::Next { .. });
         let is_repeat = matches!(statement, bbc_basic_interpreter::Statement::Repeat);
@@ -205,7 +213,8 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_endproc = matches!(statement, bbc_basic_interpreter::Statement::EndProc);
 
         // Execute the statement
-        executor.execute_statement(&statement)
+        executor
+            .execute_statement(&statement)
             .map_err(|e| format!("Runtime error at line {}: {:?}", line_number, e))?;
 
         // Handle control flow
@@ -213,21 +222,74 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
             break;
         } else if is_goto {
             // GOTO: extract target and jump
-            if let bbc_basic_interpreter::Statement::Goto { line_number: target } = statement {
+            if let bbc_basic_interpreter::Statement::Goto {
+                line_number: target,
+            } = statement
+            {
                 if !program.goto_line(target) {
                     return Err(format!("Line {} not found (GOTO)", target));
                 }
             }
         } else if is_gosub {
             // GOSUB: save return address (this line) and jump to target
-            if let bbc_basic_interpreter::Statement::Gosub { line_number: target } = statement {
+            if let bbc_basic_interpreter::Statement::Gosub {
+                line_number: target,
+            } = statement
+            {
                 // Push the current line number so RETURN can come back here
                 executor.push_gosub_return(line_number);
-                
+
                 // Jump to the target subroutine
                 if !program.goto_line(target) {
                     return Err(format!("Line {} not found (GOSUB)", target));
                 }
+            }
+        } else if is_on_goto {
+            // ON GOTO: evaluate expression and jump to computed target
+            if let bbc_basic_interpreter::Statement::OnGoto {
+                expression,
+                targets,
+            } = &statement
+            {
+                // Evaluate expression - BBC BASIC uses 1-based indexing
+                let index = executor
+                    .eval_integer(expression)
+                    .map_err(|e| format!("Error evaluating ON GOTO expression: {:?}", e))?;
+
+                // Check if index is valid (1-based, so 1 = first target, 2 = second, etc.)
+                if index >= 1 && (index as usize) <= targets.len() {
+                    let target = targets[(index - 1) as usize];
+                    if !program.goto_line(target) {
+                        return Err(format!("Line {} not found (ON GOTO)", target));
+                    }
+                }
+                // If index is out of range, just continue to next line (fall through)
+            }
+        } else if is_on_gosub {
+            // ON GOSUB: evaluate expression and gosub to computed target
+            if let bbc_basic_interpreter::Statement::OnGosub {
+                expression,
+                targets,
+            } = &statement
+            {
+                // Evaluate expression - BBC BASIC uses 1-based indexing
+                let index = executor
+                    .eval_integer(expression)
+                    .map_err(|e| format!("Error evaluating ON GOSUB expression: {:?}", e))?;
+
+                // Check if index is valid (1-based)
+                if index >= 1 && (index as usize) <= targets.len() {
+                    let target = targets[(index - 1) as usize];
+
+                    // Push return address
+                    executor.push_gosub_return(line_number);
+
+                    // Jump to target
+                    if !program.goto_line(target) {
+                        return Err(format!("Line {} not found (ON GOSUB)", target));
+                    }
+                }
+                // If index is out of range, just continue to next line (fall through)
             }
         } else if is_return {
             // RETURN: pop return address and jump back
@@ -249,43 +311,59 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
             // PROC call: get procedure definition, bind parameters, push return address, jump
             if let bbc_basic_interpreter::Statement::ProcCall { name, args } = statement {
                 // Get procedure definition
-                let proc = executor.get_procedure(&name)
+                let proc = executor
+                    .get_procedure(&name)
                     .ok_or_else(|| format!("Procedure {} not defined", name))?;
-                
+
                 // Check parameter count
                 if args.len() != proc.params.len() {
-                    return Err(format!("Procedure {} expects {} parameters, got {}", 
-                        name, proc.params.len(), args.len()));
+                    return Err(format!(
+                        "Procedure {} expects {} parameters, got {}",
+                        name,
+                        proc.params.len(),
+                        args.len()
+                    ));
                 }
-                
-                // Clone the necessary data before borrowing executor mutably
-                let params_and_args: Vec<_> = proc.params.iter()
+
+                // Clone procedure data before entering local scope
+                let proc_line = proc.line_number;
+                let params_and_args: Vec<_> = proc
+                    .params
+                    .iter()
                     .zip(args.iter())
                     .map(|(p, a)| (p.clone(), a.clone()))
                     .collect();
-                
+
+                // Enter local scope for procedure
+                executor.enter_local_scope();
+
                 // Bind arguments to parameters (as global variables)
                 for (param_name, arg_expr) in params_and_args {
-                    executor.execute_statement(&bbc_basic_interpreter::Statement::Assignment {
-                        target: param_name,
-                        expression: arg_expr,
-                    }).map_err(|e| format!("Error binding parameter: {:?}", e))?;
+                    executor
+                        .execute_statement(&bbc_basic_interpreter::Statement::Assignment {
+                            target: param_name,
+                            expression: arg_expr,
+                        })
+                        .map_err(|e| format!("Error binding parameter: {:?}", e))?;
                 }
-                
+
                 // Push return address (current line number)
                 executor.push_gosub_return(line_number);
-                
-                // Jump to procedure line (need to get it again since we borrowed mutably)
-                let proc_line = executor.get_procedure(&name).unwrap().line_number;
+
+                // Jump to procedure line
                 if !program.goto_line(proc_line) {
                     return Err(format!("Procedure {} line {} not found", name, proc_line));
                 }
-                
+
                 // Move to line AFTER DEF PROC (skip the definition line)
                 program.next_line();
             }
         } else if is_endproc {
-            // ENDPROC: pop return address and jump back (same as RETURN)
+            // ENDPROC: exit local scope and pop return address
+            executor
+                .exit_local_scope()
+                .map_err(|e| format!("Error exiting local scope: {:?}", e))?;
+
             match executor.pop_gosub_return() {
                 Ok(return_line) => {
                     // Jump back to the line that called PROC
@@ -375,20 +453,20 @@ fn extract_filename(input: &str) -> Result<String, String> {
     if parts.len() < 2 {
         return Err("Expected filename".to_string());
     }
-    
+
     let filename = parts[1].trim();
-    
+
     // Remove quotes if present
     let filename = if filename.starts_with('"') && filename.ends_with('"') {
-        &filename[1..filename.len()-1]
+        &filename[1..filename.len() - 1]
     } else {
         filename
     };
-    
+
     if filename.is_empty() {
         return Err("Filename cannot be empty".to_string());
     }
-    
+
     Ok(filename.to_string())
 }
 
@@ -397,18 +475,18 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     if program.is_empty() {
         return Err("No program to save".to_string());
     }
-    
+
     // Add .bbas extension if not present
     let path = if filename.ends_with(".bbas") {
         filename.to_string()
     } else {
         format!("{}.bbas", filename)
     };
-    
+
     // Open file for writing
-    let mut file = std::fs::File::create(&path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
-    
+    let mut file =
+        std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+
     // Write each line (detokenized)
     use std::io::Write;
     for (line_number, line) in program.list() {
@@ -417,7 +495,7 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
         writeln!(file, "{}", text)
             .map_err(|e| format!("Failed to write line {}: {}", line_number, e))?;
     }
-    
+
     println!("Saved to {}", path);
     Ok(())
 }
@@ -430,47 +508,50 @@ fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String
     } else {
         format!("{}.bbas", filename)
     };
-    
+
     // Read file
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+
     // Clear current program (like NEW command)
     program.clear();
     // Note: We don't reset executor state - variables persist across LOAD
     // This matches BBC BASIC behavior where LOAD doesn't clear variables
-    
+
     // Parse and add each line
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue; // Skip empty lines
         }
-        
+
         // Tokenize and store
-        let tokenized = tokenize(line)
-            .map_err(|e| format!("Parse error at line {}: {:?}", line_num + 1, e))?;
-        
+        let tokenized =
+            tokenize(line).map_err(|e| format!("Parse error at line {}: {:?}", line_num + 1, e))?;
+
         if tokenized.line_number.is_some() {
             program.store_line(tokenized);
         } else {
-            return Err(format!("Line {} has no line number: {}", line_num + 1, line));
+            return Err(format!(
+                "Line {} has no line number: {}",
+                line_num + 1,
+                line
+            ));
         }
     }
-    
+
     println!("Loaded from {}", path);
     Ok(())
 }
 
 /// Catalog all .bbas files in current directory
 fn catalog_files() -> Result<(), String> {
-    let paths = std::fs::read_dir(".")
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
-    
+    let paths = std::fs::read_dir(".").map_err(|e| format!("Failed to read directory: {}", e))?;
+
     println!("\nCatalog:");
     println!("{:<30} {:>10}  {}", "Filename", "Size", "Modified");
     println!("{}", "-".repeat(60));
-    
+
     let mut count = 0;
     let mut entries: Vec<_> = paths.collect();
     entries.sort_by_key(|e| {
@@ -478,18 +559,20 @@ fn catalog_files() -> Result<(), String> {
             .ok()
             .and_then(|e| e.file_name().to_str().map(|s| s.to_lowercase()))
     });
-    
+
     for path in entries {
         let path = path.map_err(|e| format!("Failed to read entry: {}", e))?;
         let filename = path.file_name();
         let filename_str = filename.to_string_lossy();
-        
+
         if filename_str.ends_with(".bbas") {
-            let metadata = path.metadata()
+            let metadata = path
+                .metadata()
                 .map_err(|e| format!("Failed to read metadata: {}", e))?;
-            
+
             let size = metadata.len();
-            let modified = metadata.modified()
+            let modified = metadata
+                .modified()
                 .ok()
                 .and_then(|m| m.elapsed().ok())
                 .map(|d| {
@@ -505,18 +588,18 @@ fn catalog_files() -> Result<(), String> {
                     }
                 })
                 .unwrap_or_else(|| "unknown".to_string());
-            
+
             println!("{:<30} {:>10}  {}", filename_str, size, modified);
             count += 1;
         }
     }
-    
+
     if count == 0 {
         println!("(no .bbas files found)");
     } else {
         println!("\n{} file(s)", count);
     }
-    
+
     Ok(())
 }
 

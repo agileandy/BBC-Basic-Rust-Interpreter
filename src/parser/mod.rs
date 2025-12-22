@@ -1,11 +1,11 @@
 //! Parser for BBC BASIC statements and expressions
-//! 
+//!
 //! Analyzes tokenized BBC BASIC statements and creates abstract syntax trees
 //! for execution.
 
-use crate::error::Result;
-use crate::tokenizer::{Token, TokenizedLine, create_reverse_keyword_maps};
 use crate::error::BBCBasicError;
+use crate::error::Result;
+use crate::tokenizer::{create_reverse_keyword_maps, Token, TokenizedLine};
 
 /// Binary operators in BBC BASIC
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +18,7 @@ pub enum BinaryOperator {
     IntegerDivide,
     Modulo,
     Power,
-    
+
     // Comparison
     Equal,
     NotEqual,
@@ -26,12 +26,12 @@ pub enum BinaryOperator {
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
-    
+
     // Logical
     And,
     Or,
     Eor, // Exclusive OR
-    
+
     // String
     StringConcat, // String concatenation
 }
@@ -61,10 +61,7 @@ pub enum Expression {
         indices: Vec<Expression>,
     },
     /// Function call
-    FunctionCall {
-        name: String,
-        args: Vec<Expression>,
-    },
+    FunctionCall { name: String, args: Vec<Expression> },
     /// Binary operation
     BinaryOp {
         left: Box<Expression>,
@@ -82,10 +79,10 @@ pub enum Expression {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintItem {
     Expression(Expression),
-    Tab(Expression),      // TAB(n)
-    Spc(Expression),      // SPC(n)
-    Semicolon,           // ;
-    Comma,               // ,
+    Tab(Expression), // TAB(n)
+    Spc(Expression), // SPC(n)
+    Semicolon,       // ;
+    Comma,           // ,
 }
 
 /// BBC BASIC statements
@@ -103,13 +100,9 @@ pub enum Statement {
         expression: Expression,
     },
     /// PRINT statement
-    Print {
-        items: Vec<PrintItem>,
-    },
+    Print { items: Vec<PrintItem> },
     /// INPUT statement
-    Input {
-        variables: Vec<String>,
-    },
+    Input { variables: Vec<String> },
     /// FOR loop
     For {
         variable: String,
@@ -118,9 +111,7 @@ pub enum Statement {
         step: Option<Expression>,
     },
     /// NEXT statement
-    Next {
-        variables: Vec<String>,
-    },
+    Next { variables: Vec<String> },
     /// IF statement
     If {
         condition: Expression,
@@ -128,13 +119,9 @@ pub enum Statement {
         else_part: Option<Vec<Statement>>,
     },
     /// GOTO statement
-    Goto {
-        line_number: u16,
-    },
+    Goto { line_number: u16 },
     /// GOSUB statement
-    Gosub {
-        line_number: u16,
-    },
+    Gosub { line_number: u16 },
     /// RETURN statement
     Return,
     /// DIM statement for array dimensioning
@@ -142,45 +129,47 @@ pub enum Statement {
         arrays: Vec<(String, Vec<Expression>)>,
     },
     /// REM statement (comment)
-    Rem {
-        comment: String,
-    },
+    Rem { comment: String },
     /// END statement
     End,
     /// STOP statement
     Stop,
     /// Procedure call
-    ProcCall {
-        name: String,
-        args: Vec<Expression>,
-    },
+    ProcCall { name: String, args: Vec<Expression> },
     /// DEF PROC - define a procedure
-    DefProc {
+    DefProc { name: String, params: Vec<String> },
+    /// DEF FN - define a function (single-line with return expression)
+    DefFn {
         name: String,
         params: Vec<String>,
+        expression: Expression,
     },
     /// ENDPROC - end procedure definition
     EndProc,
+    /// LOCAL statement - declares local variables in a procedure
+    Local { variables: Vec<String> },
     /// DATA statement - stores data values
-    Data {
-        values: Vec<DataValue>,
-    },
+    Data { values: Vec<DataValue> },
     /// READ statement - reads data into variables
-    Read {
-        variables: Vec<String>,
-    },
+    Read { variables: Vec<String> },
     /// RESTORE statement - resets data pointer (optionally to specific line)
-    Restore {
-        line_number: Option<u16>,
-    },
+    Restore { line_number: Option<u16> },
     /// REPEAT statement - starts a REPEAT...UNTIL loop
     Repeat,
     /// UNTIL statement - ends a REPEAT...UNTIL loop
-    Until {
-        condition: Expression,
-    },
+    Until { condition: Expression },
     /// CLS statement - clear screen
     Cls,
+    /// ON GOTO statement - computed GOTO based on expression value
+    OnGoto {
+        expression: Expression,
+        targets: Vec<u16>,
+    },
+    /// ON GOSUB statement - computed GOSUB based on expression value
+    OnGosub {
+        expression: Expression,
+        targets: Vec<u16>,
+    },
     /// Empty statement
     Empty,
 }
@@ -278,16 +267,16 @@ pub enum ExpressionType {
 /// Parse a tokenized line into a statement
 pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
     let tokens = &line.tokens;
-    
+
     if tokens.is_empty() {
         return Ok(Statement::Empty);
     }
-    
+
     // Check first token to determine statement type
     match &tokens[0] {
         // PRINT statement
         Token::Keyword(0xF1) => parse_print_statement(&tokens[1..]),
-        
+
         // LET statement (optional keyword)
         Token::Keyword(0xE9) => {
             // LET is optional, parse assignment from token 1 onward
@@ -299,77 +288,84 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             }
             parse_assignment(&tokens[1..], line.line_number)
         }
-        
+
         // Variable assignment (without LET keyword)
         Token::Identifier(_) => parse_assignment(tokens, line.line_number),
-        
+
         // FOR loop
         Token::Keyword(0xE3) => parse_for_statement(&tokens[1..], line.line_number),
-        
+
         // NEXT statement
         Token::Keyword(0xED) => parse_next_statement(&tokens[1..]),
-        
+
         // GOTO statement
         Token::Keyword(0xE5) => parse_goto_statement(&tokens[1..], line.line_number),
-        
-        // GOSUB statement  
+
+        // GOSUB statement
         Token::Keyword(0xE4) => parse_gosub_statement(&tokens[1..], line.line_number),
-        
+
+        // ON statement (ON GOTO / ON GOSUB)
+        Token::Keyword(0xEE) => parse_on_statement(&tokens[1..], line.line_number),
+
         // RETURN statement
         Token::Keyword(0xF8) => Ok(Statement::Return),
-        
+
         // INPUT statement
         Token::Keyword(0xE8) => parse_input_statement(&tokens[1..]),
-        
+
         // DIM statement
         Token::Keyword(0xDE) => parse_dim_statement(&tokens[1..], line.line_number),
-        
+
         // IF statement
         Token::Keyword(0xE7) => parse_if_statement(&tokens[1..], line.line_number),
-        
+
         // END statement
         Token::Keyword(0xE0) => Ok(Statement::End),
-        
+
         // STOP statement
         Token::Keyword(0xFA) => Ok(Statement::Stop),
-        
+
         // REM statement (comment)
         Token::Keyword(0xF4) => {
             // Everything after REM is a comment
-            let comment = tokens[1..].iter()
+            let comment = tokens[1..]
+                .iter()
                 .map(|t| format!("{:?}", t))
                 .collect::<Vec<_>>()
                 .join(" ");
             Ok(Statement::Rem { comment })
         }
-        
+
         // DATA statement
         Token::Keyword(0xDC) => parse_data_statement(&tokens[1..], line.line_number),
-        
+
         // READ statement
         Token::Keyword(0xF3) => parse_read_statement(&tokens[1..], line.line_number),
-        
+
         // RESTORE statement
         Token::Keyword(0xF7) => parse_restore_statement(&tokens[1..], line.line_number),
-        
+
         // REPEAT statement
         Token::Keyword(0xF5) => Ok(Statement::Repeat),
-        
+
         // UNTIL statement
         Token::Keyword(0xFD) => parse_until_statement(&tokens[1..], line.line_number),
-        
+
         // CLS statement
         Token::Keyword(0xDB) => Ok(Statement::Cls),
-        
+
         // DEF statement (DEF PROC or DEF FN)
         Token::Keyword(0xDD) => parse_def_statement(&tokens[1..], line.line_number),
-        
+
         // ENDPROC statement
         Token::Keyword(0xE1) => Ok(Statement::EndProc),
-        
+
+        // LOCAL statement
+        Token::Keyword(0xEA) => parse_local_statement(&tokens[1..], line.line_number),
+
         // PROC call (PROC followed by identifier)
         Token::Keyword(0xF2) => parse_proc_call(&tokens[1..], line.line_number),
-        
+
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
             line: line.line_number,
@@ -381,7 +377,7 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
     let mut items = Vec::new();
     let mut pos = 0;
-    
+
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::Separator(';') => {
@@ -402,7 +398,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                     });
                 }
                 pos += 1; // skip '('
-                
+
                 // Find matching ')'
                 let start_pos = pos;
                 let mut paren_depth = 1;
@@ -414,15 +410,15 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                     }
                     pos += 1;
                 }
-                
+
                 if paren_depth != 0 {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Unmatched parentheses in TAB".to_string(),
                         line: None,
                     });
                 }
-                
-                let expr = parse_expression(&tokens[start_pos..pos-1])?;
+
+                let expr = parse_expression(&tokens[start_pos..pos - 1])?;
                 items.push(PrintItem::Tab(expr));
             }
             // Handle SPC(expr)
@@ -435,7 +431,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                     });
                 }
                 pos += 1; // skip '('
-                
+
                 // Find matching ')'
                 let start_pos = pos;
                 let mut paren_depth = 1;
@@ -447,15 +443,15 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                     }
                     pos += 1;
                 }
-                
+
                 if paren_depth != 0 {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Unmatched parentheses in SPC".to_string(),
                         line: None,
                     });
                 }
-                
-                let expr = parse_expression(&tokens[start_pos..pos-1])?;
+
+                let expr = parse_expression(&tokens[start_pos..pos - 1])?;
                 items.push(PrintItem::Spc(expr));
             }
             _ => {
@@ -463,7 +459,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                 let start_pos = pos;
                 let mut end_pos = pos;
                 let mut paren_depth = 0;
-                
+
                 // Find end of expression (stop at separator or end, but respect parentheses)
                 while end_pos < tokens.len() {
                     match &tokens[end_pos] {
@@ -483,7 +479,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                         }
                     }
                 }
-                
+
                 if end_pos > start_pos {
                     let expr = parse_expression(&tokens[start_pos..end_pos])?;
                     items.push(PrintItem::Expression(expr));
@@ -494,7 +490,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
             }
         }
     }
-    
+
     Ok(Statement::Print { items })
 }
 
@@ -506,24 +502,26 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
             line: line_number,
         });
     }
-    
+
     let target = match &tokens[0] {
         Token::Identifier(name) => name.clone(),
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected variable name".to_string(),
-            line: line_number,
-        }),
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected variable name".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
+
     if !matches!(tokens[1], Token::Operator('=')) {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected '='".to_string(),
             line: line_number,
         });
     }
-    
+
     let expression = parse_expression(&tokens[2..])?;
-    
+
     Ok(Statement::Assignment { target, expression })
 }
 
@@ -536,34 +534,40 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             line: line_number,
         });
     }
-    
+
     let variable = match &tokens[0] {
         Token::Identifier(name) => name.clone(),
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected variable name after FOR".to_string(),
-            line: line_number,
-        }),
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected variable name after FOR".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
+
     if !matches!(tokens[1], Token::Operator('=')) {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected '=' in FOR statement".to_string(),
             line: line_number,
         });
     }
-    
+
     // Find TO keyword
-    let to_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0xB8)))
+    let to_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0xB8)))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected TO in FOR statement".to_string(),
             line: line_number,
         })?;
-    
+
     let start = parse_expression(&tokens[2..to_pos])?;
-    
+
     // Check for STEP keyword
-    let step_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0x88)));
-    
+    let step_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0x88)));
+
     let (end, step) = if let Some(step_pos) = step_pos {
         let end = parse_expression(&tokens[to_pos + 1..step_pos])?;
         let step = parse_expression(&tokens[step_pos + 1..])?;
@@ -572,19 +576,24 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         let end = parse_expression(&tokens[to_pos + 1..])?;
         (end, None)
     };
-    
-    Ok(Statement::For { variable, start, end, step })
+
+    Ok(Statement::For {
+        variable,
+        start,
+        end,
+        step,
+    })
 }
 
 /// Parse NEXT statement
 fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
     let mut variables = Vec::new();
-    
+
     if tokens.is_empty() {
         // NEXT without variable
         return Ok(Statement::Next { variables });
     }
-    
+
     // Parse variable list (comma-separated)
     let mut pos = 0;
     while pos < tokens.len() {
@@ -592,7 +601,7 @@ fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
             Token::Identifier(name) => {
                 variables.push(name.clone());
                 pos += 1;
-                
+
                 if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
                     pos += 1; // skip comma
                 }
@@ -600,7 +609,7 @@ fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
             _ => break,
         }
     }
-    
+
     Ok(Statement::Next { variables })
 }
 
@@ -612,16 +621,20 @@ fn parse_goto_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
             line: line_number,
         });
     }
-    
+
     let line_num = match &tokens[0] {
         Token::Integer(n) => *n as u16,
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected line number after GOTO".to_string(),
-            line: line_number,
-        }),
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected line number after GOTO".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
-    Ok(Statement::Goto { line_number: line_num })
+
+    Ok(Statement::Goto {
+        line_number: line_num,
+    })
 }
 
 /// Parse GOSUB statement
@@ -632,29 +645,130 @@ fn parse_gosub_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
             line: line_number,
         });
     }
-    
+
     let line_num = match &tokens[0] {
         Token::Integer(n) => *n as u16,
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected line number after GOSUB".to_string(),
-            line: line_number,
-        }),
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected line number after GOSUB".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
-    Ok(Statement::Gosub { line_number: line_num })
+
+    Ok(Statement::Gosub {
+        line_number: line_num,
+    })
+}
+
+/// Parse ON statement (ON GOTO or ON GOSUB)
+fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Syntax: ON <expression> GOTO|GOSUB <line1>, <line2>, ...
+
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected expression after ON".to_string(),
+            line: line_number,
+        });
+    }
+
+    // Find GOTO or GOSUB keyword
+    let mut goto_pos = None;
+    let mut gosub_pos = None;
+
+    for (i, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Keyword(0xE5) => {
+                // GOTO
+                goto_pos = Some(i);
+                break;
+            }
+            Token::Keyword(0xE4) => {
+                // GOSUB
+                gosub_pos = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let (keyword_pos, is_goto) = if let Some(pos) = goto_pos {
+        (pos, true)
+    } else if let Some(pos) = gosub_pos {
+        (pos, false)
+    } else {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected GOTO or GOSUB after ON expression".to_string(),
+            line: line_number,
+        });
+    };
+
+    // Parse expression before GOTO/GOSUB
+    let expression = parse_expression(&tokens[..keyword_pos])?;
+
+    // Parse line numbers after GOTO/GOSUB
+    let line_tokens = &tokens[keyword_pos + 1..];
+    if line_tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected line numbers after ON GOTO/GOSUB".to_string(),
+            line: line_number,
+        });
+    }
+
+    let mut targets = Vec::new();
+    let mut pos = 0;
+
+    while pos < line_tokens.len() {
+        match &line_tokens[pos] {
+            Token::Integer(n) => {
+                targets.push(*n as u16);
+                pos += 1;
+
+                // Skip comma if present
+                if pos < line_tokens.len() && matches!(line_tokens[pos], Token::Separator(',')) {
+                    pos += 1;
+                }
+            }
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected line number in ON GOTO/GOSUB list".to_string(),
+                    line: line_number,
+                });
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected at least one line number in ON GOTO/GOSUB".to_string(),
+            line: line_number,
+        });
+    }
+
+    if is_goto {
+        Ok(Statement::OnGoto {
+            expression,
+            targets,
+        })
+    } else {
+        Ok(Statement::OnGosub {
+            expression,
+            targets,
+        })
+    }
 }
 
 /// Parse INPUT statement
 fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
     let mut variables = Vec::new();
     let mut pos = 0;
-    
+
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::Identifier(name) => {
                 variables.push(name.clone());
                 pos += 1;
-                
+
                 if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
                     pos += 1; // skip comma
                 }
@@ -662,7 +776,7 @@ fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
             _ => break,
         }
     }
-    
+
     Ok(Statement::Input { variables })
 }
 
@@ -670,7 +784,7 @@ fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
 fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut arrays = Vec::new();
     let mut pos = 0;
-    
+
     while pos < tokens.len() {
         // Get array name
         let name = match &tokens[pos] {
@@ -678,13 +792,15 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
                 // Array names have opening paren
                 format!("{}(", n.trim_end_matches('('))
             }
-            _ => return Err(BBCBasicError::SyntaxError {
-                message: "Expected array name in DIM".to_string(),
-                line: line_number,
-            }),
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected array name in DIM".to_string(),
+                    line: line_number,
+                })
+            }
         };
         pos += 1;
-        
+
         // Expect opening paren
         if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
             return Err(BBCBasicError::SyntaxError {
@@ -693,7 +809,7 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             });
         }
         pos += 1;
-        
+
         // Parse dimension expressions
         let mut dimensions = Vec::new();
         loop {
@@ -710,16 +826,16 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
                 }
                 pos += 1;
             }
-            
+
             if pos > start {
                 let dim_expr = parse_expression(&tokens[start..pos])?;
                 dimensions.push(dim_expr);
             }
-            
+
             if pos >= tokens.len() {
                 break;
             }
-            
+
             match &tokens[pos] {
                 Token::Separator(',') => pos += 1, // next dimension
                 Token::Separator(')') => {
@@ -729,9 +845,9 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
                 _ => break,
             }
         }
-        
+
         arrays.push((name, dimensions));
-        
+
         // Check for comma (multiple arrays in one DIM)
         if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
             pos += 1;
@@ -739,7 +855,7 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             break;
         }
     }
-    
+
     Ok(Statement::Dim { arrays })
 }
 
@@ -748,14 +864,14 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
 fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut values = Vec::new();
     let mut pos = 0;
-    
+
     while pos < tokens.len() {
         // Skip commas
         if matches!(tokens[pos], Token::Separator(',')) {
             pos += 1;
             continue;
         }
-        
+
         // Parse value
         match &tokens[pos] {
             Token::Integer(val) => {
@@ -798,7 +914,7 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
             }
         }
     }
-    
+
     Ok(Statement::Data { values })
 }
 
@@ -807,14 +923,14 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut variables = Vec::new();
     let mut pos = 0;
-    
+
     while pos < tokens.len() {
         // Skip commas
         if matches!(tokens[pos], Token::Separator(',')) {
             pos += 1;
             continue;
         }
-        
+
         // Expect variable name
         match &tokens[pos] {
             Token::Identifier(name) => {
@@ -829,14 +945,14 @@ fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
             }
         }
     }
-    
+
     if variables.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "READ requires at least one variable".to_string(),
             line: line_number,
         });
     }
-    
+
     Ok(Statement::Read { variables })
 }
 
@@ -849,11 +965,11 @@ fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Resul
     } else if tokens.len() == 1 {
         // RESTORE with line number
         match &tokens[0] {
-            Token::Integer(num) => Ok(Statement::Restore { 
-                line_number: Some(*num as u16) 
+            Token::Integer(num) => Ok(Statement::Restore {
+                line_number: Some(*num as u16),
             }),
-            Token::LineNumber(num) => Ok(Statement::Restore { 
-                line_number: Some(*num) 
+            Token::LineNumber(num) => Ok(Statement::Restore {
+                line_number: Some(*num),
             }),
             _ => Err(BBCBasicError::SyntaxError {
                 message: "RESTORE expects line number".to_string(),
@@ -877,7 +993,7 @@ fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
             line: line_number,
         });
     }
-    
+
     // Parse the condition expression
     let condition = parse_expression(tokens)?;
     Ok(Statement::Until { condition })
@@ -893,24 +1009,28 @@ fn parse_def_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             line: line_number,
         });
     }
-    
+
     // Check if it's DEF PROC or DEF FN
     match &tokens[0] {
         Token::Keyword(0xF2) => {
             // DEF PROC
             parse_def_proc(&tokens[1..], line_number)
         }
+        Token::Keyword(0xA4) => {
+            // DEF FN
+            parse_def_fn(&tokens[1..], line_number)
+        }
         Token::Keyword(_) => {
-            // DEF FN (to be implemented)
+            // Unknown keyword after DEF
             Err(BBCBasicError::SyntaxError {
-                message: "DEF FN not yet implemented".to_string(),
+                message: "Expected PROC or FN after DEF".to_string(),
                 line: line_number,
             })
         }
         _ => Err(BBCBasicError::SyntaxError {
             message: "Expected PROC or FN after DEF".to_string(),
             line: line_number,
-        })
+        }),
     }
 }
 
@@ -922,16 +1042,18 @@ fn parse_def_proc(tokens: &[Token], line_number: Option<u16>) -> Result<Statemen
             line: line_number,
         });
     }
-    
+
     // Extract procedure name (identifier)
     let name = match &tokens[0] {
         Token::Identifier(n) => n.clone(),
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected identifier for procedure name".to_string(),
-            line: line_number,
-        })
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected identifier for procedure name".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
+
     // Parse parameters if present
     let params = if tokens.len() > 1 {
         // Should be ( param1, param2, ... )
@@ -939,8 +1061,89 @@ fn parse_def_proc(tokens: &[Token], line_number: Option<u16>) -> Result<Statemen
     } else {
         Vec::new()
     };
-    
+
     Ok(Statement::DefProc { name, params })
+}
+
+/// Parse DEF FNname(params) = expression
+fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected function name after DEF FN".to_string(),
+            line: line_number,
+        });
+    }
+
+    // Extract function name (identifier)
+    let name = match &tokens[0] {
+        Token::Identifier(n) => n.clone(),
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected identifier for function name".to_string(),
+                line: line_number,
+            })
+        }
+    };
+
+    // Parse parameters if present
+    let (params, rest_start) = if tokens.len() > 1 && matches!(tokens[1], Token::Operator('(')) {
+        // Find closing parenthesis
+        let close_pos = tokens
+            .iter()
+            .skip(1)
+            .position(|t| matches!(t, Token::Operator(')')))
+            .ok_or(BBCBasicError::SyntaxError {
+                message: "Expected ) after parameter list".to_string(),
+                line: line_number,
+            })?
+            + 1;
+
+        // Parse parameters (comma-separated identifiers between parentheses)
+        let mut params = Vec::new();
+        let mut pos = 2; // Skip name and (
+        while pos < close_pos {
+            // Skip commas
+            if matches!(tokens[pos], Token::Separator(',')) {
+                pos += 1;
+                continue;
+            }
+
+            // Expect identifier
+            match &tokens[pos] {
+                Token::Identifier(param) => {
+                    params.push(param.clone());
+                    pos += 1;
+                }
+                _ => {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected parameter name".to_string(),
+                        line: line_number,
+                    });
+                }
+            }
+        }
+
+        (params, close_pos + 1) // Skip past the )
+    } else {
+        (Vec::new(), 1)
+    };
+
+    // Expect = after parameters
+    if rest_start >= tokens.len() || !matches!(tokens[rest_start], Token::Operator('=')) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected = after function parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    // Parse the expression after =
+    let expression = parse_expression(&tokens[rest_start + 1..])?;
+
+    Ok(Statement::DefFn {
+        name,
+        params,
+        expression,
+    })
 }
 
 /// Parse PROC call: PROCname or PROCname(args)
@@ -951,24 +1154,63 @@ fn parse_proc_call(tokens: &[Token], line_number: Option<u16>) -> Result<Stateme
             line: line_number,
         });
     }
-    
+
     // Extract procedure name
     let name = match &tokens[0] {
         Token::Identifier(n) => n.clone(),
-        _ => return Err(BBCBasicError::SyntaxError {
-            message: "Expected identifier for procedure name".to_string(),
-            line: line_number,
-        })
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected identifier for procedure name".to_string(),
+                line: line_number,
+            })
+        }
     };
-    
+
     // Parse arguments if present
     let args = if tokens.len() > 1 {
         parse_argument_list(&tokens[1..], line_number)?
     } else {
         Vec::new()
     };
-    
+
     Ok(Statement::ProcCall { name, args })
+}
+
+/// Parse LOCAL statement: LOCAL var1, var2, var3
+fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mut variables = Vec::new();
+    let mut pos = 0;
+
+    while pos < tokens.len() {
+        // Skip commas
+        if matches!(tokens[pos], Token::Separator(',')) {
+            pos += 1;
+            continue;
+        }
+
+        // Expect variable name
+        match &tokens[pos] {
+            Token::Identifier(name) => {
+                variables.push(name.clone());
+                pos += 1;
+            }
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected variable name in LOCAL".to_string(),
+                    line: line_number,
+                });
+            }
+        }
+    }
+
+    if variables.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "LOCAL requires at least one variable".to_string(),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Local { variables })
 }
 
 /// Parse argument list: (expr1, expr2, ...)
@@ -976,7 +1218,7 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    
+
     // Expect opening parenthesis
     if !matches!(tokens[0], Token::Operator('(')) {
         return Err(BBCBasicError::SyntaxError {
@@ -984,24 +1226,26 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
             line: line_number,
         });
     }
-    
+
     // Find closing parenthesis
-    let close_pos = tokens.iter().position(|t| matches!(t, Token::Operator(')')))
+    let close_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Operator(')')))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected ) after argument list".to_string(),
             line: line_number,
         })?;
-    
+
     if close_pos == 1 {
         // Empty argument list: ()
         return Ok(Vec::new());
     }
-    
+
     // Parse comma-separated expressions between parentheses
     let mut args = Vec::new();
     let mut start = 1;
     let mut depth = 0;
-    
+
     for i in 1..close_pos {
         match &tokens[i] {
             Token::Operator('(') => depth += 1,
@@ -1015,13 +1259,13 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
             _ => {}
         }
     }
-    
+
     // Parse final expression
     if start < close_pos {
         let expr = parse_expression(&tokens[start..close_pos])?;
         args.push(expr);
     }
-    
+
     Ok(args)
 }
 
@@ -1030,7 +1274,7 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    
+
     // Expect opening parenthesis
     if !matches!(tokens[0], Token::Operator('(')) {
         return Err(BBCBasicError::SyntaxError {
@@ -1038,14 +1282,16 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
             line: line_number,
         });
     }
-    
+
     // Find closing parenthesis
-    let close_pos = tokens.iter().position(|t| matches!(t, Token::Operator(')')))
+    let close_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Operator(')')))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected ) after parameter list".to_string(),
             line: line_number,
         })?;
-    
+
     // Extract parameter names between parentheses
     let mut params = Vec::new();
     let mut i = 1;
@@ -1054,7 +1300,7 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
             Token::Identifier(name) => {
                 params.push(name.clone());
                 i += 1;
-                
+
                 // Check for comma or end
                 if i < close_pos {
                     if matches!(tokens[i], Token::Separator(',')) {
@@ -1067,13 +1313,15 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
                     }
                 }
             }
-            _ => return Err(BBCBasicError::SyntaxError {
-                message: "Expected identifier in parameter list".to_string(),
-                line: line_number,
-            })
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected identifier in parameter list".to_string(),
+                    line: line_number,
+                })
+            }
         }
     }
-    
+
     Ok(params)
 }
 
@@ -1081,28 +1329,35 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
 /// Supports: IF condition THEN statement [ELSE statement]
 fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // Find THEN keyword to split condition from then-part
-    let then_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0x8C)))
+    let then_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0x8C)))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected THEN after IF condition".to_string(),
             line: line_number,
         })?;
-    
+
     // Parse condition (everything before THEN)
     let condition_tokens = &tokens[..then_pos];
     let condition = parse_expression(condition_tokens)?;
-    
+
     // Find ELSE keyword (if present)
-    let else_pos = tokens[then_pos + 1..].iter().position(|t| matches!(t, Token::Keyword(0x8B)));
-    
+    let else_pos = tokens[then_pos + 1..]
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0x8B)));
+
     let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
         // ELSE found: split then_part and else_part
         let absolute_else_pos = then_pos + 1 + else_idx;
-        (&tokens[then_pos + 1..absolute_else_pos], Some(&tokens[absolute_else_pos + 1..]))
+        (
+            &tokens[then_pos + 1..absolute_else_pos],
+            Some(&tokens[absolute_else_pos + 1..]),
+        )
     } else {
         // No ELSE: only then_part
         (&tokens[then_pos + 1..], None)
     };
-    
+
     // Parse THEN part (single statement for now)
     let then_part = if then_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
@@ -1114,7 +1369,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         let then_line = TokenizedLine::new(line_number, then_tokens.to_vec());
         vec![parse_statement(&then_line)?]
     };
-    
+
     // Parse ELSE part if present
     let else_part = if let Some(else_toks) = else_tokens {
         if else_toks.is_empty() {
@@ -1128,7 +1383,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     } else {
         None
     };
-    
+
     Ok(Statement::If {
         condition,
         then_part,
@@ -1152,10 +1407,10 @@ pub fn parse_expression(tokens: &[Token]) -> Result<Expression> {
 /// Get operator precedence (higher number = higher precedence)
 fn get_precedence(op: char) -> Option<u8> {
     match op {
-        '^' => Some(60),  // Power (highest)
-        '*' | '/' => Some(50),  // Multiplication, Division
-        '+' | '-' => Some(40),  // Addition, Subtraction
-        '=' | '<' | '>' => Some(30),  // Comparison
+        '^' => Some(60),             // Power (highest)
+        '*' | '/' => Some(50),       // Multiplication, Division
+        '+' | '-' => Some(40),       // Addition, Subtraction
+        '=' | '<' | '>' => Some(30), // Comparison
         _ => None,
     }
 }
@@ -1268,7 +1523,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
         Token::Separator('(') => {
             *pos += 1;
             let expr = parse_expr_precedence(tokens, pos, 0)?;
-            
+
             // Expect closing parenthesis
             if *pos >= tokens.len() || !matches!(tokens[*pos], Token::Separator(')')) {
                 return Err(BBCBasicError::SyntaxError {
@@ -1283,26 +1538,29 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
         // Keywords (functions and constants)
         Token::Keyword(byte) => {
             let (main_reverse, _) = create_reverse_keyword_maps();
-            let keyword = main_reverse.get(byte).cloned().unwrap_or_else(|| "UNKNOWN".to_string());
-            
+            let keyword = main_reverse
+                .get(byte)
+                .cloned()
+                .unwrap_or_else(|| "UNKNOWN".to_string());
+
             *pos += 1;
 
             // Check if this is a function call (followed by opening paren)
             if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
                 *pos += 1; // consume '('
-                
+
                 let mut args = Vec::new();
-                
+
                 // Parse arguments
                 if *pos < tokens.len() && !matches!(tokens[*pos], Token::Separator(')')) {
                     loop {
                         let arg = parse_expr_precedence(tokens, pos, 0)?;
                         args.push(arg);
-                        
+
                         if *pos >= tokens.len() {
                             break;
                         }
-                        
+
                         match &tokens[*pos] {
                             Token::Separator(',') => {
                                 *pos += 1; // consume comma
@@ -1313,7 +1571,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                         }
                     }
                 }
-                
+
                 // Expect closing parenthesis
                 if *pos >= tokens.len() || !matches!(tokens[*pos], Token::Separator(')')) {
                     return Err(BBCBasicError::SyntaxError {
@@ -1322,7 +1580,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                     });
                 }
                 *pos += 1;
-                
+
                 Ok(Expression::FunctionCall {
                     name: keyword,
                     args,
@@ -1433,17 +1691,16 @@ mod tests {
     #[test]
     fn test_parse_simple_addition() {
         // RED: Parse "2 + 3"
-        let tokens = vec![
-            Token::Integer(2),
-            Token::Operator('+'),
-            Token::Integer(3),
-        ];
+        let tokens = vec![Token::Integer(2), Token::Operator('+'), Token::Integer(3)];
         let expr = parse_expression(&tokens).unwrap();
-        assert_eq!(expr, Expression::BinaryOp {
-            left: Box::new(Expression::Integer(2)),
-            op: BinaryOperator::Add,
-            right: Box::new(Expression::Integer(3)),
-        });
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(2)),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::Integer(3)),
+            }
+        );
     }
 
     #[test]
@@ -1457,15 +1714,18 @@ mod tests {
             Token::Integer(4),
         ];
         let expr = parse_expression(&tokens).unwrap();
-        assert_eq!(expr, Expression::BinaryOp {
-            left: Box::new(Expression::Integer(2)),
-            op: BinaryOperator::Add,
-            right: Box::new(Expression::BinaryOp {
-                left: Box::new(Expression::Integer(3)),
-                op: BinaryOperator::Multiply,
-                right: Box::new(Expression::Integer(4)),
-            }),
-        });
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(2)),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::BinaryOp {
+                    left: Box::new(Expression::Integer(3)),
+                    op: BinaryOperator::Multiply,
+                    right: Box::new(Expression::Integer(4)),
+                }),
+            }
+        );
     }
 
     #[test]
@@ -1479,11 +1739,14 @@ mod tests {
             Token::Separator(')'),
         ];
         let expr = parse_expression(&tokens).unwrap();
-        assert_eq!(expr, Expression::BinaryOp {
-            left: Box::new(Expression::Integer(2)),
-            op: BinaryOperator::Add,
-            right: Box::new(Expression::Integer(3)),
-        });
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(Expression::Integer(2)),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::Integer(3)),
+            }
+        );
     }
 
     #[test]
@@ -1496,24 +1759,27 @@ mod tests {
             Token::Separator(')'),
         ];
         let expr = parse_expression(&tokens).unwrap();
-        assert_eq!(expr, Expression::FunctionCall {
-            name: "SIN".to_string(),
-            args: vec![Expression::Integer(45)],
-        });
+        assert_eq!(
+            expr,
+            Expression::FunctionCall {
+                name: "SIN".to_string(),
+                args: vec![Expression::Integer(45)],
+            }
+        );
     }
 
     #[test]
     fn test_parse_unary_minus() {
         // RED: Parse "-5"
-        let tokens = vec![
-            Token::Operator('-'),
-            Token::Integer(5),
-        ];
+        let tokens = vec![Token::Operator('-'), Token::Integer(5)];
         let expr = parse_expression(&tokens).unwrap();
-        assert_eq!(expr, Expression::UnaryOp {
-            op: UnaryOperator::Minus,
-            operand: Box::new(Expression::Integer(5)),
-        });
+        assert_eq!(
+            expr,
+            Expression::UnaryOp {
+                op: UnaryOperator::Minus,
+                operand: Box::new(Expression::Integer(5)),
+            }
+        );
     }
 
     // TDD Tests for statement parsing
@@ -1524,10 +1790,13 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("PRINT 42").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Print {
-            items: vec![PrintItem::Expression(Expression::Integer(42))],
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Print {
+                items: vec![PrintItem::Expression(Expression::Integer(42))],
+            }
+        );
     }
 
     #[test]
@@ -1536,10 +1805,15 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize(r#"PRINT "Hello""#).unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Print {
-            items: vec![PrintItem::Expression(Expression::String("Hello".to_string()))],
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String(
+                    "Hello".to_string()
+                ))],
+            }
+        );
     }
 
     #[test]
@@ -1548,11 +1822,14 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("A% = 42").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Assignment {
-            target: "A%".to_string(),
-            expression: Expression::Integer(42),
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Assignment {
+                target: "A%".to_string(),
+                expression: Expression::Integer(42),
+            }
+        );
     }
 
     #[test]
@@ -1561,11 +1838,14 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("LET B = 3.14").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Assignment {
-            target: "B".to_string(),
-            expression: Expression::Real(3.14),
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Assignment {
+                target: "B".to_string(),
+                expression: Expression::Real(3.14),
+            }
+        );
     }
 
     #[test]
@@ -1574,13 +1854,16 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("FOR I% = 1 TO 10").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::For {
-            variable: "I%".to_string(),
-            start: Expression::Integer(1),
-            end: Expression::Integer(10),
-            step: None,
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::For {
+                variable: "I%".to_string(),
+                start: Expression::Integer(1),
+                end: Expression::Integer(10),
+                step: None,
+            }
+        );
     }
 
     #[test]
@@ -1589,13 +1872,16 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("FOR I% = 10 TO 1 STEP -1").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::For {
-            variable: "I%".to_string(),
-            start: Expression::Integer(10),
-            end: Expression::Integer(1),
-            step: Some(Expression::Integer(-1)),
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::For {
+                variable: "I%".to_string(),
+                start: Expression::Integer(10),
+                end: Expression::Integer(1),
+                step: Some(Expression::Integer(-1)),
+            }
+        );
     }
 
     #[test]
@@ -1604,10 +1890,13 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("NEXT I%").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Next {
-            variables: vec!["I%".to_string()],
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Next {
+                variables: vec!["I%".to_string()],
+            }
+        );
     }
 
     #[test]
@@ -1616,10 +1905,8 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("GOTO 100").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Goto {
-            line_number: 100,
-        });
+
+        assert_eq!(stmt, Statement::Goto { line_number: 100 });
     }
 
     #[test]
@@ -1628,10 +1915,8 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("GOSUB 1000").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Gosub {
-            line_number: 1000,
-        });
+
+        assert_eq!(stmt, Statement::Gosub { line_number: 1000 });
     }
 
     #[test]
@@ -1640,8 +1925,46 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("RETURN").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
+
         assert_eq!(stmt, Statement::Return);
+    }
+
+    #[test]
+    fn test_parse_on_goto() {
+        // RED: Parse "ON X GOTO 100, 200, 300"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON X GOTO 100, 200, 300").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        match stmt {
+            Statement::OnGoto {
+                expression,
+                targets,
+            } => {
+                assert_eq!(expression, Expression::Variable("X".to_string()));
+                assert_eq!(targets, vec![100, 200, 300]);
+            }
+            _ => panic!("Expected OnGoto statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_on_gosub() {
+        // RED: Parse "ON Y% GOSUB 1000, 2000"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON Y% GOSUB 1000, 2000").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        match stmt {
+            Statement::OnGosub {
+                expression,
+                targets,
+            } => {
+                assert_eq!(expression, Expression::Variable("Y%".to_string()));
+                assert_eq!(targets, vec![1000, 2000]);
+            }
+            _ => panic!("Expected OnGosub statement"),
+        }
     }
 
     #[test]
@@ -1650,10 +1973,13 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("INPUT A%, B$").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Input {
-            variables: vec!["A%".to_string(), "B$".to_string()],
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Input {
+                variables: vec!["A%".to_string(), "B$".to_string()],
+            }
+        );
     }
 
     #[test]
@@ -1662,13 +1988,19 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("DIM A%(10), B(5, 5)").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Dim {
-            arrays: vec![
-                ("A%(".to_string(), vec![Expression::Integer(10)]),
-                ("B(".to_string(), vec![Expression::Integer(5), Expression::Integer(5)]),
-            ],
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Dim {
+                arrays: vec![
+                    ("A%(".to_string(), vec![Expression::Integer(10)]),
+                    (
+                        "B(".to_string(),
+                        vec![Expression::Integer(5), Expression::Integer(5)]
+                    ),
+                ],
+            }
+        );
     }
 
     #[test]
@@ -1677,24 +2009,27 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("END").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
+
         assert_eq!(stmt, Statement::End);
     }
-    
+
     #[test]
     fn test_parse_assignment_with_function() {
         // Test parsing "X% = ABS(-5)"
         use crate::tokenizer::tokenize;
         let line = tokenize("X% = ABS(-5)").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::Assignment {
-            target: "X%".to_string(),
-            expression: Expression::FunctionCall {
-                name: "ABS".to_string(),
-                args: vec![Expression::Integer(-5)],
-            },
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::Assignment {
+                target: "X%".to_string(),
+                expression: Expression::FunctionCall {
+                    name: "ABS".to_string(),
+                    args: vec![Expression::Integer(-5)],
+                },
+            }
+        );
     }
 
     #[test]
@@ -1703,18 +2038,21 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize(r#"IF X% > 10 THEN PRINT "Big""#).unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::If {
-            condition: Expression::BinaryOp {
-                left: Box::new(Expression::Variable("X%".to_string())),
-                op: BinaryOperator::GreaterThan,
-                right: Box::new(Expression::Integer(10)),
-            },
-            then_part: vec![Statement::Print {
-                items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
-            }],
-            else_part: None,
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::GreaterThan,
+                    right: Box::new(Expression::Integer(10)),
+                },
+                then_part: vec![Statement::Print {
+                    items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
+                }],
+                else_part: None,
+            }
+        );
     }
 
     #[test]
@@ -1723,16 +2061,19 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("IF A% = 0 THEN GOTO 100").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::If {
-            condition: Expression::BinaryOp {
-                left: Box::new(Expression::Variable("A%".to_string())),
-                op: BinaryOperator::Equal,
-                right: Box::new(Expression::Integer(0)),
-            },
-            then_part: vec![Statement::Goto { line_number: 100 }],
-            else_part: None,
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("A%".to_string())),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(Expression::Integer(0)),
+                },
+                then_part: vec![Statement::Goto { line_number: 100 }],
+                else_part: None,
+            }
+        );
     }
 
     #[test]
@@ -1741,20 +2082,25 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize(r#"IF X% > 10 THEN PRINT "Big" ELSE PRINT "Small""#).unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::If {
-            condition: Expression::BinaryOp {
-                left: Box::new(Expression::Variable("X%".to_string())),
-                op: BinaryOperator::GreaterThan,
-                right: Box::new(Expression::Integer(10)),
-            },
-            then_part: vec![Statement::Print {
-                items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
-            }],
-            else_part: Some(vec![Statement::Print {
-                items: vec![PrintItem::Expression(Expression::String("Small".to_string()))],
-            }]),
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::GreaterThan,
+                    right: Box::new(Expression::Integer(10)),
+                },
+                then_part: vec![Statement::Print {
+                    items: vec![PrintItem::Expression(Expression::String("Big".to_string()))],
+                }],
+                else_part: Some(vec![Statement::Print {
+                    items: vec![PrintItem::Expression(Expression::String(
+                        "Small".to_string()
+                    ))],
+                }]),
+            }
+        );
     }
 
     #[test]
@@ -1763,18 +2109,21 @@ mod tests {
         use crate::tokenizer::tokenize;
         let line = tokenize("IF X% < 5 THEN Y% = 0").unwrap();
         let stmt = parse_statement(&line).unwrap();
-        
-        assert_eq!(stmt, Statement::If {
-            condition: Expression::BinaryOp {
-                left: Box::new(Expression::Variable("X%".to_string())),
-                op: BinaryOperator::LessThan,
-                right: Box::new(Expression::Integer(5)),
-            },
-            then_part: vec![Statement::Assignment {
-                target: "Y%".to_string(),
-                expression: Expression::Integer(0),
-            }],
-            else_part: None,
-        });
+
+        assert_eq!(
+            stmt,
+            Statement::If {
+                condition: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::LessThan,
+                    right: Box::new(Expression::Integer(5)),
+                },
+                then_part: vec![Statement::Assignment {
+                    target: "Y%".to_string(),
+                    expression: Expression::Integer(0),
+                }],
+                else_part: None,
+            }
+        );
     }
 }

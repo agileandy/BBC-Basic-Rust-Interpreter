@@ -56,8 +56,8 @@
 - [x] GOTO - Unconditional jump to line number
 - [x] GOSUB - Call subroutine at line number
 - [x] RETURN - Return from GOSUB subroutine
-- [ ] ON...GOTO - Computed GOTO based on expression
-- [ ] ON...GOSUB - Computed GOSUB based on expression
+- [x] ON...GOTO - Computed GOTO based on expression
+- [x] ON...GOSUB - Computed GOSUB based on expression
 - [ ] ON ERROR - Error handler setup
 - [ ] ON ERROR OFF - Disable error handler
 
@@ -65,9 +65,9 @@
 - [x] DEF PROC - Define named procedure
 - [x] PROC - Call named procedure
 - [x] ENDPROC - End procedure definition
-- [ ] DEF FN - Define named function (returns value)
-- [ ] FN - Call named function
-- [ ] LOCAL - Declare local variables in PROC/FN
+- [x] DEF FN - Define named function (returns value)
+- [x] FN - Call named function
+- [x] LOCAL - Declare local variables in PROC/FN
 - [ ] RETURN (expression) - Return value from function
 
 ### Program Control
@@ -296,9 +296,9 @@
 - [x] Basic math and string functions
 
 ### Medium Priority (Enhanced Functionality)
-- [ ] User-defined functions (DEF FN)
-- [ ] LOCAL variables
-- [ ] ON GOTO/GOSUB
+- [x] User-defined functions (DEF FN)
+- [x] LOCAL variables
+- [x] ON GOTO/GOSUB
 - [ ] File I/O (OPENIN/OPENOUT/PRINT#/INPUT#)
 - [ ] Error handling (ON ERROR/ERL/ERR)
 - [ ] Missing operators (MOD/DIV/^)
