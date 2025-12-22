@@ -69,11 +69,13 @@ impl Executor {
             Statement::Goto { line_number } => {
                 self.execute_goto(*line_number)
             }
-            Statement::Gosub { line_number } => {
-                self.execute_gosub(*line_number)
+            Statement::Gosub { .. } => {
+                // GOSUB is handled as control flow in main.rs
+                Ok(())
             }
             Statement::Return => {
-                self.execute_return()
+                // RETURN is handled as control flow in main.rs
+                Ok(())
             }
             Statement::For { variable, start, end, step } => {
                 self.execute_for(variable, start, end, step.as_ref())
@@ -1128,6 +1130,17 @@ impl Executor {
             Ok(None)
         }
     }
+    
+    /// Push a return address onto the GOSUB stack
+    pub fn push_gosub_return(&mut self, line_number: u16) {
+        self.return_stack.push(line_number);
+    }
+    
+    /// Pop a return address from the GOSUB stack
+    pub fn pop_gosub_return(&mut self) -> Result<u16> {
+        self.return_stack.pop()
+            .ok_or(BBCBasicError::BadCall)
+    }
 }
 
 impl Default for Executor {
@@ -1339,40 +1352,9 @@ mod tests {
         executor.execute_statement(&stmt).unwrap();
     }
     
-    #[test]
-    fn test_gosub_return() {
-        // RED: Test GOSUB/RETURN sequence
-        let mut executor = Executor::new();
-        
-        // Initially, return stack should be empty
-        assert!(executor.return_stack.is_empty());
-        
-        // Execute GOSUB 1000
-        let gosub = Statement::Gosub { line_number: 1000 };
-        executor.execute_statement(&gosub).unwrap();
-        
-        // Return stack should have one entry
-        assert_eq!(executor.return_stack.len(), 1);
-        
-        // Execute RETURN
-        let return_stmt = Statement::Return;
-        executor.execute_statement(&return_stmt).unwrap();
-        
-        // Return stack should be empty again
-        assert!(executor.return_stack.is_empty());
-    }
-    
-    #[test]
-    fn test_return_without_gosub() {
-        // RED: Test RETURN without GOSUB should error
-        let mut executor = Executor::new();
-        let stmt = Statement::Return;
-        
-        // Should return an error
-        let result = executor.execute_statement(&stmt);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BBCBasicError::BadCall));
-    }
+    // OLD TESTS REMOVED: test_gosub_return and test_return_without_gosub
+    // GOSUB/RETURN are now handled as control flow in main.rs, not in executor
+    // New tests: test_gosub_return_call_stack and test_gosub_return_nested
     
     #[test]
     fn test_goto_statement() {
@@ -2326,6 +2308,56 @@ mod tests {
         // ESC[2J clears screen, ESC[H moves cursor to home
         assert!(executor.output.contains("\x1b[2J\x1b[H"), 
                "CLS should output ANSI clear screen sequence");
+    }
+    
+    #[test]
+    fn test_gosub_return_call_stack() {
+        // RED: Test GOSUB/RETURN properly saves and restores execution position
+        let mut executor = Executor::new();
+        
+        // Simulate:
+        // 10 X% = 1
+        // 20 GOSUB 100    (should save line 20 for return)
+        // 30 X% = 3
+        // 100 X% = 2
+        // 110 RETURN      (should return to line AFTER 20, which is 30)
+        
+        // Push return address for line 20
+        executor.push_gosub_return(20);
+        
+        // Verify return address was saved
+        assert_eq!(executor.return_stack.len(), 1);
+        
+        // Pop return address
+        let return_line = executor.pop_gosub_return().unwrap();
+        
+        // Should return to line 20 (caller will advance to next line)
+        assert_eq!(return_line, 20, "RETURN should pop the line number that called GOSUB");
+        
+        // Stack should be empty now
+        assert_eq!(executor.return_stack.len(), 0);
+    }
+    
+    #[test]
+    fn test_gosub_return_nested() {
+        // RED: Test nested GOSUB/RETURN
+        let mut executor = Executor::new();
+        
+        // Simulate:
+        // 10 GOSUB 100
+        // 20 END
+        // 100 GOSUB 200
+        // 110 RETURN
+        // 200 RETURN
+        
+        executor.push_gosub_return(10);
+        executor.push_gosub_return(100);
+        
+        // First RETURN should go back to 100
+        assert_eq!(executor.pop_gosub_return().unwrap(), 100);
+        
+        // Second RETURN should go back to 10
+        assert_eq!(executor.pop_gosub_return().unwrap(), 10);
     }
 }
 
