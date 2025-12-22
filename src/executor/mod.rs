@@ -962,6 +962,26 @@ impl Executor {
                 let handle = self.eval_integer(&args[0])?;
                 self.check_eof(handle)
             }
+            "TRUE" => {
+                // TRUE constant = -1 (BBC BASIC convention)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "TRUE takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(-1)
+            }
+            "FALSE" => {
+                // FALSE constant = 0 (BBC BASIC convention)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "FALSE takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(0)
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
             | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -2633,6 +2653,25 @@ mod tests {
 
         let result = executor.eval_real(&pi_expr).unwrap();
         assert!((result - std::f64::consts::PI).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_true_false_constants() {
+        // RED: Test TRUE = -1, FALSE = 0 (BBC BASIC convention)
+        let mut executor = Executor::new();
+
+        let true_expr = Expression::FunctionCall {
+            name: "TRUE".to_string(),
+            args: vec![],
+        };
+
+        let false_expr = Expression::FunctionCall {
+            name: "FALSE".to_string(),
+            args: vec![],
+        };
+
+        assert_eq!(executor.eval_integer(&true_expr).unwrap(), -1);
+        assert_eq!(executor.eval_integer(&false_expr).unwrap(), 0);
     }
 
     #[test]
