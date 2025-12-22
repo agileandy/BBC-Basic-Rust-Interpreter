@@ -20,6 +20,7 @@ pub use tokenizer::{Token, TokenizedLine};
 pub use variables::{Variable, VarType};
 pub use parser::{Statement, Expression, BinaryOperator, UnaryOperator};
 pub use memory::MemoryManager;
+pub use program::ProgramStore;
 pub use crate::error::{BBCBasicError, Result};
 
 /// Core error handling types for the BBC BASIC interpreter

@@ -522,6 +522,21 @@ impl Executor {
             .map(|s| s.to_string())
             .ok_or_else(|| BBCBasicError::NoSuchVariable(name.to_string()))
     }
+    
+    /// Check if the last NEXT caused a loop to continue (not complete)
+    /// Returns Some(line_number) if should loop back, None if loop completed
+    pub fn should_loop_back(&self) -> Option<u16> {
+        // If there are active FOR loops, return the line number of the most recent one
+        // This will be called after execute_next to determine if we should jump back
+        self.for_loops.last().map(|(_, _, _, line)| *line)
+    }
+    
+    /// Set the line number for a FOR loop (called when FOR is executed)
+    pub fn set_for_loop_line(&mut self, line_number: u16) {
+        if let Some(loop_state) = self.for_loops.last_mut() {
+            loop_state.3 = line_number;
+        }
+    }
 }
 
 impl Default for Executor {
