@@ -400,13 +400,26 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                 // Parse an expression
                 let start_pos = pos;
                 let mut end_pos = pos;
+                let mut paren_depth = 0;
                 
-                // Find end of expression (stop at separator or end)
+                // Find end of expression (stop at separator or end, but respect parentheses)
                 while end_pos < tokens.len() {
-                    if matches!(tokens[end_pos], Token::Separator(';') | Token::Separator(',')) {
-                        break;
+                    match &tokens[end_pos] {
+                        Token::Separator('(') => {
+                            paren_depth += 1;
+                            end_pos += 1;
+                        }
+                        Token::Separator(')') => {
+                            paren_depth -= 1;
+                            end_pos += 1;
+                        }
+                        Token::Separator(';') | Token::Separator(',') if paren_depth == 0 => {
+                            break;
+                        }
+                        _ => {
+                            end_pos += 1;
+                        }
                     }
-                    end_pos += 1;
                 }
                 
                 if end_pos > start_pos {
