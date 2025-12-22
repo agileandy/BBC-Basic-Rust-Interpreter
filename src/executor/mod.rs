@@ -76,8 +76,12 @@ pub struct Executor {
     while_stack: Vec<u16>,
     // DATA storage: stores all DATA values in program order
     data_values: Vec<DataValue>,
+    // DATA line numbers: tracks which line each DATA value came from (parallel to data_values)
+    data_line_numbers: Vec<Option<u16>>,
     // DATA pointer: current index in data_values
     data_pointer: usize,
+    // Current line number being executed (for DATA tracking)
+    current_line: Option<u16>,
     // Random number generator for RND function (wrapped in RefCell for interior mutability)
     rng: RefCell<rand::rngs::ThreadRng>,
     // Procedure definitions: name -> (line_number, params)
@@ -110,7 +114,9 @@ impl Executor {
             repeat_stack: Vec::new(),
             while_stack: Vec::new(),
             data_values: Vec::new(),
+            data_line_numbers: Vec::new(),
             data_pointer: 0,
+            current_line: None,
             rng: RefCell::new(rand::thread_rng()),
             procedures: HashMap::new(),
             functions: HashMap::new(),
@@ -122,6 +128,11 @@ impl Executor {
             #[cfg(test)]
             output: String::new(),
         }
+    }
+
+    /// Set the current line number (for tests and program execution tracking)
+    pub fn set_line_number(&mut self, line_number: Option<u16>) {
+        self.current_line = line_number;
     }
 
     /// Execute a statement
@@ -589,8 +600,12 @@ impl Executor {
 
     /// Execute DATA statement - stores data values for READ
     fn execute_data(&mut self, values: &[DataValue]) -> Result<()> {
-        // DATA statements just append values to the data pool
-        self.data_values.extend(values.iter().cloned());
+        // DATA statements append values to the data pool
+        // Track which line each value came from
+        for value in values {
+            self.data_values.push(value.clone());
+            self.data_line_numbers.push(self.current_line);
+        }
         Ok(())
     }
 
@@ -598,7 +613,10 @@ impl Executor {
     /// This is used to collect all DATA statements before program execution begins
     pub fn collect_data(&mut self, statement: &Statement) -> Result<()> {
         if let Statement::Data { values } = statement {
-            self.data_values.extend(values.iter().cloned());
+            for value in values {
+                self.data_values.push(value.clone());
+                self.data_line_numbers.push(self.current_line);
+            }
         }
         Ok(())
     }
@@ -607,6 +625,7 @@ impl Executor {
     /// Called at the start of RUN to prepare for fresh program execution
     pub fn reset_data(&mut self) {
         self.data_values.clear();
+        self.data_line_numbers.clear();
         self.data_pointer = 0;
     }
 
@@ -656,10 +675,26 @@ impl Executor {
     }
 
     /// Execute RESTORE statement - resets data pointer
-    fn execute_restore(&mut self, _line_number: Option<u16>) -> Result<()> {
-        // For now, just reset to beginning
-        // TODO: Support RESTORE to specific line number
-        self.data_pointer = 0;
+    fn execute_restore(&mut self, line_number: Option<u16>) -> Result<()> {
+        if let Some(target_line) = line_number {
+            // Find the first DATA value at or after the target line
+            for (i, data_line) in self.data_line_numbers.iter().enumerate() {
+                if let Some(line) = data_line {
+                    if *line >= target_line {
+                        self.data_pointer = i;
+                        return Ok(());
+                    }
+                }
+            }
+            // If no DATA found at or after target line, error
+            return Err(BBCBasicError::SyntaxError {
+                message: format!("No DATA at line {}", target_line),
+                line: None,
+            });
+        } else {
+            // No line number: reset to beginning
+            self.data_pointer = 0;
+        }
         Ok(())
     }
 
@@ -3264,6 +3299,57 @@ mod tests {
         // After RESTORE, should read from beginning again
         assert_eq!(executor.get_variable_int("C%").unwrap(), 10);
         assert_eq!(executor.get_variable_int("D%").unwrap(), 20);
+    }
+
+    #[test]
+    fn test_restore_with_line_number() {
+        // RED: Test RESTORE line_number jumps to specific DATA statement
+        let mut executor = Executor::new();
+
+        // Simulate:
+        // 10 DATA 100, 200
+        // 20 DATA 300, 400
+        // 30 READ A%, B%
+        // 40 RESTORE 20
+        // 50 READ C%, D%
+
+        // Line 10: DATA 100, 200
+        executor.set_line_number(Some(10));
+        let data_stmt1 = Statement::Data {
+            values: vec![DataValue::Integer(100), DataValue::Integer(200)],
+        };
+        executor.execute_statement(&data_stmt1).unwrap();
+
+        // Line 20: DATA 300, 400
+        executor.set_line_number(Some(20));
+        let data_stmt2 = Statement::Data {
+            values: vec![DataValue::Integer(300), DataValue::Integer(400)],
+        };
+        executor.execute_statement(&data_stmt2).unwrap();
+
+        // READ A%, B% (should get 100, 200)
+        let read_stmt1 = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string()],
+        };
+        executor.execute_statement(&read_stmt1).unwrap();
+
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 100);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 200);
+
+        // RESTORE 20 (jump to line 20's DATA)
+        let restore_stmt = Statement::Restore {
+            line_number: Some(20),
+        };
+        executor.execute_statement(&restore_stmt).unwrap();
+
+        // READ C%, D% (should get 300, 400 from line 20)
+        let read_stmt2 = Statement::Read {
+            variables: vec!["C%".to_string(), "D%".to_string()],
+        };
+        executor.execute_statement(&read_stmt2).unwrap();
+
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 300);
+        assert_eq!(executor.get_variable_int("D%").unwrap(), 400);
     }
 
     #[test]
