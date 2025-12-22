@@ -109,15 +109,21 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
     // This ensures READ can access DATA regardless of program flow (GOTO, etc.)
     executor.reset_data();
     
-    // First pass: collect all DATA statements
+    // First pass: collect all DATA statements and procedure definitions
+    executor.clear_procedures();
     for (line_number, line) in program.list() {
         let statement = parse_statement(line)
             .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
         
-        // Only collect DATA statements, don't execute anything yet
+        // Collect DATA statements
         if matches!(statement, bbc_basic_interpreter::Statement::Data { .. }) {
             executor.collect_data(&statement)
                 .map_err(|e| format!("Error collecting DATA at line {}: {:?}", line_number, e))?;
+        }
+        
+        // Collect procedure definitions
+        if let bbc_basic_interpreter::Statement::DefProc { name, params } = statement {
+            executor.define_procedure(name, line_number, params);
         }
     }
 
@@ -142,6 +148,8 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_next = matches!(statement, bbc_basic_interpreter::Statement::Next { .. });
         let is_repeat = matches!(statement, bbc_basic_interpreter::Statement::Repeat);
         let is_until = matches!(statement, bbc_basic_interpreter::Statement::Until { .. });
+        let is_proc_call = matches!(statement, bbc_basic_interpreter::Statement::ProcCall { .. });
+        let is_endproc = matches!(statement, bbc_basic_interpreter::Statement::EndProc);
 
         // Execute the statement
         executor.execute_statement(&statement)
@@ -182,6 +190,61 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
                 }
                 Err(_) => {
                     return Err("RETURN without GOSUB".to_string());
+                }
+            }
+        } else if is_proc_call {
+            // PROC call: get procedure definition, bind parameters, push return address, jump
+            if let bbc_basic_interpreter::Statement::ProcCall { name, args } = statement {
+                // Get procedure definition
+                let proc = executor.get_procedure(&name)
+                    .ok_or_else(|| format!("Procedure {} not defined", name))?;
+                
+                // Check parameter count
+                if args.len() != proc.params.len() {
+                    return Err(format!("Procedure {} expects {} parameters, got {}", 
+                        name, proc.params.len(), args.len()));
+                }
+                
+                // Clone the necessary data before borrowing executor mutably
+                let params_and_args: Vec<_> = proc.params.iter()
+                    .zip(args.iter())
+                    .map(|(p, a)| (p.clone(), a.clone()))
+                    .collect();
+                
+                // Bind arguments to parameters (as global variables)
+                for (param_name, arg_expr) in params_and_args {
+                    executor.execute_statement(&bbc_basic_interpreter::Statement::Assignment {
+                        target: param_name,
+                        expression: arg_expr,
+                    }).map_err(|e| format!("Error binding parameter: {:?}", e))?;
+                }
+                
+                // Push return address (current line number)
+                executor.push_gosub_return(line_number);
+                
+                // Jump to procedure line (need to get it again since we borrowed mutably)
+                let proc_line = executor.get_procedure(&name).unwrap().line_number;
+                if !program.goto_line(proc_line) {
+                    return Err(format!("Procedure {} line {} not found", name, proc_line));
+                }
+                
+                // Move to line AFTER DEF PROC (skip the definition line)
+                program.next_line();
+            }
+        } else if is_endproc {
+            // ENDPROC: pop return address and jump back (same as RETURN)
+            match executor.pop_gosub_return() {
+                Ok(return_line) => {
+                    // Jump back to the line that called PROC
+                    if program.goto_line(return_line) {
+                        // Move to the line AFTER the PROC call
+                        program.next_line();
+                    } else {
+                        return Err(format!("Return line {} not found", return_line));
+                    }
+                }
+                Err(_) => {
+                    return Err("ENDPROC without PROC call".to_string());
                 }
             }
         } else if is_for {

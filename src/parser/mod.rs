@@ -367,6 +367,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // ENDPROC statement
         Token::Keyword(0xE1) => Ok(Statement::EndProc),
         
+        // PROC call (PROC followed by identifier)
+        Token::Keyword(0xF2) => parse_proc_call(&tokens[1..], line.line_number),
+        
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
             line: line.line_number,
@@ -938,6 +941,88 @@ fn parse_def_proc(tokens: &[Token], line_number: Option<u16>) -> Result<Statemen
     };
     
     Ok(Statement::DefProc { name, params })
+}
+
+/// Parse PROC call: PROCname or PROCname(args)
+fn parse_proc_call(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected procedure name after PROC".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Extract procedure name
+    let name = match &tokens[0] {
+        Token::Identifier(n) => n.clone(),
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected identifier for procedure name".to_string(),
+            line: line_number,
+        })
+    };
+    
+    // Parse arguments if present
+    let args = if tokens.len() > 1 {
+        parse_argument_list(&tokens[1..], line_number)?
+    } else {
+        Vec::new()
+    };
+    
+    Ok(Statement::ProcCall { name, args })
+}
+
+/// Parse argument list: (expr1, expr2, ...)
+fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Expression>> {
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    // Expect opening parenthesis
+    if !matches!(tokens[0], Token::Operator('(')) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected ( after procedure name".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Find closing parenthesis
+    let close_pos = tokens.iter().position(|t| matches!(t, Token::Operator(')')))
+        .ok_or(BBCBasicError::SyntaxError {
+            message: "Expected ) after argument list".to_string(),
+            line: line_number,
+        })?;
+    
+    if close_pos == 1 {
+        // Empty argument list: ()
+        return Ok(Vec::new());
+    }
+    
+    // Parse comma-separated expressions between parentheses
+    let mut args = Vec::new();
+    let mut start = 1;
+    let mut depth = 0;
+    
+    for i in 1..close_pos {
+        match &tokens[i] {
+            Token::Operator('(') => depth += 1,
+            Token::Operator(')') => depth -= 1,
+            Token::Separator(',') if depth == 0 => {
+                // Parse expression from start to i
+                let expr = parse_expression(&tokens[start..i])?;
+                args.push(expr);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    
+    // Parse final expression
+    if start < close_pos {
+        let expr = parse_expression(&tokens[start..close_pos])?;
+        args.push(expr);
+    }
+    
+    Ok(args)
 }
 
 /// Parse parameter list: (param1, param2, ...)

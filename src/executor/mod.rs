@@ -8,6 +8,14 @@ use crate::variables::VariableStore;
 use crate::memory::MemoryManager;
 use rand::Rng;
 use std::cell::RefCell;
+use std::collections::HashMap;
+
+/// Procedure definition
+#[derive(Debug, Clone)]
+pub struct ProcedureDefinition {
+    pub line_number: u16,
+    pub params: Vec<String>,
+}
 
 /// BBC BASIC statement executor
 #[derive(Debug)]
@@ -26,6 +34,8 @@ pub struct Executor {
     data_pointer: usize,
     // Random number generator for RND function (wrapped in RefCell for interior mutability)
     rng: RefCell<rand::rngs::ThreadRng>,
+    // Procedure definitions: name -> (line_number, params)
+    procedures: HashMap<String, ProcedureDefinition>,
     // Output buffer (for testing)
     #[cfg(test)]
     output: String,
@@ -43,6 +53,7 @@ impl Executor {
             data_values: Vec::new(),
             data_pointer: 0,
             rng: RefCell::new(rand::thread_rng()),
+            procedures: HashMap::new(),
             #[cfg(test)]
             output: String::new(),
         }
@@ -111,6 +122,18 @@ impl Executor {
             }
             Statement::Cls => {
                 self.execute_cls()
+            }
+            Statement::DefProc { .. } => {
+                // DEF PROC is handled during procedure collection in main.rs
+                Ok(())
+            }
+            Statement::EndProc => {
+                // ENDPROC is handled as control flow in main.rs
+                Ok(())
+            }
+            Statement::ProcCall { .. } => {
+                // PROC calls are handled as control flow in main.rs
+                Ok(())
             }
             _ => {
                 // Other statements not implemented yet
@@ -1140,6 +1163,24 @@ impl Executor {
     pub fn pop_gosub_return(&mut self) -> Result<u16> {
         self.return_stack.pop()
             .ok_or(BBCBasicError::BadCall)
+    }
+    
+    /// Define a procedure
+    pub fn define_procedure(&mut self, name: String, line_number: u16, params: Vec<String>) {
+        self.procedures.insert(name, ProcedureDefinition {
+            line_number,
+            params,
+        });
+    }
+    
+    /// Get procedure definition
+    pub fn get_procedure(&self, name: &str) -> Option<&ProcedureDefinition> {
+        self.procedures.get(name)
+    }
+    
+    /// Clear all procedure definitions (used when loading new program)
+    pub fn clear_procedures(&mut self) {
+        self.procedures.clear();
     }
 }
 
@@ -2358,6 +2399,69 @@ mod tests {
         
         // Second RETURN should go back to 10
         assert_eq!(executor.pop_gosub_return().unwrap(), 10);
+    }
+    
+    #[test]
+    fn test_procedure_definition() {
+        // RED: Test defining a procedure
+        let mut executor = Executor::new();
+        
+        // Define a simple procedure
+        executor.define_procedure("greet".to_string(), 100, vec![]);
+        
+        // Should be able to retrieve it
+        let proc = executor.get_procedure("greet");
+        assert!(proc.is_some());
+        assert_eq!(proc.unwrap().line_number, 100);
+        assert_eq!(proc.unwrap().params.len(), 0);
+    }
+    
+    #[test]
+    fn test_procedure_definition_with_params() {
+        // RED: Test defining a procedure with parameters
+        let mut executor = Executor::new();
+        
+        // Define procedure with parameters
+        executor.define_procedure(
+            "add".to_string(), 
+            200, 
+            vec!["X".to_string(), "Y".to_string()]
+        );
+        
+        // Should be able to retrieve it
+        let proc = executor.get_procedure("add");
+        assert!(proc.is_some());
+        assert_eq!(proc.unwrap().line_number, 200);
+        assert_eq!(proc.unwrap().params, vec!["X", "Y"]);
+    }
+    
+    #[test]
+    fn test_procedure_not_found() {
+        // RED: Test getting undefined procedure
+        let executor = Executor::new();
+        
+        // Should return None for undefined procedure
+        assert!(executor.get_procedure("undefined").is_none());
+    }
+    
+    #[test]
+    fn test_clear_procedures() {
+        // RED: Test clearing all procedures
+        let mut executor = Executor::new();
+        
+        executor.define_procedure("proc1".to_string(), 100, vec![]);
+        executor.define_procedure("proc2".to_string(), 200, vec![]);
+        
+        // Both should exist
+        assert!(executor.get_procedure("proc1").is_some());
+        assert!(executor.get_procedure("proc2").is_some());
+        
+        // Clear all procedures
+        executor.clear_procedures();
+        
+        // Both should be gone
+        assert!(executor.get_procedure("proc1").is_none());
+        assert!(executor.get_procedure("proc2").is_none());
     }
 }
 
