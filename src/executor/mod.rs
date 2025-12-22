@@ -18,6 +18,8 @@ pub struct Executor {
     return_stack: Vec<u16>,
     // FOR loop state: (variable, end_value, step_value, loop_line)
     for_loops: Vec<(String, i32, i32, u16)>,
+    // REPEAT loop stack: stores line numbers of REPEAT statements
+    repeat_stack: Vec<u16>,
     // DATA storage: stores all DATA values in program order
     data_values: Vec<DataValue>,
     // DATA pointer: current index in data_values
@@ -37,6 +39,7 @@ impl Executor {
             memory: MemoryManager::new(),
             return_stack: Vec::new(),
             for_loops: Vec::new(),
+            repeat_stack: Vec::new(),
             data_values: Vec::new(),
             data_pointer: 0,
             rng: RefCell::new(rand::thread_rng()),
@@ -95,6 +98,14 @@ impl Executor {
             }
             Statement::Restore { line_number } => {
                 self.execute_restore(*line_number)
+            }
+            Statement::Repeat => {
+                // REPEAT is handled as control flow in main.rs
+                Ok(())
+            }
+            Statement::Until { .. } => {
+                // UNTIL is handled as control flow in main.rs
+                Ok(())
             }
             _ => {
                 // Other statements not implemented yet
@@ -1075,6 +1086,27 @@ impl Executor {
     pub fn set_for_loop_line(&mut self, line_number: u16) {
         if let Some(loop_state) = self.for_loops.last_mut() {
             loop_state.3 = line_number;
+        }
+    }
+    
+    /// Push a REPEAT line number onto the repeat stack
+    pub fn push_repeat(&mut self, line_number: u16) {
+        self.repeat_stack.push(line_number);
+    }
+    
+    /// Evaluate UNTIL condition and return the REPEAT line if we should loop back
+    pub fn check_until(&mut self, condition: &Expression) -> Result<Option<u16>> {
+        // Evaluate the condition
+        let result = self.eval_integer(condition)?;
+        
+        if result == 0 {
+            // Condition is false - loop back to REPEAT
+            // Return the REPEAT line number but keep it on stack (don't pop yet)
+            Ok(self.repeat_stack.last().copied())
+        } else {
+            // Condition is true - exit loop
+            self.repeat_stack.pop();
+            Ok(None)
         }
     }
 }
@@ -2205,6 +2237,62 @@ mod tests {
             assert!(as_int >= 1 && as_int <= 10, 
                    "RND(10) should return values 1-10, got {}", result);
         }
+    }
+    
+    #[test]
+    fn test_repeat_until_loop_helpers() {
+        // RED: Test REPEAT...UNTIL helper methods
+        use crate::parser::BinaryOperator;
+        let mut executor = Executor::new();
+        
+        // Simulate: 
+        // 10 X% = 0
+        // 20 REPEAT
+        // 30 X% = X% + 1
+        // 40 UNTIL X% = 5
+        
+        // Initialize X% = 0
+        let init_stmt = Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::Integer(0),
+        };
+        executor.execute_statement(&init_stmt).unwrap();
+        
+        // REPEAT at line 20
+        executor.push_repeat(20);
+        
+        // Loop several times
+        for expected in 1..=5 {
+            // X% = X% + 1
+            let increment_stmt = Statement::Assignment {
+                target: "X%".to_string(),
+                expression: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Integer(1)),
+                },
+            };
+            executor.execute_statement(&increment_stmt).unwrap();
+            
+            // UNTIL X% = 5
+            let condition = Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Integer(5)),
+            };
+            
+            let result = executor.check_until(&condition).unwrap();
+            
+            if expected < 5 {
+                // Should loop back
+                assert_eq!(result, Some(20), "Should loop back to REPEAT at line 20");
+            } else {
+                // Should exit loop
+                assert_eq!(result, None, "Should exit loop when X% = 5");
+            }
+        }
+        
+        assert_eq!(executor.get_variable_int("X%").unwrap(), 5);
     }
 }
 

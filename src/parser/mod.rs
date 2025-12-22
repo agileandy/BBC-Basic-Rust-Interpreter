@@ -166,6 +166,12 @@ pub enum Statement {
     Restore {
         line_number: Option<u16>,
     },
+    /// REPEAT statement - starts a REPEAT...UNTIL loop
+    Repeat,
+    /// UNTIL statement - ends a REPEAT...UNTIL loop
+    Until {
+        condition: Expression,
+    },
     /// Empty statement
     Empty,
 }
@@ -336,6 +342,12 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         
         // RESTORE statement
         Token::Keyword(0xF7) => parse_restore_statement(&tokens[1..], line.line_number),
+        
+        // REPEAT statement
+        Token::Keyword(0xF5) => Ok(Statement::Repeat),
+        
+        // UNTIL statement
+        Token::Keyword(0xFD) => parse_until_statement(&tokens[1..], line.line_number),
         
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
@@ -833,6 +845,21 @@ fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Resul
             line: None,
         })
     }
+}
+
+/// Parse UNTIL statement
+/// Supports: UNTIL condition
+fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "UNTIL requires a condition".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Parse the condition expression
+    let condition = parse_expression(tokens)?;
+    Ok(Statement::Until { condition })
 }
 
 /// Parse IF statement
