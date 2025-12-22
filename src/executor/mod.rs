@@ -142,8 +142,8 @@ impl Executor {
                 self.execute_assignment(target, expression)
             }
             Statement::Print { items } => self.execute_print(items),
-            Statement::End | Statement::Stop => {
-                // END and STOP both stop execution
+            Statement::End | Statement::Stop | Statement::Quit => {
+                // END, STOP, and QUIT all stop execution
                 // In a full program, this would signal the interpreter to halt
                 Ok(())
             }
