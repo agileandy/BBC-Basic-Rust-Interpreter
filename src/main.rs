@@ -63,6 +63,59 @@ fn main() {
             continue;
         }
 
+        // SAVE command
+        let input_upper = input.to_uppercase();
+        if input_upper.starts_with("SAVE ") {
+            match extract_filename(input) {
+                Ok(filename) => {
+                    if let Err(e) = save_program(&program, &filename) {
+                        println!("Error: {}", e);
+                    }
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+            continue;
+        }
+
+        // LOAD command
+        if input_upper.starts_with("LOAD ") {
+            match extract_filename(input) {
+                Ok(filename) => {
+                    if let Err(e) = load_program(&mut program, &filename) {
+                        println!("Error: {}", e);
+                    }
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+            continue;
+        }
+
+        // CHAIN command (LOAD and RUN)
+        if input_upper.starts_with("CHAIN ") {
+            match extract_filename(input) {
+                Ok(filename) => {
+                    match load_program(&mut program, &filename) {
+                        Ok(_) => {
+                            if let Err(e) = run_program(&mut executor, &mut program) {
+                                println!("Error: {}", e);
+                            }
+                        }
+                        Err(e) => println!("Error: {}", e),
+                    }
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+            continue;
+        }
+
+        // *CAT command (catalog files)
+        if input.trim() == "*CAT" || input.trim().eq_ignore_ascii_case("*cat") {
+            if let Err(e) = catalog_files() {
+                println!("Error: {}", e);
+            }
+            continue;
+        }
+
         // Process the line (either store or execute)
         match process_line(&mut executor, &mut program, input) {
             Ok(()) => {},
@@ -315,6 +368,158 @@ fn list_program(program: &ProgramStore) {
     }
 }
 
+/// Extract filename from command like SAVE "filename" or LOAD "filename"
+fn extract_filename(input: &str) -> Result<String, String> {
+    // Split on first space to get command and rest
+    let parts: Vec<&str> = input.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return Err("Expected filename".to_string());
+    }
+    
+    let filename = parts[1].trim();
+    
+    // Remove quotes if present
+    let filename = if filename.starts_with('"') && filename.ends_with('"') {
+        &filename[1..filename.len()-1]
+    } else {
+        filename
+    };
+    
+    if filename.is_empty() {
+        return Err("Filename cannot be empty".to_string());
+    }
+    
+    Ok(filename.to_string())
+}
+
+/// Save current program to a .bbas file
+fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
+    if program.is_empty() {
+        return Err("No program to save".to_string());
+    }
+    
+    // Add .bbas extension if not present
+    let path = if filename.ends_with(".bbas") {
+        filename.to_string()
+    } else {
+        format!("{}.bbas", filename)
+    };
+    
+    // Open file for writing
+    let mut file = std::fs::File::create(&path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+    
+    // Write each line (detokenized)
+    use std::io::Write;
+    for (line_number, line) in program.list() {
+        let text = detokenize(line)
+            .map_err(|e| format!("Failed to detokenize line {}: {:?}", line_number, e))?;
+        writeln!(file, "{}", text)
+            .map_err(|e| format!("Failed to write line {}: {}", line_number, e))?;
+    }
+    
+    println!("Saved to {}", path);
+    Ok(())
+}
+
+/// Load program from a .bbas file
+fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String> {
+    // Add .bbas extension if not present
+    let path = if filename.ends_with(".bbas") {
+        filename.to_string()
+    } else {
+        format!("{}.bbas", filename)
+    };
+    
+    // Read file
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    
+    // Clear current program (like NEW command)
+    program.clear();
+    // Note: We don't reset executor state - variables persist across LOAD
+    // This matches BBC BASIC behavior where LOAD doesn't clear variables
+    
+    // Parse and add each line
+    for (line_num, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue; // Skip empty lines
+        }
+        
+        // Tokenize and store
+        let tokenized = tokenize(line)
+            .map_err(|e| format!("Parse error at line {}: {:?}", line_num + 1, e))?;
+        
+        if tokenized.line_number.is_some() {
+            program.store_line(tokenized);
+        } else {
+            return Err(format!("Line {} has no line number: {}", line_num + 1, line));
+        }
+    }
+    
+    println!("Loaded from {}", path);
+    Ok(())
+}
+
+/// Catalog all .bbas files in current directory
+fn catalog_files() -> Result<(), String> {
+    let paths = std::fs::read_dir(".")
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    
+    println!("\nCatalog:");
+    println!("{:<30} {:>10}  {}", "Filename", "Size", "Modified");
+    println!("{}", "-".repeat(60));
+    
+    let mut count = 0;
+    let mut entries: Vec<_> = paths.collect();
+    entries.sort_by_key(|e| {
+        e.as_ref()
+            .ok()
+            .and_then(|e| e.file_name().to_str().map(|s| s.to_lowercase()))
+    });
+    
+    for path in entries {
+        let path = path.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let filename = path.file_name();
+        let filename_str = filename.to_string_lossy();
+        
+        if filename_str.ends_with(".bbas") {
+            let metadata = path.metadata()
+                .map_err(|e| format!("Failed to read metadata: {}", e))?;
+            
+            let size = metadata.len();
+            let modified = metadata.modified()
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .map(|d| {
+                    let secs = d.as_secs();
+                    if secs < 60 {
+                        format!("{}s ago", secs)
+                    } else if secs < 3600 {
+                        format!("{}m ago", secs / 60)
+                    } else if secs < 86400 {
+                        format!("{}h ago", secs / 3600)
+                    } else {
+                        format!("{}d ago", secs / 86400)
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            
+            println!("{:<30} {:>10}  {}", filename_str, size, modified);
+            count += 1;
+        }
+    }
+    
+    if count == 0 {
+        println!("(no .bbas files found)");
+    } else {
+        println!("\n{} file(s)", count);
+    }
+    
+    Ok(())
+}
+
 fn print_help() {
     println!("BBC BASIC Interpreter - Available Commands:");
     println!();
@@ -322,9 +527,15 @@ fn print_help() {
     println!("  10 PRINT \"HELLO\"        - Store program line");
     println!("  20 GOTO 10               - Store line with GOTO");
     println!("  10                       - Delete line 10");
+    println!();
+    println!("Immediate Commands:");
     println!("  LIST                     - List the program");
     println!("  RUN                      - Run the stored program");
     println!("  NEW                      - Clear the program");
+    println!("  SAVE \"filename\"          - Save program to filename.bbas");
+    println!("  LOAD \"filename\"          - Load program from filename.bbas");
+    println!("  CHAIN \"filename\"         - Load and run program");
+    println!("  *CAT                     - List all .bbas files");
     println!();
     println!("Immediate Mode (no line numbers):");
     println!("  A% = 42                  - Execute immediately");
@@ -342,6 +553,9 @@ fn print_help() {
     println!("  GOTO 100                 - Jump to line");
     println!("  GOSUB 1000               - Call subroutine");
     println!("  RETURN                   - Return from subroutine");
+    println!("  DEF PROC name(params)    - Define procedure");
+    println!("  PROC name(args)          - Call procedure");
+    println!("  ENDPROC                  - End procedure");
     println!("  REM comment              - Comment");
     println!("  END                      - End program");
     println!();
@@ -350,6 +564,8 @@ fn print_help() {
     println!("  20 GOTO 10");
     println!("  LIST");
     println!("  RUN");
+    println!("  SAVE \"myprog\"");
+    println!("  LOAD \"myprog\"");
     println!();
     println!("Variable Types:");
     println!("  A%  - Integer variable");
