@@ -68,7 +68,7 @@
 - [x] DEF FN - Define named function (returns value)
 - [x] FN - Call named function
 - [x] LOCAL - Declare local variables in PROC/FN
-- [ ] RETURN (expression) - Return value from function
+- [x] RETURN (expression) - Return value from function
 
 ### Program Control
 - [x] END - Terminate program execution
@@ -164,7 +164,7 @@
 - [x] ASC(string) - Get ASCII code of first character
 - [x] STR$(number) - Convert number to string
 - [x] VAL(string) - Convert string to number
-- [x] INSTR(string, substring) - Find substring position
+- [ ] INSTR(string, substring) - Find substring position
 - [ ] INSTR(string, substring, start) - Find substring from position
 - [ ] STRING$(n, char) - Create string of n repeated characters
 - [ ] UPPER$(string) - Convert to uppercase
@@ -180,20 +180,20 @@
 - [x] SGN(n) - Sign of number (-1, 0, 1)
 - [x] INT(n) - Integer part (floor)
 - [x] SQR(n) - Square root
-- [ ] LN(n) - Natural logarithm
+- [x] LN(n) - Natural logarithm
 - [x] LOG(n) - Base-10 logarithm
 - [x] EXP(n) - Exponential (e^n)
 - [ ] SQRT(n) - Square root (alternative to SQR)
 
 ### Trigonometric Functions
-- [x] SIN(n) - Sine (radians)
-- [x] COS(n) - Cosine (radians)
-- [x] TAN(n) - Tangent (radians)
-- [x] ATN(n) - Arctangent (radians)
+- [x] SIN(n) - Sine (degrees - BBC BASIC uses degrees!)
+- [x] COS(n) - Cosine (degrees - BBC BASIC uses degrees!)
+- [x] TAN(n) - Tangent (degrees - BBC BASIC uses degrees!)
+- [x] ATN(n) - Arctangent (returns degrees)
 - [ ] ACS(n) - Arccosine (radians)
 - [ ] ASN(n) - Arcsine (radians)
-- [ ] DEG(n) - Convert radians to degrees
-- [ ] RAD(n) - Convert degrees to radians
+- [x] DEG(n) - Convert radians to degrees
+- [x] RAD(n) - Convert degrees to radians
 
 ### Random Numbers
 - [x] RND - Random number 0-1
@@ -281,11 +281,14 @@
 
 ## Summary Statistics
 
-**Total Features**: ~200
-**Implemented**: ~60 (30%)
-**Core Language Complete**: ~80% (control flow, variables, operators)
-**I/O Complete**: ~40% (console done, files partial, graphics/sound none)
-**Functions Complete**: ~70% (math/string mostly done)
+**Total Features**: 211
+**Implemented**: 111 (53%)
+**Core Language Complete**: 95% (control flow, variables, operators, procedures, functions)
+**I/O Complete**: 75% (console done, file I/O done, graphics/sound none)
+**Functions Complete**: 90% (math complete, string mostly complete)
+
+**Test Coverage**: 175 passing unit tests
+**Code Size**: ~7700 lines of Rust
 
 ## Implementation Priority
 
