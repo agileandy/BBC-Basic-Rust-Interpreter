@@ -613,8 +613,9 @@ impl Executor {
                         line: None,
                     });
                 }
-                let val = self.eval_real(&args[0])?;
-                Ok(val.sin())
+                let degrees = self.eval_real(&args[0])?;
+                let radians = degrees.to_radians();
+                Ok(radians.sin())
             }
             "COS" => {
                 if args.len() != 1 {
@@ -623,8 +624,9 @@ impl Executor {
                         line: None,
                     });
                 }
-                let val = self.eval_real(&args[0])?;
-                Ok(val.cos())
+                let degrees = self.eval_real(&args[0])?;
+                let radians = degrees.to_radians();
+                Ok(radians.cos())
             }
             "TAN" => {
                 if args.len() != 1 {
@@ -633,8 +635,9 @@ impl Executor {
                         line: None,
                     });
                 }
-                let val = self.eval_real(&args[0])?;
-                Ok(val.tan())
+                let degrees = self.eval_real(&args[0])?;
+                let radians = degrees.to_radians();
+                Ok(radians.tan())
             }
             "ATN" => {
                 if args.len() != 1 {
@@ -644,7 +647,8 @@ impl Executor {
                     });
                 }
                 let val = self.eval_real(&args[0])?;
-                Ok(val.atan())
+                let radians = val.atan();
+                Ok(radians.to_degrees())
             }
             "SQR" => {
                 if args.len() != 1 {
@@ -1352,24 +1356,15 @@ mod tests {
     
     #[test]
     fn test_sin_function() {
-        // RED: Test SIN(0) = 0, SIN(PI/2) = 1
+        // RED: Test SIN(90) = 1 (BBC BASIC uses degrees)
         let mut executor = Executor::new();
         
-        let sin_expr = Expression::FunctionCall {
+        let sin_90 = Expression::FunctionCall {
             name: "SIN".to_string(),
-            args: vec![Expression::Real(0.0)],
+            args: vec![Expression::Real(90.0)],
         };
         
-        let result = executor.eval_real(&sin_expr).unwrap();
-        assert!((result - 0.0).abs() < 0.0001);
-        
-        // SIN(π/2) ≈ 1
-        let sin_pi_2 = Expression::FunctionCall {
-            name: "SIN".to_string(),
-            args: vec![Expression::Real(std::f64::consts::FRAC_PI_2)],
-        };
-        
-        let result = executor.eval_real(&sin_pi_2).unwrap();
+        let result = executor.eval_real(&sin_90).unwrap();
         assert!((result - 1.0).abs() < 0.0001);
     }
     
