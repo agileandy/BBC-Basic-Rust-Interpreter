@@ -4,14 +4,17 @@ A Rust implementation of the BBC BASIC language as found on the BBC Micro Model 
 
 ## Features
 
+- ✅ **Program Storage**: Store and execute complete programs with line numbers
 - ✅ **Tokenizer**: Converts BBC BASIC source to internal token representation
 - ✅ **Parser**: Parses tokenized lines into an Abstract Syntax Tree (AST)
 - ✅ **Executor**: Executes parsed statements with full variable and control flow support
+- ✅ **Dual Mode**: Immediate execution OR program storage
 - ✅ **32K RAM Emulation**: Authentic BBC Micro memory model
 - ✅ **Variable Types**: Integer (%), Real (float), and String ($)
 - ✅ **Arrays**: Multi-dimensional arrays with DIM statement
 - ✅ **Control Flow**: FOR...NEXT loops, GOTO, GOSUB/RETURN
 - ✅ **I/O**: PRINT and INPUT statements
+- ✅ **Program Commands**: RUN, LIST, NEW
 
 ## Quick Start
 
@@ -30,10 +33,36 @@ cargo run --release
 
 ### Interactive REPL
 
+The interpreter supports two modes:
+
+**Program Mode (with line numbers):**
 ```
 BBC BASIC Interpreter v0.1.0
 Type 'EXIT' to quit, 'HELP' for help
 
+> 10 FOR I% = 1 TO 5
+> 20 PRINT I%
+> 30 NEXT I%
+> 40 END
+> LIST
+10 FOR I% = 1 TO 5
+20 PRINT I%
+30 NEXT I%
+40 END
+> RUN
+1
+2
+3
+4
+5
+> NEW
+Program cleared
+> EXIT
+Goodbye!
+```
+
+**Immediate Mode (no line numbers):**
+```
 > A% = 42
 > PRINT "The answer is"; A%
 The answer is42
@@ -45,8 +74,6 @@ The answer is42
 3
 4
 5
-> EXIT
-Goodbye!
 ```
 
 ## Supported Statements
@@ -165,14 +192,14 @@ src/
 
 This is v0.1.0 with core functionality. Not yet implemented:
 
-- Program storage with line numbers
 - IF...THEN...ELSE conditionals
-- Array element access
+- Array element access (arrays can be dimensioned but not accessed)
 - Built-in functions (SIN, COS, ABS, etc.)
 - Graphics commands (PLOT, DRAW, MOVE, etc.)
 - Sound commands (SOUND, ENVELOPE)
 - File I/O (LOAD, SAVE, OPENIN, OPENOUT)
 - PROC/FN user-defined procedures/functions
+- RETURN from GOSUB (stack is tracked but no jump-back implemented)
 
 ## Examples
 
