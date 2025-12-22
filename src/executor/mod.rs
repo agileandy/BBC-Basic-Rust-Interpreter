@@ -73,6 +73,9 @@ impl Executor {
             Statement::Dim { arrays } => {
                 self.execute_dim(arrays)
             }
+            Statement::If { condition, then_part, else_part } => {
+                self.execute_if(condition, then_part, else_part.as_ref())
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -386,6 +389,31 @@ impl Executor {
         Ok(())
     }
     
+    /// Execute an IF statement
+    fn execute_if(
+        &mut self,
+        condition: &Expression,
+        then_part: &[Statement],
+        else_part: Option<&Vec<Statement>>,
+    ) -> Result<()> {
+        // Evaluate condition - in BBC BASIC, 0 is false, non-zero is true
+        let condition_value = self.eval_integer(condition)?;
+        
+        if condition_value != 0 {
+            // Condition is true: execute then_part
+            for stmt in then_part {
+                self.execute_statement(stmt)?;
+            }
+        } else if let Some(else_statements) = else_part {
+            // Condition is false and ELSE exists: execute else_part
+            for stmt in else_statements {
+                self.execute_statement(stmt)?;
+            }
+        }
+        
+        Ok(())
+    }
+    
     /// Evaluate an expression to an integer value
     fn eval_integer(&self, expr: &Expression) -> Result<i32> {
         match expr {
@@ -426,6 +454,17 @@ impl Executor {
                     }
                     BinaryOperator::Modulo => Ok(left_val % right_val),
                     BinaryOperator::Power => Ok(left_val.pow(right_val as u32)),
+                    // Comparison operators: return -1 for true, 0 for false (BBC BASIC convention)
+                    BinaryOperator::Equal => Ok(if left_val == right_val { -1 } else { 0 }),
+                    BinaryOperator::NotEqual => Ok(if left_val != right_val { -1 } else { 0 }),
+                    BinaryOperator::LessThan => Ok(if left_val < right_val { -1 } else { 0 }),
+                    BinaryOperator::LessThanOrEqual => Ok(if left_val <= right_val { -1 } else { 0 }),
+                    BinaryOperator::GreaterThan => Ok(if left_val > right_val { -1 } else { 0 }),
+                    BinaryOperator::GreaterThanOrEqual => Ok(if left_val >= right_val { -1 } else { 0 }),
+                    // Logical operators
+                    BinaryOperator::And => Ok(left_val & right_val),
+                    BinaryOperator::Or => Ok(left_val | right_val),
+                    BinaryOperator::Eor => Ok(left_val ^ right_val),
                     _ => Err(BBCBasicError::IllegalFunction),
                 }
             }
@@ -990,6 +1029,118 @@ mod tests {
         
         executor.execute_statement(&stmt).unwrap();
         // Both arrays should be created
+    }
+    
+    #[test]
+    fn test_if_then_true_condition() {
+        // RED: Test IF X% > 5 THEN Y% = 10
+        let mut executor = Executor::new();
+        
+        // Set X% = 7
+        executor.variables.set_integer_var("X%".to_string(), 7);
+        
+        let stmt = Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: crate::parser::BinaryOperator::GreaterThan,
+                right: Box::new(Expression::Integer(5)),
+            },
+            then_part: vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(10),
+            }],
+            else_part: None,
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Y% should be set to 10 because condition is true
+        assert_eq!(executor.get_variable_int("Y%").unwrap(), 10);
+    }
+    
+    #[test]
+    fn test_if_then_false_condition() {
+        // RED: Test IF X% > 5 THEN Y% = 10 (with X% = 3)
+        let mut executor = Executor::new();
+        
+        // Set X% = 3
+        executor.variables.set_integer_var("X%".to_string(), 3);
+        
+        let stmt = Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: crate::parser::BinaryOperator::GreaterThan,
+                right: Box::new(Expression::Integer(5)),
+            },
+            then_part: vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(10),
+            }],
+            else_part: None,
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Y% should not exist because condition is false
+        assert!(executor.get_variable_int("Y%").is_err());
+    }
+    
+    #[test]
+    fn test_if_then_else_true_condition() {
+        // RED: Test IF X% = 5 THEN Y% = 1 ELSE Y% = 2
+        let mut executor = Executor::new();
+        
+        executor.variables.set_integer_var("X%".to_string(), 5);
+        
+        let stmt = Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: crate::parser::BinaryOperator::Equal,
+                right: Box::new(Expression::Integer(5)),
+            },
+            then_part: vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(1),
+            }],
+            else_part: Some(vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(2),
+            }]),
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Y% should be 1 because condition is true
+        assert_eq!(executor.get_variable_int("Y%").unwrap(), 1);
+    }
+    
+    #[test]
+    fn test_if_then_else_false_condition() {
+        // RED: Test IF X% = 5 THEN Y% = 1 ELSE Y% = 2 (with X% = 3)
+        let mut executor = Executor::new();
+        
+        executor.variables.set_integer_var("X%".to_string(), 3);
+        
+        let stmt = Statement::If {
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Variable("X%".to_string())),
+                op: crate::parser::BinaryOperator::Equal,
+                right: Box::new(Expression::Integer(5)),
+            },
+            then_part: vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(1),
+            }],
+            else_part: Some(vec![Statement::Assignment {
+                target: "Y%".to_string(),
+                expression: Expression::Integer(2),
+            }]),
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Y% should be 2 because condition is false
+        assert_eq!(executor.get_variable_int("Y%").unwrap(), 2);
     }
 }
 
