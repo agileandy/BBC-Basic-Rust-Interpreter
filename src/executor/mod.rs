@@ -730,6 +730,12 @@ impl Executor {
                     // Convert to centiseconds (1/100th of a second)
                     let centiseconds = (now.as_millis() / 10) as i32;
                     return Ok(centiseconds);
+                } else if name == "HIMEM" {
+                    // HIMEM returns top of available memory
+                    return Ok(self.memory.get_himem() as i32);
+                } else if name == "LOMEM" {
+                    // LOMEM returns bottom of user memory (PAGE)
+                    return Ok(self.memory.get_page() as i32);
                 }
 
                 if name.ends_with('%') {
@@ -3529,6 +3535,45 @@ mod tests {
         // Both should be positive
         assert!(result1 >= 0, "TIME should be positive");
         assert!(result2 >= 0, "TIME should be positive");
+    }
+
+    #[test]
+    fn test_himem_function() {
+        // RED: Test HIMEM returns top of memory
+        let mut executor = Executor::new();
+
+        let himem_var = Expression::Variable("HIMEM".to_string());
+
+        let result = executor.eval_integer(&himem_var).unwrap();
+
+        // HIMEM should return a positive memory address
+        assert!(result > 0, "HIMEM should be positive");
+
+        // Should be consistent across multiple reads
+        let result2 = executor.eval_integer(&himem_var).unwrap();
+        assert_eq!(result, result2, "HIMEM should be consistent");
+    }
+
+    #[test]
+    fn test_lomem_function() {
+        // RED: Test LOMEM returns bottom of memory (PAGE)
+        let mut executor = Executor::new();
+
+        let lomem_var = Expression::Variable("LOMEM".to_string());
+
+        let result = executor.eval_integer(&lomem_var).unwrap();
+
+        // LOMEM should return a positive memory address
+        assert!(result > 0, "LOMEM should be positive");
+
+        // Should be consistent across multiple reads
+        let result2 = executor.eval_integer(&lomem_var).unwrap();
+        assert_eq!(result, result2, "LOMEM should be consistent");
+
+        // LOMEM should be less than HIMEM
+        let himem_var = Expression::Variable("HIMEM".to_string());
+        let himem = executor.eval_integer(&himem_var).unwrap();
+        assert!(result < himem, "LOMEM should be < HIMEM");
     }
 
     #[test]
