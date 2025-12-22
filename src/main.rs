@@ -104,6 +104,22 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
     if program.is_empty() {
         return Err("No program to run".to_string());
     }
+    
+    // CRITICAL: Reset and collect all DATA statements BEFORE execution begins
+    // This ensures READ can access DATA regardless of program flow (GOTO, etc.)
+    executor.reset_data();
+    
+    // First pass: collect all DATA statements
+    for (line_number, line) in program.list() {
+        let statement = parse_statement(line)
+            .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
+        
+        // Only collect DATA statements, don't execute anything yet
+        if matches!(statement, bbc_basic_interpreter::Statement::Data { .. }) {
+            executor.collect_data(&statement)
+                .map_err(|e| format!("Error collecting DATA at line {}: {:?}", line_number, e))?;
+        }
+    }
 
     // Start execution from first line
     program.start_execution();
