@@ -982,6 +982,38 @@ impl Executor {
                 }
                 Ok(0)
             }
+            "INSTR" => {
+                // INSTR(haystack, needle) or INSTR(haystack, needle, start)
+                // Returns 1-based position of needle in haystack, or 0 if not found
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "INSTR requires 2 or 3 arguments".to_string(),
+                        line: None,
+                    });
+                }
+
+                let haystack = self.eval_string(&args[0])?;
+                let needle = self.eval_string(&args[1])?;
+
+                let start_pos = if args.len() == 3 {
+                    let start = self.eval_integer(&args[2])? as usize;
+                    // BBC BASIC uses 1-based indexing
+                    if start < 1 {
+                        return Ok(0);
+                    }
+                    start - 1
+                } else {
+                    0
+                };
+
+                // Search for needle in haystack starting from start_pos
+                if let Some(pos) = haystack[start_pos.min(haystack.len())..].find(&needle) {
+                    // Return 1-based position relative to start of string
+                    Ok((start_pos + pos + 1) as i32)
+                } else {
+                    Ok(0)
+                }
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
             | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -2929,6 +2961,53 @@ mod tests {
             ],
         };
         assert_eq!(executor.eval_string(&string_expr2).unwrap(), "AAA");
+    }
+
+    #[test]
+    fn test_instr_function() {
+        // RED: Test INSTR for substring search
+        let mut executor = Executor::new();
+
+        // Test INSTR("Hello World", "World") = 7 (1-based)
+        let instr1 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("World".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr1).unwrap(), 7);
+
+        // Test INSTR("Hello World", "o") = 5 (first occurrence)
+        let instr2 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("o".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr2).unwrap(), 5);
+
+        // Test INSTR("Hello World", "o", 6) = 8 (search from position 6)
+        let instr3 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("o".to_string()),
+                Expression::Integer(6),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr3).unwrap(), 8);
+
+        // Test INSTR("Hello", "xyz") = 0 (not found)
+        let instr4 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello".to_string()),
+                Expression::String("xyz".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr4).unwrap(), 0);
     }
 
     #[test]
