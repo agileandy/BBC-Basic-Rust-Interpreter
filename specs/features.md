@@ -58,8 +58,8 @@
 - [x] RETURN - Return from GOSUB subroutine
 - [x] ON...GOTO - Computed GOTO based on expression
 - [x] ON...GOSUB - Computed GOSUB based on expression
-- [ ] ON ERROR - Error handler setup
-- [ ] ON ERROR OFF - Disable error handler
+- [x] ON ERROR - Error handler setup
+- [x] ON ERROR OFF - Disable error handler
 
 #### Procedures and Functions
 - [x] DEF PROC - Define named procedure
@@ -221,8 +221,8 @@
 
 ### Error Handling
 - [ ] ERROR n, "message" - Generate error
-- [ ] ERL - Line number of last error
-- [ ] ERR - Error number of last error
+- [x] ERL - Line number of last error
+- [x] ERR - Error number of last error
 - [ ] REPORT - Print last error message
 - [ ] REPORT$ - Get last error message as string
 

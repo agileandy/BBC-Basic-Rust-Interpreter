@@ -213,9 +213,43 @@ fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<()
         let is_endproc = matches!(statement, bbc_basic_interpreter::Statement::EndProc);
 
         // Execute the statement
-        executor
-            .execute_statement(&statement)
-            .map_err(|e| format!("Runtime error at line {}: {:?}", line_number, e))?;
+        let execution_result = executor.execute_statement(&statement);
+
+        // Handle errors with ON ERROR handler if set
+        if let Err(e) = execution_result {
+            if let Some(handler_line) = executor.get_error_handler() {
+                // Convert BBCBasicError to error number
+                let error_number = match &e {
+                    bbc_basic_interpreter::BBCBasicError::DivisionByZero => 18,
+                    bbc_basic_interpreter::BBCBasicError::TypeMismatch => 6,
+                    bbc_basic_interpreter::BBCBasicError::SubscriptOutOfRange => 15,
+                    bbc_basic_interpreter::BBCBasicError::NoRoom => 11,
+                    bbc_basic_interpreter::BBCBasicError::StringTooLong => 19,
+                    bbc_basic_interpreter::BBCBasicError::NoSuchVariable(_) => 26,
+                    bbc_basic_interpreter::BBCBasicError::ArrayNotDimensioned(_) => 14,
+                    bbc_basic_interpreter::BBCBasicError::SyntaxError { .. } => 220,
+                    bbc_basic_interpreter::BBCBasicError::BadProgram => 254,
+                    bbc_basic_interpreter::BBCBasicError::IllegalFunction => 31,
+                    _ => 255, // Unknown error
+                };
+
+                // Set error information (ERL and ERR)
+                executor.set_last_error(error_number, line_number, format!("{:?}", e));
+
+                // Jump to error handler
+                if !program.goto_line(handler_line) {
+                    return Err(format!(
+                        "Error handler line {} not found (from error at line {})",
+                        handler_line, line_number
+                    ));
+                }
+                // Continue execution from error handler
+                continue;
+            } else {
+                // No error handler - propagate error as before
+                return Err(format!("Runtime error at line {}: {:?}", line_number, e));
+            }
+        }
 
         // Handle control flow
         if is_end {

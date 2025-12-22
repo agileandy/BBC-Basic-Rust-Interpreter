@@ -170,6 +170,10 @@ pub enum Statement {
         expression: Expression,
         targets: Vec<u16>,
     },
+    /// ON ERROR GOTO statement - set error handler
+    OnError { line_number: u16 },
+    /// ON ERROR OFF statement - clear error handler
+    OnErrorOff,
     /// Empty statement
     Empty,
 }
@@ -664,12 +668,60 @@ fn parse_gosub_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
 /// Parse ON statement (ON GOTO or ON GOSUB)
 fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // Syntax: ON <expression> GOTO|GOSUB <line1>, <line2>, ...
+    // or: ON ERROR GOTO <line>
+    // or: ON ERROR OFF
 
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected expression after ON".to_string(),
             line: line_number,
         });
+    }
+
+    // Check for ON ERROR variant
+    if matches!(tokens[0], Token::Keyword(0x85)) {
+        // ERROR keyword (0x85)
+        if tokens.len() < 2 {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected GOTO or OFF after ON ERROR".to_string(),
+                line: line_number,
+            });
+        }
+
+        match tokens[1] {
+            Token::Keyword(0x87) => {
+                // OFF keyword (0x87)
+                return Ok(Statement::OnErrorOff);
+            }
+            Token::Keyword(0xE5) => {
+                // GOTO keyword (0xE5)
+                if tokens.len() < 3 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected line number after ON ERROR GOTO".to_string(),
+                        line: line_number,
+                    });
+                }
+                match tokens[2] {
+                    Token::Integer(n) => {
+                        return Ok(Statement::OnError {
+                            line_number: n as u16,
+                        });
+                    }
+                    _ => {
+                        return Err(BBCBasicError::SyntaxError {
+                            message: "Expected line number after ON ERROR GOTO".to_string(),
+                            line: line_number,
+                        });
+                    }
+                }
+            }
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected GOTO or OFF after ON ERROR".to_string(),
+                    line: line_number,
+                });
+            }
+        }
     }
 
     // Find GOTO or GOSUB keyword

@@ -39,6 +39,17 @@ pub struct FunctionDefinition {
     pub expression: Expression,
 }
 
+/// Error information for ON ERROR handling
+#[derive(Debug, Clone)]
+pub struct ErrorInfo {
+    /// Error number (ERR)
+    pub error_number: i32,
+    /// Line number where error occurred (ERL)
+    pub error_line: u16,
+    /// Error message
+    pub message: String,
+}
+
 /// BBC BASIC statement executor
 #[derive(Debug)]
 pub struct Executor {
@@ -62,6 +73,10 @@ pub struct Executor {
     functions: HashMap<String, FunctionDefinition>,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
+    // Error handler: line number to jump to on error (None = no handler)
+    error_handler: Option<u16>,
+    // Last error information (for ERL and ERR functions)
+    last_error: Option<ErrorInfo>,
     // Output buffer (for testing)
     #[cfg(test)]
     output: String,
@@ -82,6 +97,8 @@ impl Executor {
             procedures: HashMap::new(),
             functions: HashMap::new(),
             local_stack: Vec::new(),
+            error_handler: None,
+            last_error: None,
             #[cfg(test)]
             output: String::new(),
         }
@@ -154,6 +171,14 @@ impl Executor {
             Statement::Local { variables } => self.execute_local(variables),
             Statement::ProcCall { .. } => {
                 // PROC calls are handled as control flow in main.rs
+                Ok(())
+            }
+            Statement::OnError { line_number } => {
+                self.set_error_handler(*line_number);
+                Ok(())
+            }
+            Statement::OnErrorOff => {
+                self.clear_error_handler();
                 Ok(())
             }
             _ => {
@@ -842,6 +867,26 @@ impl Executor {
                 let s = self.eval_string(&args[0])?;
                 s.trim().parse::<i32>().or_else(|_| Ok(0)) // BBC BASIC returns 0 for non-numeric strings
             }
+            "ERL" => {
+                // Error line number - returns 0 if no error has occurred
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ERL takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(self.get_error_line())
+            }
+            "ERR" => {
+                // Error number - returns 0 if no error has occurred
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ERR takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(self.get_error_number())
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
             | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -1332,6 +1377,46 @@ impl Executor {
     /// Clear all procedure definitions (used when loading new program)
     pub fn clear_procedures(&mut self) {
         self.procedures.clear();
+    }
+
+    /// Set error handler (ON ERROR GOTO line)
+    pub fn set_error_handler(&mut self, line_number: u16) {
+        self.error_handler = Some(line_number);
+    }
+
+    /// Clear error handler (ON ERROR OFF)
+    pub fn clear_error_handler(&mut self) {
+        self.error_handler = None;
+    }
+
+    /// Get error handler line number (returns None if no handler set)
+    pub fn get_error_handler(&self) -> Option<u16> {
+        self.error_handler
+    }
+
+    /// Set last error information
+    pub fn set_last_error(&mut self, error_number: i32, error_line: u16, message: String) {
+        self.last_error = Some(ErrorInfo {
+            error_number,
+            error_line,
+            message,
+        });
+    }
+
+    /// Get error line number (ERL)
+    pub fn get_error_line(&self) -> i32 {
+        self.last_error
+            .as_ref()
+            .map(|e| e.error_line as i32)
+            .unwrap_or(0)
+    }
+
+    /// Get error number (ERR)
+    pub fn get_error_number(&self) -> i32 {
+        self.last_error
+            .as_ref()
+            .map(|e| e.error_number)
+            .unwrap_or(0)
     }
 
     /// Execute DEF FN statement - define a function
@@ -2939,4 +3024,107 @@ mod tests {
         let result = executor.eval_integer(&expr).unwrap();
         assert_eq!(result, 3);
     }
+
+    #[test]
+    fn test_error_handler_set_and_clear() {
+        // RED: Test ON ERROR GOTO and ON ERROR OFF
+        let mut executor = Executor::new();
+
+        // Initially no error handler
+        assert_eq!(executor.get_error_handler(), None);
+
+        // Set error handler
+        executor.set_error_handler(1000);
+        assert_eq!(executor.get_error_handler(), Some(1000));
+
+        // Clear error handler
+        executor.clear_error_handler();
+        assert_eq!(executor.get_error_handler(), None);
+    }
+
+    #[test]
+    fn test_erl_err_functions_no_error() {
+        // RED: Test ERL and ERR when no error has occurred
+        let mut executor = Executor::new();
+
+        // ERL and ERR should return 0 when no error
+        assert_eq!(executor.get_error_line(), 0);
+        assert_eq!(executor.get_error_number(), 0);
+    }
+
+    #[test]
+    fn test_erl_err_functions_after_error() {
+        // RED: Test ERL and ERR after an error
+        let mut executor = Executor::new();
+
+        // Set error information
+        executor.set_last_error(18, 100, "Division by zero".to_string());
+
+        // Check ERL and ERR values
+        assert_eq!(executor.get_error_line(), 100);
+        assert_eq!(executor.get_error_number(), 18);
+    }
+
+    #[test]
+    fn test_on_error_statement_execution() {
+        // RED: Test executing ON ERROR GOTO statement
+        let mut executor = Executor::new();
+
+        let stmt = Statement::OnError { line_number: 1000 };
+        executor.execute_statement(&stmt).unwrap();
+
+        assert_eq!(executor.get_error_handler(), Some(1000));
+    }
+
+    #[test]
+    fn test_on_error_off_statement_execution() {
+        // RED: Test executing ON ERROR OFF statement
+        let mut executor = Executor::new();
+
+        // Set a handler first
+        executor.set_error_handler(1000);
+
+        // Execute ON ERROR OFF
+        let stmt = Statement::OnErrorOff;
+        executor.execute_statement(&stmt).unwrap();
+
+        assert_eq!(executor.get_error_handler(), None);
+    }
+
+    #[test]
+    fn test_erl_function_call() {
+        // RED: Test calling ERL as a function
+        let mut executor = Executor::new();
+
+        // Set error info
+        executor.set_last_error(6, 250, "Type mismatch".to_string());
+
+        // Call ERL function
+        let fn_call = Expression::FunctionCall {
+            name: "ERL".to_string(),
+            args: vec![],
+        };
+
+        let result = executor.eval_integer(&fn_call).unwrap();
+        assert_eq!(result, 250);
+    }
+
+    #[test]
+    fn test_err_function_call() {
+        // RED: Test calling ERR as a function
+        let mut executor = Executor::new();
+
+        // Set error info
+        executor.set_last_error(18, 150, "Division by zero".to_string());
+
+        // Call ERR function
+        let fn_call = Expression::FunctionCall {
+            name: "ERR".to_string(),
+            args: vec![],
+        };
+
+        let result = executor.eval_integer(&fn_call).unwrap();
+        assert_eq!(result, 18);
+    }
 }
+
