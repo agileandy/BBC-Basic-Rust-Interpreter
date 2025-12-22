@@ -55,6 +55,8 @@ pub mod error {
         // File system errors
         FileNotFound(String),
         DiskError(String),
+        ChannelNotOpen(i32),
+        TooManyOpenFiles,
 
         // System errors
         IllegalFunction,
@@ -88,6 +90,8 @@ pub mod error {
                 BBCBasicError::MemoryExhausted => write!(f, "Memory exhausted"),
                 BBCBasicError::FileNotFound(name) => write!(f, "File not found: {}", name),
                 BBCBasicError::DiskError(msg) => write!(f, "Disk error: {}", msg),
+                BBCBasicError::ChannelNotOpen(handle) => write!(f, "Channel {} not open", handle),
+                BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),

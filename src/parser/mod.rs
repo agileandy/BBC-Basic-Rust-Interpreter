@@ -122,8 +122,8 @@ pub enum Statement {
     Goto { line_number: u16 },
     /// GOSUB statement
     Gosub { line_number: u16 },
-    /// RETURN statement
-    Return,
+    /// RETURN statement (optionally with value for functions)
+    Return { value: Option<Expression> },
     /// DIM statement for array dimensioning
     Dim {
         arrays: Vec<(String, Vec<Expression>)>,
@@ -212,7 +212,7 @@ impl Statement {
                 | Statement::If { .. }
                 | Statement::Goto { .. }
                 | Statement::Gosub { .. }
-                | Statement::Return
+                | Statement::Return { .. }
         )
     }
 
@@ -334,8 +334,17 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // ON statement (ON GOTO / ON GOSUB)
         Token::Keyword(0xEE) => parse_on_statement(&tokens[1..], line.line_number),
 
-        // RETURN statement
-        Token::Keyword(0xF8) => Ok(Statement::Return),
+        // RETURN statement (with optional expression for functions)
+        Token::Keyword(0xF8) => {
+            if tokens.len() > 1 {
+                // Parse the expression after RETURN
+                let expr = parse_expression(&tokens[1..])?;
+                Ok(Statement::Return { value: Some(expr) })
+            } else {
+                // Just RETURN with no expression
+                Ok(Statement::Return { value: None })
+            }
+        }
 
         // INPUT statement
         Token::Keyword(0xE8) => {
@@ -2326,7 +2335,28 @@ mod tests {
         let line = tokenize("RETURN").unwrap();
         let stmt = parse_statement(&line).unwrap();
 
-        assert_eq!(stmt, Statement::Return);
+        assert_eq!(stmt, Statement::Return { value: None });
+    }
+
+    #[test]
+    fn test_parse_return_with_expression() {
+        // RED: Parse "RETURN X + 1"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("RETURN X + 1").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        match stmt {
+            Statement::Return { value: Some(expr) } => {
+                // Verify it's a binary expression
+                match expr {
+                    Expression::BinaryOp { op, .. } => {
+                        assert_eq!(op, BinaryOperator::Add);
+                    }
+                    _ => panic!("Expected binary expression, got {:?}", expr),
+                }
+            }
+            _ => panic!("Expected Return statement with expression, got {:?}", stmt),
+        }
     }
 
     #[test]
