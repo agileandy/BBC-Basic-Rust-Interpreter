@@ -164,11 +164,11 @@
 - [x] ASC(string) - Get ASCII code of first character
 - [x] STR$(number) - Convert number to string
 - [x] VAL(string) - Convert string to number
-- [ ] INSTR(string, substring) - Find substring position
-- [ ] INSTR(string, substring, start) - Find substring from position
-- [ ] STRING$(n, char) - Create string of n repeated characters
-- [ ] UPPER$(string) - Convert to uppercase
-- [ ] LOWER$(string) - Convert to lowercase
+- [x] INSTR(string, substring) - Find substring position
+- [x] INSTR(string, substring, start) - Find substring from position
+- [x] STRING$(n, char) - Create string of n repeated characters
+- [x] UPPER$(string) - Convert to uppercase
+- [x] LOWER$(string) - Convert to lowercase
 
 ### String Operators
 - [x] + - String concatenation
@@ -183,15 +183,15 @@
 - [x] LN(n) - Natural logarithm
 - [x] LOG(n) - Base-10 logarithm
 - [x] EXP(n) - Exponential (e^n)
-- [ ] SQRT(n) - Square root (alternative to SQR)
+- [x] SQRT(n) - Square root (alternative to SQR)
 
 ### Trigonometric Functions
 - [x] SIN(n) - Sine (degrees - BBC BASIC uses degrees!)
 - [x] COS(n) - Cosine (degrees - BBC BASIC uses degrees!)
 - [x] TAN(n) - Tangent (degrees - BBC BASIC uses degrees!)
 - [x] ATN(n) - Arctangent (returns degrees)
-- [ ] ACS(n) - Arccosine (radians)
-- [ ] ASN(n) - Arcsine (radians)
+- [x] ACS(n) - Arccosine (radians)
+- [x] ASN(n) - Arcsine (radians)
 - [x] DEG(n) - Convert radians to degrees
 - [x] RAD(n) - Convert degrees to radians
 
@@ -201,8 +201,8 @@
 
 ### Constants
 - [x] PI - Value of π (3.14159...)
-- [ ] TRUE - Boolean true value (-1)
-- [ ] FALSE - Boolean false value (0)
+- [x] TRUE - Boolean true value (-1)
+- [x] FALSE - Boolean false value (0)
 
 ## System Functions
 
@@ -282,13 +282,13 @@
 ## Summary Statistics
 
 **Total Features**: 211
-**Implemented**: 111 (53%)
+**Implemented**: 120 (57%)
 **Core Language Complete**: 95% (control flow, variables, operators, procedures, functions)
 **I/O Complete**: 75% (console done, file I/O done, graphics/sound none)
-**Functions Complete**: 90% (math complete, string mostly complete)
+**Functions Complete**: 95% (math complete, string complete)
 
-**Test Coverage**: 175 passing unit tests
-**Code Size**: ~7700 lines of Rust
+**Test Coverage**: 179 passing unit tests
+**Code Size**: ~8000 lines of Rust
 
 ## Implementation Priority
 
