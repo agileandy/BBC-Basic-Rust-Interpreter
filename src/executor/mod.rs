@@ -16,6 +16,9 @@ pub struct Executor {
     return_stack: Vec<u16>,
     // FOR loop state: (variable, end_value, step_value, loop_line)
     for_loops: Vec<(String, i32, i32, u16)>,
+    // Output buffer (for testing)
+    #[cfg(test)]
+    output: String,
 }
 
 impl Executor {
@@ -26,6 +29,8 @@ impl Executor {
             memory: MemoryManager::new(),
             return_stack: Vec::new(),
             for_loops: Vec::new(),
+            #[cfg(test)]
+            output: String::new(),
         }
     }
 
@@ -34,6 +39,9 @@ impl Executor {
         match statement {
             Statement::Assignment { target, expression } => {
                 self.execute_assignment(target, expression)
+            }
+            Statement::Print { items } => {
+                self.execute_print(items)
             }
             _ => {
                 // Other statements not implemented yet
@@ -58,6 +66,125 @@ impl Executor {
             self.variables.set_real_var(target.to_string(), value);
             Ok(())
         }
+    }
+    
+    /// Execute a PRINT statement
+    fn execute_print(&mut self, items: &[crate::parser::PrintItem]) -> Result<()> {
+        use crate::parser::PrintItem;
+        
+        for item in items {
+            match item {
+                PrintItem::Expression(expr) => {
+                    // Evaluate expression and print it
+                    let output = self.format_expression(expr)?;
+                    self.print_output(&output);
+                }
+                PrintItem::Semicolon => {
+                    // Semicolon suppresses newline (do nothing)
+                }
+                PrintItem::Comma => {
+                    // Comma moves to next tab position (TAB(10) intervals)
+                    #[cfg(test)]
+                    {
+                        let current_len = self.output.len();
+                        let next_tab = ((current_len / 10) + 1) * 10;
+                        let spaces = next_tab - current_len;
+                        self.output.push_str(&" ".repeat(spaces));
+                    }
+                    #[cfg(not(test))]
+                    {
+                        print!("\t");
+                    }
+                }
+                PrintItem::Tab(expr) => {
+                    let pos = self.eval_integer(expr)? as usize;
+                    #[cfg(test)]
+                    {
+                        let current_len = self.output.len();
+                        if pos > current_len {
+                            self.output.push_str(&" ".repeat(pos - current_len));
+                        }
+                    }
+                    #[cfg(not(test))]
+                    {
+                        // Move to absolute position (simplified)
+                        print!("{}", " ".repeat(pos));
+                    }
+                }
+                PrintItem::Spc(expr) => {
+                    let count = self.eval_integer(expr)? as usize;
+                    self.print_output(&" ".repeat(count));
+                }
+            }
+        }
+        
+        // Add newline unless last item was semicolon
+        if items.is_empty() || !matches!(items.last(), Some(PrintItem::Semicolon)) {
+            #[cfg(test)]
+            {
+                self.output.push('\n');
+            }
+            #[cfg(not(test))]
+            {
+                println!();
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Format an expression for printing
+    fn format_expression(&self, expr: &Expression) -> Result<String> {
+        match expr {
+            Expression::Integer(_) => Ok(self.eval_integer(expr)?.to_string()),
+            Expression::Real(_) => Ok(self.eval_real(expr)?.to_string()),
+            Expression::String(_) => self.eval_string(expr),
+            Expression::Variable(name) => {
+                if name.ends_with('%') {
+                    Ok(self.eval_integer(expr)?.to_string())
+                } else if name.ends_with('$') {
+                    self.eval_string(expr)
+                } else {
+                    Ok(self.eval_real(expr)?.to_string())
+                }
+            }
+            _ => {
+                // Try to evaluate as different types
+                if let Ok(val) = self.eval_integer(expr) {
+                    Ok(val.to_string())
+                } else if let Ok(val) = self.eval_real(expr) {
+                    Ok(val.to_string())
+                } else if let Ok(val) = self.eval_string(expr) {
+                    Ok(val)
+                } else {
+                    Err(BBCBasicError::TypeMismatch)
+                }
+            }
+        }
+    }
+    
+    /// Print output (to buffer in test mode, to stdout in production)
+    fn print_output(&mut self, text: &str) {
+        #[cfg(test)]
+        {
+            self.output.push_str(text);
+        }
+        #[cfg(not(test))]
+        {
+            print!("{}", text);
+        }
+    }
+    
+    /// Get output buffer (for testing)
+    #[cfg(test)]
+    pub fn get_output(&self) -> &str {
+        &self.output
+    }
+    
+    /// Clear output buffer (for testing)
+    #[cfg(test)]
+    pub fn clear_output(&mut self) {
+        self.output.clear();
     }
     
     /// Evaluate an expression to an integer value
@@ -272,5 +399,106 @@ mod tests {
         };
         
         assert_eq!(executor.eval_integer(&expr).unwrap(), 14);
+    }
+    
+    #[test]
+    fn test_print_integer() {
+        // RED: Test PRINT 42
+        use crate::parser::PrintItem;
+        
+        let mut executor = Executor::new();
+        let stmt = Statement::Print {
+            items: vec![PrintItem::Expression(Expression::Integer(42))],
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        assert_eq!(executor.get_output(), "42\n");
+    }
+    
+    #[test]
+    fn test_print_string() {
+        // RED: Test PRINT "HELLO"
+        use crate::parser::PrintItem;
+        
+        let mut executor = Executor::new();
+        let stmt = Statement::Print {
+            items: vec![PrintItem::Expression(Expression::String("HELLO".to_string()))],
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        assert_eq!(executor.get_output(), "HELLO\n");
+    }
+    
+    #[test]
+    fn test_print_variable() {
+        // RED: Test PRINT A% (after A% = 100)
+        use crate::parser::PrintItem;
+        
+        let mut executor = Executor::new();
+        
+        // Set A% = 100
+        let assign = Statement::Assignment {
+            target: "A%".to_string(),
+            expression: Expression::Integer(100),
+        };
+        executor.execute_statement(&assign).unwrap();
+        
+        // PRINT A%
+        let print = Statement::Print {
+            items: vec![PrintItem::Expression(Expression::Variable("A%".to_string()))],
+        };
+        executor.execute_statement(&print).unwrap();
+        
+        assert_eq!(executor.get_output(), "100\n");
+    }
+    
+    #[test]
+    fn test_print_multiple_items() {
+        // RED: Test PRINT "Value:"; A%
+        use crate::parser::PrintItem;
+        
+        let mut executor = Executor::new();
+        
+        // Set A% = 42
+        let assign = Statement::Assignment {
+            target: "A%".to_string(),
+            expression: Expression::Integer(42),
+        };
+        executor.execute_statement(&assign).unwrap();
+        
+        // PRINT "Value:"; A%
+        let print = Statement::Print {
+            items: vec![
+                PrintItem::Expression(Expression::String("Value:".to_string())),
+                PrintItem::Semicolon,
+                PrintItem::Expression(Expression::Variable("A%".to_string())),
+            ],
+        };
+        executor.execute_statement(&print).unwrap();
+        
+        assert_eq!(executor.get_output(), "Value:42\n");
+    }
+    
+    #[test]
+    fn test_print_with_comma() {
+        // RED: Test PRINT "A", "B"
+        use crate::parser::PrintItem;
+        
+        let mut executor = Executor::new();
+        let stmt = Statement::Print {
+            items: vec![
+                PrintItem::Expression(Expression::String("A".to_string())),
+                PrintItem::Comma,
+                PrintItem::Expression(Expression::String("B".to_string())),
+            ],
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        
+        // Comma should add spaces to next tab stop (10-char intervals)
+        let output = executor.get_output();
+        assert!(output.contains("A"));
+        assert!(output.contains("B"));
+        assert!(output.ends_with("\n"));
     }
 }
