@@ -1,0 +1,8 @@
+10 REM Test simple PROC
+20 X = 1
+30 PROCgreet
+40 PRINT X
+50 END
+100 DEF PROCgreet
+110 X = 99
+120 ENDPROC
