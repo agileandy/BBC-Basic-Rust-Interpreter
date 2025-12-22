@@ -43,6 +43,24 @@ impl Executor {
             Statement::Print { items } => {
                 self.execute_print(items)
             }
+            Statement::End | Statement::Stop => {
+                // END and STOP both stop execution
+                // In a full program, this would signal the interpreter to halt
+                Ok(())
+            }
+            Statement::Rem { .. } => {
+                // Comments do nothing during execution
+                Ok(())
+            }
+            Statement::Goto { line_number } => {
+                self.execute_goto(*line_number)
+            }
+            Statement::Gosub { line_number } => {
+                self.execute_gosub(*line_number)
+            }
+            Statement::Return => {
+                self.execute_return()
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -185,6 +203,34 @@ impl Executor {
     #[cfg(test)]
     pub fn clear_output(&mut self) {
         self.output.clear();
+    }
+    
+    /// Execute GOTO statement
+    fn execute_goto(&mut self, _line_number: u16) -> Result<()> {
+        // In a full program executor, this would change the program counter
+        // For now, we just acknowledge the command
+        // This will be fully implemented when we add program storage
+        Ok(())
+    }
+    
+    /// Execute GOSUB statement
+    fn execute_gosub(&mut self, line_number: u16) -> Result<()> {
+        // Push return address to stack
+        // In a real implementation, we'd push the NEXT line after this GOSUB
+        // For now, we push the target line (simplified)
+        self.return_stack.push(line_number);
+        Ok(())
+    }
+    
+    /// Execute RETURN statement
+    fn execute_return(&mut self) -> Result<()> {
+        // Pop return address from stack
+        if self.return_stack.is_empty() {
+            Err(BBCBasicError::BadCall)
+        } else {
+            self.return_stack.pop();
+            Ok(())
+        }
     }
     
     /// Evaluate an expression to an integer value
@@ -501,4 +547,83 @@ mod tests {
         assert!(output.contains("B"));
         assert!(output.ends_with("\n"));
     }
+    
+    #[test]
+    fn test_end_statement() {
+        // RED: Test END statement
+        let mut executor = Executor::new();
+        let stmt = Statement::End;
+        
+        // Should execute without error
+        executor.execute_statement(&stmt).unwrap();
+    }
+    
+    #[test]
+    fn test_stop_statement() {
+        // RED: Test STOP statement
+        let mut executor = Executor::new();
+        let stmt = Statement::Stop;
+        
+        // Should execute without error
+        executor.execute_statement(&stmt).unwrap();
+    }
+    
+    #[test]
+    fn test_rem_statement() {
+        // RED: Test REM statement
+        let mut executor = Executor::new();
+        let stmt = Statement::Rem {
+            comment: "This is a comment".to_string(),
+        };
+        
+        // Should execute without error (does nothing)
+        executor.execute_statement(&stmt).unwrap();
+    }
+    
+    #[test]
+    fn test_gosub_return() {
+        // RED: Test GOSUB/RETURN sequence
+        let mut executor = Executor::new();
+        
+        // Initially, return stack should be empty
+        assert!(executor.return_stack.is_empty());
+        
+        // Execute GOSUB 1000
+        let gosub = Statement::Gosub { line_number: 1000 };
+        executor.execute_statement(&gosub).unwrap();
+        
+        // Return stack should have one entry
+        assert_eq!(executor.return_stack.len(), 1);
+        
+        // Execute RETURN
+        let return_stmt = Statement::Return;
+        executor.execute_statement(&return_stmt).unwrap();
+        
+        // Return stack should be empty again
+        assert!(executor.return_stack.is_empty());
+    }
+    
+    #[test]
+    fn test_return_without_gosub() {
+        // RED: Test RETURN without GOSUB should error
+        let mut executor = Executor::new();
+        let stmt = Statement::Return;
+        
+        // Should return an error
+        let result = executor.execute_statement(&stmt);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BBCBasicError::BadCall));
+    }
+    
+    #[test]
+    fn test_goto_statement() {
+        // RED: Test GOTO statement
+        let mut executor = Executor::new();
+        let stmt = Statement::Goto { line_number: 500 };
+        
+        // Should execute without error
+        // (Full implementation requires program storage)
+        executor.execute_statement(&stmt).unwrap();
+    }
 }
+
