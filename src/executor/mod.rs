@@ -130,7 +130,13 @@ impl Executor {
                     }
                 }
                 PrintItem::Tab(expr) => {
-                    let pos = self.eval_integer(expr)? as usize;
+                    // TAB accepts both integer and real, truncating real to integer
+                    let pos = if let Ok(int_val) = self.eval_integer(expr) {
+                        int_val as usize
+                    } else {
+                        let real_val = self.eval_real(expr)?;
+                        real_val.floor().max(0.0) as usize
+                    };
                     #[cfg(test)]
                     {
                         let current_len = self.output.len();
@@ -145,7 +151,13 @@ impl Executor {
                     }
                 }
                 PrintItem::Spc(expr) => {
-                    let count = self.eval_integer(expr)? as usize;
+                    // SPC accepts both integer and real, truncating real to integer
+                    let count = if let Ok(int_val) = self.eval_integer(expr) {
+                        int_val as usize
+                    } else {
+                        let real_val = self.eval_real(expr)?;
+                        real_val.floor().max(0.0) as usize
+                    };
                     self.print_output(&" ".repeat(count));
                 }
             }

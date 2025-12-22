@@ -330,6 +330,72 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                 items.push(PrintItem::Comma);
                 pos += 1;
             }
+            // Handle TAB(expr)
+            Token::Keyword(0x8A) => {
+                pos += 1; // skip TAB keyword
+                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected '(' after TAB".to_string(),
+                        line: None,
+                    });
+                }
+                pos += 1; // skip '('
+                
+                // Find matching ')'
+                let start_pos = pos;
+                let mut paren_depth = 1;
+                while pos < tokens.len() && paren_depth > 0 {
+                    match &tokens[pos] {
+                        Token::Separator('(') => paren_depth += 1,
+                        Token::Separator(')') => paren_depth -= 1,
+                        _ => {}
+                    }
+                    pos += 1;
+                }
+                
+                if paren_depth != 0 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Unmatched parentheses in TAB".to_string(),
+                        line: None,
+                    });
+                }
+                
+                let expr = parse_expression(&tokens[start_pos..pos-1])?;
+                items.push(PrintItem::Tab(expr));
+            }
+            // Handle SPC(expr)
+            Token::Keyword(0x89) => {
+                pos += 1; // skip SPC keyword
+                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected '(' after SPC".to_string(),
+                        line: None,
+                    });
+                }
+                pos += 1; // skip '('
+                
+                // Find matching ')'
+                let start_pos = pos;
+                let mut paren_depth = 1;
+                while pos < tokens.len() && paren_depth > 0 {
+                    match &tokens[pos] {
+                        Token::Separator('(') => paren_depth += 1,
+                        Token::Separator(')') => paren_depth -= 1,
+                        _ => {}
+                    }
+                    pos += 1;
+                }
+                
+                if paren_depth != 0 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Unmatched parentheses in SPC".to_string(),
+                        line: None,
+                    });
+                }
+                
+                let expr = parse_expression(&tokens[start_pos..pos-1])?;
+                items.push(PrintItem::Spc(expr));
+            }
             _ => {
                 // Parse an expression
                 let start_pos = pos;
