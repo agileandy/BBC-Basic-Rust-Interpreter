@@ -720,6 +720,18 @@ impl Executor {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => Ok(*val as i32),
             Expression::Variable(name) => {
+                // Check for pseudo-variables first
+                if name == "TIME" {
+                    // TIME returns centiseconds since program start or system boot
+                    // For now, use system time
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap();
+                    // Convert to centiseconds (1/100th of a second)
+                    let centiseconds = (now.as_millis() / 10) as i32;
+                    return Ok(centiseconds);
+                }
+
                 if name.ends_with('%') {
                     self.variables
                         .get_integer_var(name)
@@ -3494,6 +3506,29 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_time_function() {
+        // RED: Test TIME returns centiseconds
+        let mut executor = Executor::new();
+
+        // TIME is a pseudo-variable that returns current time
+        let time_var = Expression::Variable("TIME".to_string());
+
+        let result1 = executor.eval_integer(&time_var).unwrap();
+
+        // Sleep a tiny bit
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let result2 = executor.eval_integer(&time_var).unwrap();
+
+        // Second reading should be >= first (time moves forward)
+        assert!(result2 >= result1, "TIME should increase: {} >= {}", result2, result1);
+
+        // Both should be positive
+        assert!(result1 >= 0, "TIME should be positive");
+        assert!(result2 >= 0, "TIME should be positive");
     }
 
     #[test]
