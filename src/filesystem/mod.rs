@@ -1,5 +1,5 @@
 //! File system operations for BBC BASIC
-//! 
+//!
 //! Handles file I/O operations and star commands.
 
 /// File system interface

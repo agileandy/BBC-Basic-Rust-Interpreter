@@ -1,5 +1,5 @@
 //! Tokenizer for BBC BASIC source code
-//! 
+//!
 //! Converts BBC BASIC source code into internal token representation compatible
 //! with the original BBC Micro tokenized format.
 
@@ -41,7 +41,10 @@ pub struct TokenizedLine {
 impl TokenizedLine {
     /// Create a new tokenized line
     pub fn new(line_number: Option<u16>, tokens: Vec<Token>) -> Self {
-        Self { line_number, tokens }
+        Self {
+            line_number,
+            tokens,
+        }
     }
 
     /// Create an empty tokenized line
@@ -58,22 +61,22 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
     let mut tokens = Vec::new();
     let mut line_number = None;
     let (keyword_map, extended_map) = create_keyword_maps();
-    
+
     // Trim the input
     let line = source_line.trim();
     if line.is_empty() {
         return Ok(TokenizedLine::empty());
     }
-    
+
     let mut chars = line.chars().peekable();
-    
+
     // Check for line number at the start (only if followed by whitespace and a keyword/identifier)
     if let Some(&ch) = chars.peek() {
         if ch.is_ascii_digit() {
             // Peek ahead to check if this looks like a line number
             let mut temp_chars = chars.clone();
             let mut num_str = String::new();
-            
+
             // Manually collect digits to avoid consuming past them
             while let Some(&ch) = temp_chars.peek() {
                 if ch.is_ascii_digit() {
@@ -83,19 +86,27 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                     break;
                 }
             }
-            
+
             // Line numbers must be followed by whitespace AND start of statement
-            let has_whitespace = temp_chars.peek().map(|c| c.is_whitespace()).unwrap_or(false);
+            let has_whitespace = temp_chars
+                .peek()
+                .map(|c| c.is_whitespace())
+                .unwrap_or(false);
             if has_whitespace {
                 // Skip whitespace
-                while temp_chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+                while temp_chars
+                    .peek()
+                    .map(|c| c.is_whitespace())
+                    .unwrap_or(false)
+                {
                     temp_chars.next();
                 }
                 // Check if what follows looks like a statement (keyword or identifier, not operator)
-                let next_is_statement = temp_chars.peek()
+                let next_is_statement = temp_chars
+                    .peek()
                     .map(|c| c.is_alphabetic() || *c == '_')
                     .unwrap_or(false);
-                
+
                 if next_is_statement {
                     // This is a line number - consume it from the actual iterator
                     let mut actual_num_str = String::new();
@@ -107,7 +118,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                             break;
                         }
                     }
-                    
+
                     if let Ok(num) = actual_num_str.parse::<u16>() {
                         line_number = Some(num);
                         // Skip whitespace after line number
@@ -123,7 +134,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             }
         }
     }
-    
+
     // Tokenize the rest of the line
     while let Some(&ch) = chars.peek() {
         // Skip whitespace
@@ -131,34 +142,41 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             chars.next();
             continue;
         }
-        
+
         // String literal
         if ch == '"' {
             chars.next(); // consume opening quote
             let mut string_content = String::new();
-            
+
             while let Some(ch) = chars.next() {
                 if ch == '"' {
                     break; // found closing quote
                 }
                 string_content.push(ch);
             }
-            
+
             tokens.push(Token::String(string_content));
             continue;
         }
-        
+
         // Numbers (integer or real, including negative)
-        if ch.is_ascii_digit() || (ch == '-' && chars.clone().nth(1).map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+        if ch.is_ascii_digit()
+            || (ch == '-'
+                && chars
+                    .clone()
+                    .nth(1)
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false))
+        {
             let mut num_str = String::new();
             let mut is_real = false;
-            
+
             // Handle negative sign
             if ch == '-' {
                 num_str.push(ch);
                 chars.next();
             }
-            
+
             // Collect digits before decimal point
             while let Some(&ch) = chars.peek() {
                 if ch.is_ascii_digit() {
@@ -168,7 +186,11 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                     // Check if the next character is a digit (to distinguish from range operator)
                     let mut temp_chars = chars.clone();
                     temp_chars.next(); // skip the '.'
-                    if temp_chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    if temp_chars
+                        .peek()
+                        .map(|c| c.is_ascii_digit())
+                        .unwrap_or(false)
+                    {
                         is_real = true;
                         num_str.push(ch);
                         chars.next(); // consume the '.'
@@ -179,7 +201,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                     break;
                 }
             }
-            
+
             // Parse the number
             if is_real {
                 if let Ok(val) = num_str.parse::<f64>() {
@@ -192,11 +214,11 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             }
             continue;
         }
-        
+
         // Keywords and identifiers
         if ch.is_alphabetic() || ch == '_' {
             let mut word = String::new();
-            
+
             // Collect alphanumeric characters, underscores, % (integer), $ (string)
             while let Some(&ch) = chars.peek() {
                 if ch.is_alphanumeric() || ch == '_' || ch == '%' || ch == '$' {
@@ -206,10 +228,10 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                     break;
                 }
             }
-            
+
             // Convert to uppercase for keyword matching
             let upper_word = word.to_uppercase();
-            
+
             // Check if it's a keyword
             if let Some(&token_byte) = keyword_map.get(&upper_word) {
                 tokens.push(Token::Keyword(token_byte));
@@ -221,7 +243,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             }
             continue;
         }
-        
+
         // Operators and separators
         match ch {
             '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
@@ -243,7 +265,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             }
         }
     }
-    
+
     Ok(TokenizedLine::new(line_number, tokens))
 }
 
@@ -251,12 +273,12 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
 pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
     let (main_reverse, extended_reverse) = create_reverse_keyword_maps();
     let mut result = String::new();
-    
+
     // Add line number if present
     if let Some(line_num) = tokenized_line.line_number {
         result.push_str(&format!("{} ", line_num));
     }
-    
+
     // Convert each token
     for (i, token) in tokenized_line.tokens.iter().enumerate() {
         // Add space before token (except first one or after certain tokens)
@@ -273,12 +295,12 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // Need space between most tokens
                 _ => true,
             };
-            
+
             if needs_space {
                 result.push(' ');
             }
         }
-        
+
         match token {
             Token::Keyword(byte) => {
                 if let Some(keyword) = main_reverse.get(byte) {
@@ -318,7 +340,7 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             }
         }
     }
-    
+
     Ok(result)
 }
 
@@ -340,7 +362,7 @@ const MAIN_KEYWORDS: &[(&str, u8)] = &[
     ("ELSE", 0x8B),
     ("THEN", 0x8C),
     // Line number reference marker (0x8D is special - handled separately)
-    
+
     // Functions and system variables (0x8E-0xC5)
     ("OPENIN", 0x8E),
     ("PTR", 0x8F),
@@ -398,7 +420,6 @@ const MAIN_KEYWORDS: &[(&str, u8)] = &[
     ("STR$", 0xC3),
     ("STRING$", 0xC4),
     ("EOF", 0xC5),
-    
     // Commands and statements (0xC6-0xFF) - these are NOT extended tokens
     ("AUTO", 0xC6),
     ("DELETE", 0xC7),
@@ -461,10 +482,7 @@ const MAIN_KEYWORDS: &[(&str, u8)] = &[
 ];
 
 // Extended functions (0xC6 prefix) - BBC BASIC 4 extensions
-const EXTENDED_FUNCTIONS: &[(&str, u8)] = &[
-    ("SUM", 0x8E),
-    ("BEAT", 0x8F),
-];
+const EXTENDED_FUNCTIONS: &[(&str, u8)] = &[("SUM", 0x8E), ("BEAT", 0x8F)];
 
 // Extended commands (0xC7 prefix) - BBC BASIC 4 extensions
 const EXTENDED_COMMANDS: &[(&str, u8)] = &[
@@ -517,27 +535,27 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
 pub fn create_keyword_maps() -> (HashMap<String, u8>, HashMap<String, (u8, u8)>) {
     let mut main_keywords = HashMap::new();
     let mut extended_keywords = HashMap::new();
-    
+
     // Add main keywords
     for &(keyword, token) in MAIN_KEYWORDS {
         main_keywords.insert(keyword.to_string(), token);
     }
-    
+
     // Add extended functions with 0xC6 prefix
     for &(keyword, token) in EXTENDED_FUNCTIONS {
         extended_keywords.insert(keyword.to_string(), (0xC6, token));
     }
-    
+
     // Add extended commands with 0xC7 prefix
     for &(keyword, token) in EXTENDED_COMMANDS {
         extended_keywords.insert(keyword.to_string(), (0xC7, token));
     }
-    
+
     // Add extended statements with 0xC8 prefix
     for &(keyword, token) in EXTENDED_STATEMENTS {
         extended_keywords.insert(keyword.to_string(), (0xC8, token));
     }
-    
+
     (main_keywords, extended_keywords)
 }
 
@@ -545,27 +563,27 @@ pub fn create_keyword_maps() -> (HashMap<String, u8>, HashMap<String, (u8, u8)>)
 pub fn create_reverse_keyword_maps() -> (HashMap<u8, String>, HashMap<(u8, u8), String>) {
     let mut main_reverse = HashMap::new();
     let mut extended_reverse = HashMap::new();
-    
+
     // Add main keywords
     for &(keyword, token) in MAIN_KEYWORDS {
         main_reverse.insert(token, keyword.to_string());
     }
-    
+
     // Add extended functions with 0xC6 prefix
     for &(keyword, token) in EXTENDED_FUNCTIONS {
         extended_reverse.insert((0xC6, token), keyword.to_string());
     }
-    
+
     // Add extended commands with 0xC7 prefix
     for &(keyword, token) in EXTENDED_COMMANDS {
         extended_reverse.insert((0xC7, token), keyword.to_string());
     }
-    
+
     // Add extended statements with 0xC8 prefix
     for &(keyword, token) in EXTENDED_STATEMENTS {
         extended_reverse.insert((0xC8, token), keyword.to_string());
     }
-    
+
     (main_reverse, extended_reverse)
 }
 
@@ -590,12 +608,12 @@ mod tests {
     #[test]
     fn test_keyword_maps_creation() {
         let (main_keywords, extended_keywords) = create_keyword_maps();
-        
+
         // Test some main keywords
         assert_eq!(main_keywords.get("PRINT"), Some(&0xF1));
         assert_eq!(main_keywords.get("FOR"), Some(&0xE3));
         assert_eq!(main_keywords.get("AND"), Some(&0x80));
-        
+
         // Test extended keywords
         assert_eq!(extended_keywords.get("SUM"), Some(&(0xC6, 0x8E)));
         assert_eq!(extended_keywords.get("AUTO"), Some(&(0xC7, 0x8F)));
@@ -605,15 +623,24 @@ mod tests {
     #[test]
     fn test_reverse_keyword_maps_creation() {
         let (main_reverse, extended_reverse) = create_reverse_keyword_maps();
-        
+
         // Test main reverse lookup
         assert_eq!(main_reverse.get(&0xF1), Some(&"PRINT".to_string()));
         assert_eq!(main_reverse.get(&0xE3), Some(&"FOR".to_string()));
-        
+
         // Test extended reverse lookup
-        assert_eq!(extended_reverse.get(&(0xC6, 0x8E)), Some(&"SUM".to_string()));
-        assert_eq!(extended_reverse.get(&(0xC7, 0x8F)), Some(&"AUTO".to_string()));
-        assert_eq!(extended_reverse.get(&(0xC8, 0x8E)), Some(&"CASE".to_string()));
+        assert_eq!(
+            extended_reverse.get(&(0xC6, 0x8E)),
+            Some(&"SUM".to_string())
+        );
+        assert_eq!(
+            extended_reverse.get(&(0xC7, 0x8F)),
+            Some(&"AUTO".to_string())
+        );
+        assert_eq!(
+            extended_reverse.get(&(0xC8, 0x8E)),
+            Some(&"CASE".to_string())
+        );
     }
 
     // TDD Tests for tokenization
@@ -728,10 +755,7 @@ mod tests {
 
     #[test]
     fn test_detokenize_print_statement() {
-        let line = TokenizedLine::new(
-            Some(10),
-            vec![Token::Keyword(0xF1), Token::Integer(42)]
-        );
+        let line = TokenizedLine::new(Some(10), vec![Token::Keyword(0xF1), Token::Integer(42)]);
         let result = detokenize(&line).unwrap();
         assert_eq!(result, "10 PRINT 42");
     }
@@ -740,7 +764,7 @@ mod tests {
     fn test_detokenize_print_with_string() {
         let line = TokenizedLine::new(
             None,
-            vec![Token::Keyword(0xF1), Token::String("Hello".to_string())]
+            vec![Token::Keyword(0xF1), Token::String("Hello".to_string())],
         );
         let result = detokenize(&line).unwrap();
         assert_eq!(result, r#"PRINT "Hello""#);
@@ -753,8 +777,8 @@ mod tests {
             vec![
                 Token::Identifier("A%".to_string()),
                 Token::Operator('='),
-                Token::Integer(42)
-            ]
+                Token::Integer(42),
+            ],
         );
         let result = detokenize(&line).unwrap();
         assert_eq!(result, "A% = 42");

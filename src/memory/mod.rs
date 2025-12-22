@@ -1,5 +1,5 @@
 //! Memory management for BBC BASIC interpreter
-//! 
+//!
 //! Emulates the exact memory layout of the BBC Model B with 32K RAM,
 //! including proper memory mapping and allocation.
 
@@ -7,8 +7,8 @@ use crate::error::{BBCBasicError, Result};
 
 /// BBC Model B memory constants
 pub const MEMORY_SIZE: usize = 32768; // 32K RAM
-pub const PAGE: u16 = 0x1900;         // Start of user memory
-pub const HIMEM: u16 = 0x8000;        // End of user memory
+pub const PAGE: u16 = 0x1900; // Start of user memory
+pub const HIMEM: u16 = 0x8000; // End of user memory
 pub const ZERO_PAGE_SIZE: usize = 0x100;
 pub const STACK_START: u16 = 0x0100;
 pub const STACK_SIZE: usize = 0x100;
@@ -49,7 +49,7 @@ impl MemoryManager {
             top: PAGE,
             allocations: Vec::new(),
         };
-        
+
         // Initialize system memory areas
         manager.initialize_system_memory();
         manager
@@ -77,13 +77,13 @@ impl MemoryManager {
         if addr >= MEMORY_SIZE {
             return Err(BBCBasicError::InvalidAddress(address));
         }
-        
+
         // Check if this is a protected system area
         if addr < PAGE as usize && !self.is_safe_system_write(address) {
             // Allow writes to some system areas but be careful
             // For now, allow all writes but this could be restricted
         }
-        
+
         self.ram[addr] = value;
         Ok(())
     }
@@ -141,7 +141,8 @@ impl MemoryManager {
 
     /// Free all allocations of a specific type
     pub fn free_allocations(&mut self, allocation_type: AllocationType) {
-        self.allocations.retain(|alloc| alloc.allocation_type != allocation_type);
+        self.allocations
+            .retain(|alloc| alloc.allocation_type != allocation_type);
         self.recalculate_top();
     }
 
@@ -150,7 +151,8 @@ impl MemoryManager {
         if self.allocations.is_empty() {
             self.top = PAGE;
         } else {
-            self.top = self.allocations
+            self.top = self
+                .allocations
                 .iter()
                 .map(|alloc| alloc.start + alloc.size as u16)
                 .max()
@@ -169,7 +171,7 @@ impl MemoryManager {
         for addr in PAGE as usize..HIMEM as usize {
             self.ram[addr] = 0;
         }
-        
+
         // Reset allocations and top
         self.allocations.clear();
         self.top = PAGE;
@@ -218,11 +220,11 @@ mod tests {
     #[test]
     fn test_peek_poke() {
         let mut mem = MemoryManager::new();
-        
+
         // Test basic peek/poke
         mem.poke(0x2000, 0x42).unwrap();
         assert_eq!(mem.peek(0x2000).unwrap(), 0x42);
-        
+
         // Test invalid address
         assert!(mem.peek(0x8000).is_err());
         assert!(mem.poke(0x8000, 0x42).is_err());
@@ -231,10 +233,10 @@ mod tests {
     #[test]
     fn test_word_operations() {
         let mut mem = MemoryManager::new();
-        
+
         mem.poke_word(0x2000, 0x1234).unwrap();
         assert_eq!(mem.peek_word(0x2000).unwrap(), 0x1234);
-        
+
         // Check little-endian storage
         assert_eq!(mem.peek(0x2000).unwrap(), 0x34);
         assert_eq!(mem.peek(0x2001).unwrap(), 0x12);
@@ -243,11 +245,11 @@ mod tests {
     #[test]
     fn test_memory_allocation() {
         let mut mem = MemoryManager::new();
-        
+
         let addr1 = mem.allocate_program_space(100).unwrap();
         assert_eq!(addr1, PAGE);
         assert_eq!(mem.get_top(), PAGE + 100);
-        
+
         let addr2 = mem.allocate_variable_space(50).unwrap();
         assert_eq!(addr2, PAGE + 100);
         assert_eq!(mem.get_top(), PAGE + 150);
@@ -256,7 +258,7 @@ mod tests {
     #[test]
     fn test_memory_exhaustion() {
         let mut mem = MemoryManager::new();
-        
+
         let available = mem.get_available_memory();
         let result = mem.allocate_program_space(available + 1);
         assert!(matches!(result, Err(BBCBasicError::NoRoom)));

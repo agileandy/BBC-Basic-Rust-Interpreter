@@ -1,5 +1,5 @@
 //! Sound system for BBC BASIC
-//! 
+//!
 //! Handles sound generation and music.
 
 /// Sound system

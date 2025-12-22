@@ -57,7 +57,9 @@ impl Variable {
     pub fn is_array(&self) -> bool {
         matches!(
             self,
-            Variable::IntegerArray { .. } | Variable::RealArray { .. } | Variable::StringArray { .. }
+            Variable::IntegerArray { .. }
+                | Variable::RealArray { .. }
+                | Variable::StringArray { .. }
         )
     }
 
@@ -101,7 +103,7 @@ impl Variable {
     /// Calculate linear index from multi-dimensional indices
     pub fn calculate_index(&self, indices: &[usize]) -> Result<usize> {
         let dimensions = self.dimensions().ok_or(BBCBasicError::TypeMismatch)?;
-        
+
         if indices.len() != dimensions.len() {
             return Err(BBCBasicError::SubscriptOutOfRange);
         }
@@ -179,7 +181,12 @@ impl VariableStore {
     }
 
     /// Dimension an array
-    pub fn dim_array(&mut self, name: String, dimensions: Vec<usize>, var_type: VarType) -> Result<()> {
+    pub fn dim_array(
+        &mut self,
+        name: String,
+        dimensions: Vec<usize>,
+        var_type: VarType,
+    ) -> Result<()> {
         if dimensions.is_empty() {
             return Err(BBCBasicError::SyntaxError {
                 message: "Array must have at least one dimension".to_string(),
@@ -209,33 +216,46 @@ impl VariableStore {
 
     /// Get an array element (immutable)
     pub fn get_array_element(&self, name: &str, indices: &[usize]) -> Result<Variable> {
-        let variable = self.get_variable(name)
+        let variable = self
+            .get_variable(name)
             .ok_or(BBCBasicError::NoSuchVariable(name.to_string()))?;
-        
+
         let linear_index = variable.calculate_index(indices)?;
-        
+
         match variable {
             Variable::IntegerArray { values, .. } => Ok(Variable::Integer(values[linear_index])),
             Variable::RealArray { values, .. } => Ok(Variable::Real(values[linear_index])),
-            Variable::StringArray { values, .. } => Ok(Variable::String(values[linear_index].clone())),
+            Variable::StringArray { values, .. } => {
+                Ok(Variable::String(values[linear_index].clone()))
+            }
             _ => Err(BBCBasicError::TypeMismatch),
         }
     }
 
     /// Set an array element (mutable)
-    pub fn set_array_element(&mut self, name: &str, indices: &[usize], value: Variable) -> Result<()> {
-        let variable = self.get_variable_mut(name)
+    pub fn set_array_element(
+        &mut self,
+        name: &str,
+        indices: &[usize],
+        value: Variable,
+    ) -> Result<()> {
+        let variable = self
+            .get_variable_mut(name)
             .ok_or(BBCBasicError::NoSuchVariable(name.to_string()))?;
-        
+
         let linear_index = variable.calculate_index(indices)?;
-        
+
         match (variable, value) {
-            (Variable::IntegerArray { values, .. }, Variable::Integer(val)) => values[linear_index] = val,
+            (Variable::IntegerArray { values, .. }, Variable::Integer(val)) => {
+                values[linear_index] = val
+            }
             (Variable::RealArray { values, .. }, Variable::Real(val)) => values[linear_index] = val,
-            (Variable::StringArray { values, .. }, Variable::String(val)) => values[linear_index] = val,
+            (Variable::StringArray { values, .. }, Variable::String(val)) => {
+                values[linear_index] = val
+            }
             _ => return Err(BBCBasicError::TypeMismatch),
         }
-        
+
         Ok(())
     }
 
@@ -282,22 +302,34 @@ mod tests {
     #[test]
     fn test_array_access() {
         let mut store = VariableStore::new();
-        
+
         // Test integer array
-        store.dim_array("A%(".to_string(), vec![3, 3], VarType::Integer).unwrap();
-        store.set_array_element("A%(", &[1, 1], Variable::Integer(42)).unwrap();
+        store
+            .dim_array("A%(".to_string(), vec![3, 3], VarType::Integer)
+            .unwrap();
+        store
+            .set_array_element("A%(", &[1, 1], Variable::Integer(42))
+            .unwrap();
         let result = store.get_array_element("A%(", &[1, 1]).unwrap();
         assert_eq!(result, Variable::Integer(42));
-        
+
         // Test real array
-        store.dim_array("B(".to_string(), vec![2, 2], VarType::Real).unwrap();
-        store.set_array_element("B(", &[0, 1], Variable::Real(3.14)).unwrap();
+        store
+            .dim_array("B(".to_string(), vec![2, 2], VarType::Real)
+            .unwrap();
+        store
+            .set_array_element("B(", &[0, 1], Variable::Real(3.14))
+            .unwrap();
         let result = store.get_array_element("B(", &[0, 1]).unwrap();
         assert_eq!(result, Variable::Real(3.14));
-        
+
         // Test string array
-        store.dim_array("C$(".to_string(), vec![2, 2], VarType::String).unwrap();
-        store.set_array_element("C$(", &[1, 0], Variable::String("hello".to_string())).unwrap();
+        store
+            .dim_array("C$(".to_string(), vec![2, 2], VarType::String)
+            .unwrap();
+        store
+            .set_array_element("C$(", &[1, 0], Variable::String("hello".to_string()))
+            .unwrap();
         let result = store.get_array_element("C$(", &[1, 0]).unwrap();
         assert_eq!(result, Variable::String("hello".to_string()));
     }
@@ -305,14 +337,16 @@ mod tests {
     #[test]
     fn test_variable_store() {
         let mut store = VariableStore::new();
-        
+
         store.set_integer_var("A%".to_string(), 42);
         assert_eq!(store.get_integer_var("A%"), Some(42));
-        
+
         store.set_real_var("B".to_string(), 3.14);
         assert_eq!(store.get_real_var("B"), Some(3.14));
-        
-        store.set_string_var("C$".to_string(), "hello".to_string()).unwrap();
+
+        store
+            .set_string_var("C$".to_string(), "hello".to_string())
+            .unwrap();
         assert_eq!(store.get_string_var("C$"), Some("hello"));
     }
 
@@ -320,7 +354,7 @@ mod tests {
     fn test_string_too_long() {
         let mut store = VariableStore::new();
         let long_string = "a".repeat(256);
-        
+
         let result = store.set_string_var("A$".to_string(), long_string);
         assert!(matches!(result, Err(BBCBasicError::StringTooLong)));
     }
@@ -334,11 +368,11 @@ mod tests {
         fn property(value: i32) -> bool {
             let mut store = VariableStore::new();
             let var_name = "TEST%".to_string();
-            
+
             store.set_integer_var(var_name.clone(), value);
             store.get_integer_var(&var_name) == Some(value)
         }
-        
+
         // Run with fewer iterations for faster testing
         let mut qc = quickcheck::QuickCheck::new().tests(10);
         qc.quickcheck(property as fn(i32) -> bool);
@@ -353,16 +387,16 @@ mod tests {
             if !value.is_finite() {
                 return TestResult::discard();
             }
-            
+
             let mut store = VariableStore::new();
             let var_name = "TEST".to_string();
-            
+
             store.set_real_var(var_name.clone(), value);
             let retrieved = store.get_real_var(&var_name);
-            
+
             TestResult::from_bool(retrieved == Some(value))
         }
-        
+
         // Run with fewer iterations for faster testing
         let mut qc = quickcheck::QuickCheck::new().tests(10);
         qc.quickcheck(property as fn(f64) -> TestResult);
@@ -377,10 +411,10 @@ mod tests {
             if value.len() > 255 {
                 return TestResult::discard();
             }
-            
+
             let mut store = VariableStore::new();
             let var_name = "TEST$".to_string();
-            
+
             match store.set_string_var(var_name.clone(), value.clone()) {
                 Ok(()) => {
                     let retrieved = store.get_string_var(&var_name);
@@ -389,7 +423,7 @@ mod tests {
                 Err(_) => TestResult::failed(), // Should not fail for valid strings
             }
         }
-        
+
         // Run with fewer iterations for faster testing
         let mut qc = quickcheck::QuickCheck::new().tests(10);
         qc.quickcheck(property as fn(String) -> TestResult);
@@ -403,12 +437,12 @@ mod tests {
             let int_var = Variable::Integer(value);
             let real_var = Variable::Real(value as f64);
             let string_var = Variable::String(value.to_string());
-            
-            int_var.var_type() == VarType::Integer &&
-            real_var.var_type() == VarType::Real &&
-            string_var.var_type() == VarType::String
+
+            int_var.var_type() == VarType::Integer
+                && real_var.var_type() == VarType::Real
+                && string_var.var_type() == VarType::String
         }
-        
+
         // Run with fewer iterations for faster testing
         let mut qc = quickcheck::QuickCheck::new().tests(10);
         qc.quickcheck(property as fn(i32) -> bool);

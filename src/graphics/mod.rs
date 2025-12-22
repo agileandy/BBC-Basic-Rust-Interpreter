@@ -1,5 +1,5 @@
 //! Graphics system for BBC BASIC
-//! 
+//!
 //! Handles display modes and graphics operations.
 
 /// Graphics system

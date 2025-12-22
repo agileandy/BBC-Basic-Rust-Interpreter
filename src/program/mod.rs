@@ -1,11 +1,11 @@
 //! Program storage and management for BBC BASIC
-//! 
+//!
 //! Manages BBC BASIC program lines in tokenized format with automatic sorting.
 
-use std::collections::BTreeMap;
-use crate::tokenizer::TokenizedLine;
-use crate::parser::Statement;
 use crate::error::Result;
+use crate::parser::Statement;
+use crate::tokenizer::TokenizedLine;
+use std::collections::BTreeMap;
 
 /// Program line storage with execution support
 #[derive(Debug, Clone)]
@@ -128,9 +128,9 @@ mod tests {
     fn test_store_and_retrieve_line() {
         let mut store = ProgramStore::new();
         let line = tokenize("10 PRINT \"HELLO\"").unwrap();
-        
+
         store.store_line(line.clone());
-        
+
         assert_eq!(store.len(), 1);
         assert!(store.get_line(10).is_some());
     }
@@ -138,11 +138,11 @@ mod tests {
     #[test]
     fn test_store_multiple_lines_sorted() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("30 PRINT \"C\"").unwrap());
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        
+
         let line_numbers = store.get_line_numbers();
         assert_eq!(line_numbers, vec![10, 20, 30]);
     }
@@ -150,14 +150,14 @@ mod tests {
     #[test]
     fn test_delete_line() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        
+
         assert_eq!(store.len(), 2);
-        
+
         store.delete_line(10);
-        
+
         assert_eq!(store.len(), 1);
         assert!(store.get_line(10).is_none());
         assert!(store.get_line(20).is_some());
@@ -166,12 +166,12 @@ mod tests {
     #[test]
     fn test_clear_program() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        
+
         store.clear();
-        
+
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
     }
@@ -179,11 +179,11 @@ mod tests {
     #[test]
     fn test_start_execution() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
         store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-        
+
         let first_line = store.start_execution();
         assert_eq!(first_line, Some(10));
         assert_eq!(store.get_current_line(), Some(10));
@@ -192,20 +192,20 @@ mod tests {
     #[test]
     fn test_next_line() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
         store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-        
+
         store.start_execution();
         assert_eq!(store.get_current_line(), Some(10));
-        
+
         store.next_line();
         assert_eq!(store.get_current_line(), Some(20));
-        
+
         store.next_line();
         assert_eq!(store.get_current_line(), Some(30));
-        
+
         let next = store.next_line();
         assert_eq!(next, None);
     }
@@ -213,18 +213,18 @@ mod tests {
     #[test]
     fn test_goto_line() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
         store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-        
+
         store.start_execution();
-        
+
         // Jump to line 30
         let success = store.goto_line(30);
         assert!(success);
         assert_eq!(store.get_current_line(), Some(30));
-        
+
         // Try to jump to non-existent line
         let success = store.goto_line(999);
         assert!(!success);
@@ -233,13 +233,13 @@ mod tests {
     #[test]
     fn test_list_program() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("30 PRINT \"C\"").unwrap());
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        
+
         let listing = store.list();
-        
+
         assert_eq!(listing.len(), 3);
         assert_eq!(listing[0].0, 10);
         assert_eq!(listing[1].0, 20);
@@ -249,12 +249,12 @@ mod tests {
     #[test]
     fn test_overwrite_line() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"OLD\"").unwrap());
         store.store_line(tokenize("10 PRINT \"NEW\"").unwrap());
-        
+
         assert_eq!(store.len(), 1);
-        
+
         let line = store.get_line(10).unwrap();
         // Verify it's the new line (this is a simplified check)
         assert!(line.line_number == Some(10));
@@ -263,14 +263,14 @@ mod tests {
     #[test]
     fn test_stop_execution() {
         let mut store = ProgramStore::new();
-        
+
         store.store_line(tokenize("10 PRINT \"A\"").unwrap());
         store.start_execution();
-        
+
         assert_eq!(store.get_current_line(), Some(10));
-        
+
         store.stop_execution();
-        
+
         assert_eq!(store.get_current_line(), None);
     }
 }

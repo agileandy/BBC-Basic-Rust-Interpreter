@@ -1,5 +1,5 @@
 //! Operating system interface for BBC BASIC
-//! 
+//!
 //! Handles OS calls and ROM functionality.
 
 /// Operating system interface
