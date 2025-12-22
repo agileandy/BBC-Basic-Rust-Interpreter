@@ -4,7 +4,8 @@
 //! for execution.
 
 use crate::error::Result;
-use crate::tokenizer::{Token, TokenizedLine};
+use crate::tokenizer::{Token, TokenizedLine, create_reverse_keyword_maps};
+use crate::error::BBCBasicError;
 
 /// Binary operators in BBC BASIC
 #[derive(Debug, Clone, PartialEq)]
@@ -248,9 +249,206 @@ pub fn parse_statement(tokens: &TokenizedLine) -> Result<Statement> {
 
 /// Parse a sequence of tokens into an expression
 pub fn parse_expression(tokens: &[Token]) -> Result<Expression> {
-    // For now, return a basic implementation
-    // Full implementation will be done in task 6
-    Ok(Expression::Integer(0))
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected expression".to_string(),
+            line: None,
+        });
+    }
+
+    let mut pos = 0;
+    parse_expr_precedence(tokens, &mut pos, 0)
+}
+
+/// Get operator precedence (higher number = higher precedence)
+fn get_precedence(op: char) -> Option<u8> {
+    match op {
+        '^' => Some(60),  // Power (highest)
+        '*' | '/' => Some(50),  // Multiplication, Division
+        '+' | '-' => Some(40),  // Addition, Subtraction
+        '=' | '<' | '>' => Some(30),  // Comparison
+        _ => None,
+    }
+}
+
+/// Convert operator character to BinaryOperator
+fn char_to_binary_op(op: char) -> Option<BinaryOperator> {
+    match op {
+        '+' => Some(BinaryOperator::Add),
+        '-' => Some(BinaryOperator::Subtract),
+        '*' => Some(BinaryOperator::Multiply),
+        '/' => Some(BinaryOperator::Divide),
+        '^' => Some(BinaryOperator::Power),
+        '=' => Some(BinaryOperator::Equal),
+        '<' => Some(BinaryOperator::LessThan),
+        '>' => Some(BinaryOperator::GreaterThan),
+        _ => None,
+    }
+}
+
+/// Parse expression with precedence climbing algorithm
+fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Result<Expression> {
+    // Parse the left-hand side (primary expression)
+    let mut left = parse_primary(tokens, pos)?;
+
+    // Parse binary operators with precedence
+    while *pos < tokens.len() {
+        // Check if current token is a binary operator
+        let op_char = match &tokens[*pos] {
+            Token::Operator(ch) => *ch,
+            _ => break,
+        };
+
+        let prec = match get_precedence(op_char) {
+            Some(p) if p >= min_prec => p,
+            _ => break,
+        };
+
+        *pos += 1; // consume operator
+
+        // Parse right-hand side with higher precedence
+        let right = parse_expr_precedence(tokens, pos, prec + 1)?;
+
+        // Create binary operation
+        let op = char_to_binary_op(op_char).ok_or(BBCBasicError::SyntaxError {
+            message: format!("Invalid operator: {}", op_char),
+            line: None,
+        })?;
+
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+
+    Ok(left)
+}
+
+/// Parse a primary expression (literal, variable, function call, or parenthesized expression)
+fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
+    if *pos >= tokens.len() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Unexpected end of expression".to_string(),
+            line: None,
+        });
+    }
+
+    let token = &tokens[*pos];
+
+    match token {
+        // Literals
+        Token::Integer(val) => {
+            *pos += 1;
+            Ok(Expression::Integer(*val))
+        }
+        Token::Real(val) => {
+            *pos += 1;
+            Ok(Expression::Real(*val))
+        }
+        Token::String(s) => {
+            *pos += 1;
+            Ok(Expression::String(s.clone()))
+        }
+
+        // Variables
+        Token::Identifier(name) => {
+            *pos += 1;
+            Ok(Expression::Variable(name.clone()))
+        }
+
+        // Unary operators
+        Token::Operator('-') => {
+            *pos += 1;
+            let operand = parse_primary(tokens, pos)?;
+            Ok(Expression::UnaryOp {
+                op: UnaryOperator::Minus,
+                operand: Box::new(operand),
+            })
+        }
+        Token::Operator('+') => {
+            *pos += 1;
+            let operand = parse_primary(tokens, pos)?;
+            Ok(Expression::UnaryOp {
+                op: UnaryOperator::Plus,
+                operand: Box::new(operand),
+            })
+        }
+
+        // Parenthesized expressions
+        Token::Separator('(') => {
+            *pos += 1;
+            let expr = parse_expr_precedence(tokens, pos, 0)?;
+            
+            // Expect closing parenthesis
+            if *pos >= tokens.len() || !matches!(tokens[*pos], Token::Separator(')')) {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected ')'".to_string(),
+                    line: None,
+                });
+            }
+            *pos += 1;
+            Ok(expr)
+        }
+
+        // Keywords (functions and constants)
+        Token::Keyword(byte) => {
+            let (main_reverse, _) = create_reverse_keyword_maps();
+            let keyword = main_reverse.get(byte).cloned().unwrap_or_else(|| "UNKNOWN".to_string());
+            
+            *pos += 1;
+
+            // Check if this is a function call (followed by opening paren)
+            if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
+                *pos += 1; // consume '('
+                
+                let mut args = Vec::new();
+                
+                // Parse arguments
+                if *pos < tokens.len() && !matches!(tokens[*pos], Token::Separator(')')) {
+                    loop {
+                        let arg = parse_expr_precedence(tokens, pos, 0)?;
+                        args.push(arg);
+                        
+                        if *pos >= tokens.len() {
+                            break;
+                        }
+                        
+                        match &tokens[*pos] {
+                            Token::Separator(',') => {
+                                *pos += 1; // consume comma
+                                continue;
+                            }
+                            Token::Separator(')') => break,
+                            _ => break,
+                        }
+                    }
+                }
+                
+                // Expect closing parenthesis
+                if *pos >= tokens.len() || !matches!(tokens[*pos], Token::Separator(')')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected ')'".to_string(),
+                        line: None,
+                    });
+                }
+                *pos += 1;
+                
+                Ok(Expression::FunctionCall {
+                    name: keyword,
+                    args,
+                })
+            } else {
+                // It's a constant or keyword used as value
+                Ok(Expression::Variable(keyword))
+            }
+        }
+
+        _ => Err(BBCBasicError::SyntaxError {
+            message: format!("Unexpected token in expression: {:?}", token),
+            line: None,
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -307,5 +505,125 @@ mod tests {
             right: Box::new(Expression::Integer(2)),
         };
         assert_eq!(add_expr.expression_type(), ExpressionType::Numeric);
+    }
+
+    // TDD Tests for expression parsing
+
+    #[test]
+    fn test_parse_integer_literal() {
+        // RED: Parse simple integer
+        let tokens = vec![Token::Integer(42)];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::Integer(42));
+    }
+
+    #[test]
+    fn test_parse_real_literal() {
+        // RED: Parse real number
+        let tokens = vec![Token::Real(3.14)];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::Real(3.14));
+    }
+
+    #[test]
+    fn test_parse_string_literal() {
+        // RED: Parse string
+        let tokens = vec![Token::String("hello".to_string())];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_variable() {
+        // RED: Parse variable reference
+        let tokens = vec![Token::Identifier("A%".to_string())];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::Variable("A%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_simple_addition() {
+        // RED: Parse "2 + 3"
+        let tokens = vec![
+            Token::Integer(2),
+            Token::Operator('+'),
+            Token::Integer(3),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::BinaryOp {
+            left: Box::new(Expression::Integer(2)),
+            op: BinaryOperator::Add,
+            right: Box::new(Expression::Integer(3)),
+        });
+    }
+
+    #[test]
+    fn test_parse_operator_precedence() {
+        // RED: Parse "2 + 3 * 4" - should be 2 + (3 * 4)
+        let tokens = vec![
+            Token::Integer(2),
+            Token::Operator('+'),
+            Token::Integer(3),
+            Token::Operator('*'),
+            Token::Integer(4),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::BinaryOp {
+            left: Box::new(Expression::Integer(2)),
+            op: BinaryOperator::Add,
+            right: Box::new(Expression::BinaryOp {
+                left: Box::new(Expression::Integer(3)),
+                op: BinaryOperator::Multiply,
+                right: Box::new(Expression::Integer(4)),
+            }),
+        });
+    }
+
+    #[test]
+    fn test_parse_parenthesized_expression() {
+        // RED: Parse "(2 + 3)"
+        let tokens = vec![
+            Token::Separator('('),
+            Token::Integer(2),
+            Token::Operator('+'),
+            Token::Integer(3),
+            Token::Separator(')'),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::BinaryOp {
+            left: Box::new(Expression::Integer(2)),
+            op: BinaryOperator::Add,
+            right: Box::new(Expression::Integer(3)),
+        });
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        // RED: Parse "SIN(45)"
+        let tokens = vec![
+            Token::Keyword(0xB5), // SIN
+            Token::Separator('('),
+            Token::Integer(45),
+            Token::Separator(')'),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::FunctionCall {
+            name: "SIN".to_string(),
+            args: vec![Expression::Integer(45)],
+        });
+    }
+
+    #[test]
+    fn test_parse_unary_minus() {
+        // RED: Parse "-5"
+        let tokens = vec![
+            Token::Operator('-'),
+            Token::Integer(5),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+        assert_eq!(expr, Expression::UnaryOp {
+            op: UnaryOperator::Minus,
+            operand: Box::new(Expression::Integer(5)),
+        });
     }
 }
