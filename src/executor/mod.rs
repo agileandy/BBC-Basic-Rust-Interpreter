@@ -3,7 +3,7 @@
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
 use crate::error::{Result, BBCBasicError};
-use crate::parser::{Statement, Expression};
+use crate::parser::{Statement, Expression, DataValue};
 use crate::variables::VariableStore;
 use crate::memory::MemoryManager;
 
@@ -16,6 +16,10 @@ pub struct Executor {
     return_stack: Vec<u16>,
     // FOR loop state: (variable, end_value, step_value, loop_line)
     for_loops: Vec<(String, i32, i32, u16)>,
+    // DATA storage: stores all DATA values in program order
+    data_values: Vec<DataValue>,
+    // DATA pointer: current index in data_values
+    data_pointer: usize,
     // Output buffer (for testing)
     #[cfg(test)]
     output: String,
@@ -29,6 +33,8 @@ impl Executor {
             memory: MemoryManager::new(),
             return_stack: Vec::new(),
             for_loops: Vec::new(),
+            data_values: Vec::new(),
+            data_pointer: 0,
             #[cfg(test)]
             output: String::new(),
         }
@@ -75,6 +81,15 @@ impl Executor {
             }
             Statement::If { condition, then_part, else_part } => {
                 self.execute_if(condition, then_part, else_part.as_ref())
+            }
+            Statement::Data { values } => {
+                self.execute_data(values)
+            }
+            Statement::Read { variables } => {
+                self.execute_read(variables)
+            }
+            Statement::Restore { line_number } => {
+                self.execute_restore(*line_number)
             }
             _ => {
                 // Other statements not implemented yet
@@ -423,6 +438,66 @@ impl Executor {
             }
         }
         
+        Ok(())
+    }
+    
+    /// Execute DATA statement - stores data values for READ
+    fn execute_data(&mut self, values: &[DataValue]) -> Result<()> {
+        // DATA statements just append values to the data pool
+        self.data_values.extend(values.iter().cloned());
+        Ok(())
+    }
+    
+    /// Execute READ statement - reads data into variables
+    fn execute_read(&mut self, variables: &[String]) -> Result<()> {
+        for var_name in variables {
+            // Check if we've run out of data
+            if self.data_pointer >= self.data_values.len() {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Out of DATA".to_string(),
+                    line: None,
+                });
+            }
+            
+            // Get next data value
+            let data_value = &self.data_values[self.data_pointer];
+            self.data_pointer += 1;
+            
+            // Assign to variable based on type
+            if var_name.ends_with('%') {
+                // Integer variable
+                let int_val = match data_value {
+                    DataValue::Integer(v) => *v,
+                    DataValue::Real(v) => *v as i32,
+                    DataValue::String(_) => 0, // BBC BASIC: string to number = 0
+                };
+                self.variables.set_integer_var(var_name.clone(), int_val);
+            } else if var_name.ends_with('$') {
+                // String variable
+                let str_val = match data_value {
+                    DataValue::String(s) => s.clone(),
+                    DataValue::Integer(v) => v.to_string(),
+                    DataValue::Real(v) => v.to_string(),
+                };
+                self.variables.set_string_var(var_name.clone(), str_val)?;
+            } else {
+                // Real variable
+                let real_val = match data_value {
+                    DataValue::Real(v) => *v,
+                    DataValue::Integer(v) => *v as f64,
+                    DataValue::String(_) => 0.0, // BBC BASIC: string to number = 0
+                };
+                self.variables.set_real_var(var_name.clone(), real_val);
+            }
+        }
+        Ok(())
+    }
+    
+    /// Execute RESTORE statement - resets data pointer
+    fn execute_restore(&mut self, _line_number: Option<u16>) -> Result<()> {
+        // For now, just reset to beginning
+        // TODO: Support RESTORE to specific line number
+        self.data_pointer = 0;
         Ok(())
     }
     
@@ -1831,6 +1906,180 @@ mod tests {
         
         let result = executor.eval_real(&val_real).unwrap();
         assert!((result - 3.14).abs() < 0.0001);
+    }
+    
+    #[test]
+    fn test_data_read_integers() {
+        // RED: Test DATA with integers and READ into integer variables
+        let mut executor = Executor::new();
+        
+        // DATA 10, 20, 30
+        let data_stmt = Statement::Data {
+            values: vec![
+                DataValue::Integer(10),
+                DataValue::Integer(20),
+                DataValue::Integer(30),
+            ],
+        };
+        executor.execute_statement(&data_stmt).unwrap();
+        
+        // READ A%, B%, C%
+        let read_stmt = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string(), "C%".to_string()],
+        };
+        executor.execute_statement(&read_stmt).unwrap();
+        
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 10);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 20);
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 30);
+    }
+    
+    #[test]
+    fn test_data_read_strings() {
+        // RED: Test DATA with strings and READ into string variables
+        let mut executor = Executor::new();
+        
+        // DATA "Hello", "World", "Test"
+        let data_stmt = Statement::Data {
+            values: vec![
+                DataValue::String("Hello".to_string()),
+                DataValue::String("World".to_string()),
+                DataValue::String("Test".to_string()),
+            ],
+        };
+        executor.execute_statement(&data_stmt).unwrap();
+        
+        // READ A$, B$, C$
+        let read_stmt = Statement::Read {
+            variables: vec!["A$".to_string(), "B$".to_string(), "C$".to_string()],
+        };
+        executor.execute_statement(&read_stmt).unwrap();
+        
+        assert_eq!(executor.get_variable_string("A$").unwrap(), "Hello");
+        assert_eq!(executor.get_variable_string("B$").unwrap(), "World");
+        assert_eq!(executor.get_variable_string("C$").unwrap(), "Test");
+    }
+    
+    #[test]
+    fn test_data_read_mixed_types() {
+        // RED: Test DATA with mixed types
+        let mut executor = Executor::new();
+        
+        // DATA 42, 3.14, "Hello"
+        let data_stmt = Statement::Data {
+            values: vec![
+                DataValue::Integer(42),
+                DataValue::Real(3.14),
+                DataValue::String("Hello".to_string()),
+            ],
+        };
+        executor.execute_statement(&data_stmt).unwrap();
+        
+        // READ A%, B, C$
+        let read_stmt = Statement::Read {
+            variables: vec!["A%".to_string(), "B".to_string(), "C$".to_string()],
+        };
+        executor.execute_statement(&read_stmt).unwrap();
+        
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 42);
+        assert!((executor.get_variable_real("B").unwrap() - 3.14).abs() < 0.0001);
+        assert_eq!(executor.get_variable_string("C$").unwrap(), "Hello");
+    }
+    
+    #[test]
+    fn test_restore() {
+        // RED: Test RESTORE resets data pointer
+        let mut executor = Executor::new();
+        
+        // DATA 10, 20, 30
+        let data_stmt = Statement::Data {
+            values: vec![
+                DataValue::Integer(10),
+                DataValue::Integer(20),
+                DataValue::Integer(30),
+            ],
+        };
+        executor.execute_statement(&data_stmt).unwrap();
+        
+        // READ A%, B%
+        let read_stmt1 = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string()],
+        };
+        executor.execute_statement(&read_stmt1).unwrap();
+        
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 10);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 20);
+        
+        // RESTORE
+        let restore_stmt = Statement::Restore { line_number: None };
+        executor.execute_statement(&restore_stmt).unwrap();
+        
+        // READ C%, D%
+        let read_stmt2 = Statement::Read {
+            variables: vec!["C%".to_string(), "D%".to_string()],
+        };
+        executor.execute_statement(&read_stmt2).unwrap();
+        
+        // After RESTORE, should read from beginning again
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 10);
+        assert_eq!(executor.get_variable_int("D%").unwrap(), 20);
+    }
+    
+    #[test]
+    fn test_multiple_data_statements() {
+        // RED: Test multiple DATA statements accumulate
+        let mut executor = Executor::new();
+        
+        // DATA 10, 20
+        let data_stmt1 = Statement::Data {
+            values: vec![
+                DataValue::Integer(10),
+                DataValue::Integer(20),
+            ],
+        };
+        executor.execute_statement(&data_stmt1).unwrap();
+        
+        // DATA 30, 40
+        let data_stmt2 = Statement::Data {
+            values: vec![
+                DataValue::Integer(30),
+                DataValue::Integer(40),
+            ],
+        };
+        executor.execute_statement(&data_stmt2).unwrap();
+        
+        // READ A%, B%, C%, D%
+        let read_stmt = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string(), "C%".to_string(), "D%".to_string()],
+        };
+        executor.execute_statement(&read_stmt).unwrap();
+        
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 10);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 20);
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 30);
+        assert_eq!(executor.get_variable_int("D%").unwrap(), 40);
+    }
+    
+    #[test]
+    fn test_read_out_of_data() {
+        // RED: Test reading more variables than data available
+        let mut executor = Executor::new();
+        
+        // DATA 10
+        let data_stmt = Statement::Data {
+            values: vec![DataValue::Integer(10)],
+        };
+        executor.execute_statement(&data_stmt).unwrap();
+        
+        // READ A%, B% - should fail on B%
+        let read_stmt = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string()],
+        };
+        let result = executor.execute_statement(&read_stmt);
+        
+        assert!(result.is_err());
+        // A% should have been set before error
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 10);
     }
 }
 

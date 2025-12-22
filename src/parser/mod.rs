@@ -154,8 +154,28 @@ pub enum Statement {
         name: String,
         args: Vec<Expression>,
     },
+    /// DATA statement - stores data values
+    Data {
+        values: Vec<DataValue>,
+    },
+    /// READ statement - reads data into variables
+    Read {
+        variables: Vec<String>,
+    },
+    /// RESTORE statement - resets data pointer (optionally to specific line)
+    Restore {
+        line_number: Option<u16>,
+    },
     /// Empty statement
     Empty,
+}
+
+/// Data value types for DATA statement
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataValue {
+    Integer(i32),
+    Real(f64),
+    String(String),
 }
 
 impl Statement {
@@ -307,6 +327,15 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                 .join(" ");
             Ok(Statement::Rem { comment })
         }
+        
+        // DATA statement
+        Token::Keyword(0xDC) => parse_data_statement(&tokens[1..], line.line_number),
+        
+        // READ statement
+        Token::Keyword(0xF3) => parse_read_statement(&tokens[1..], line.line_number),
+        
+        // RESTORE statement
+        Token::Keyword(0xF7) => parse_restore_statement(&tokens[1..], line.line_number),
         
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
@@ -679,6 +708,131 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
     }
     
     Ok(Statement::Dim { arrays })
+}
+
+/// Parse DATA statement
+/// Supports: DATA value1, value2, value3, ...
+fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mut values = Vec::new();
+    let mut pos = 0;
+    
+    while pos < tokens.len() {
+        // Skip commas
+        if matches!(tokens[pos], Token::Separator(',')) {
+            pos += 1;
+            continue;
+        }
+        
+        // Parse value
+        match &tokens[pos] {
+            Token::Integer(val) => {
+                values.push(DataValue::Integer(*val));
+                pos += 1;
+            }
+            Token::Real(val) => {
+                values.push(DataValue::Real(*val));
+                pos += 1;
+            }
+            Token::String(val) => {
+                values.push(DataValue::String(val.clone()));
+                pos += 1;
+            }
+            Token::Operator('-') if pos + 1 < tokens.len() => {
+                // Handle negative numbers
+                pos += 1;
+                match &tokens[pos] {
+                    Token::Integer(val) => {
+                        values.push(DataValue::Integer(-val));
+                        pos += 1;
+                    }
+                    Token::Real(val) => {
+                        values.push(DataValue::Real(-val));
+                        pos += 1;
+                    }
+                    _ => {
+                        return Err(BBCBasicError::SyntaxError {
+                            message: "Expected number after minus in DATA".to_string(),
+                            line: line_number,
+                        });
+                    }
+                }
+            }
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: format!("Invalid DATA value: {:?}", tokens[pos]),
+                    line: line_number,
+                });
+            }
+        }
+    }
+    
+    Ok(Statement::Data { values })
+}
+
+/// Parse READ statement
+/// Supports: READ var1, var2, var3, ...
+fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mut variables = Vec::new();
+    let mut pos = 0;
+    
+    while pos < tokens.len() {
+        // Skip commas
+        if matches!(tokens[pos], Token::Separator(',')) {
+            pos += 1;
+            continue;
+        }
+        
+        // Expect variable name
+        match &tokens[pos] {
+            Token::Identifier(name) => {
+                variables.push(name.clone());
+                pos += 1;
+            }
+            _ => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected variable name in READ".to_string(),
+                    line: line_number,
+                });
+            }
+        }
+    }
+    
+    if variables.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "READ requires at least one variable".to_string(),
+            line: line_number,
+        });
+    }
+    
+    Ok(Statement::Read { variables })
+}
+
+/// Parse RESTORE statement
+/// Supports: RESTORE [line_number]
+fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        // RESTORE with no line number - reset to beginning
+        Ok(Statement::Restore { line_number: None })
+    } else if tokens.len() == 1 {
+        // RESTORE with line number
+        match &tokens[0] {
+            Token::Integer(num) => Ok(Statement::Restore { 
+                line_number: Some(*num as u16) 
+            }),
+            Token::LineNumber(num) => Ok(Statement::Restore { 
+                line_number: Some(*num) 
+            }),
+            _ => Err(BBCBasicError::SyntaxError {
+                message: "RESTORE expects line number".to_string(),
+                line: None,
+            }),
+        }
+    } else {
+        Err(BBCBasicError::SyntaxError {
+            message: "RESTORE expects at most one line number".to_string(),
+            line: None,
+        })
+    }
 }
 
 /// Parse IF statement
