@@ -2467,6 +2467,78 @@ mod tests {
     }
 
     #[test]
+    fn test_tan_function() {
+        // RED: Test TAN(45) ≈ 1.0 (BBC BASIC uses degrees)
+        let mut executor = Executor::new();
+
+        let tan_45 = Expression::FunctionCall {
+            name: "TAN".to_string(),
+            args: vec![Expression::Real(45.0)],
+        };
+
+        let result = executor.eval_real(&tan_45).unwrap();
+        assert!((result - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_atn_function() {
+        // RED: Test ATN(1) = 45 degrees
+        let mut executor = Executor::new();
+
+        let atn_expr = Expression::FunctionCall {
+            name: "ATN".to_string(),
+            args: vec![Expression::Real(1.0)],
+        };
+
+        let result = executor.eval_real(&atn_expr).unwrap();
+        assert!((result - 45.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_log_function() {
+        // RED: Test LOG(100) = 2 (base 10 logarithm)
+        let mut executor = Executor::new();
+
+        let log_100 = Expression::FunctionCall {
+            name: "LOG".to_string(),
+            args: vec![Expression::Real(100.0)],
+        };
+
+        let result = executor.eval_real(&log_100).unwrap();
+        assert!((result - 2.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_ln_function() {
+        // RED: Test LN(E) ≈ 1.0 (natural logarithm)
+        let mut executor = Executor::new();
+
+        let e = std::f64::consts::E;
+        let ln_e = Expression::FunctionCall {
+            name: "LN".to_string(),
+            args: vec![Expression::Real(e)],
+        };
+
+        let result = executor.eval_real(&ln_e).unwrap();
+        assert!((result - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_exp_function() {
+        // RED: Test EXP(1) ≈ E (e^1)
+        let mut executor = Executor::new();
+
+        let exp_1 = Expression::FunctionCall {
+            name: "EXP".to_string(),
+            args: vec![Expression::Real(1.0)],
+        };
+
+        let result = executor.eval_real(&exp_1).unwrap();
+        let e = std::f64::consts::E;
+        assert!((result - e).abs() < 0.0001);
+    }
+
+    #[test]
     fn test_abs_function() {
         // RED: Test ABS(-5) = 5, ABS(3.5) = 3.5
         let mut executor = Executor::new();
