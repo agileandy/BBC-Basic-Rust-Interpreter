@@ -36,8 +36,8 @@
 - [x] EOR - Exclusive OR operation
 
 #### Bitwise Operators
-- [ ] Left shift (<<) - Shift bits left
-- [ ] Right shift (>>) - Shift bits right
+- [x] Left shift (<<) - Shift bits left
+- [x] Right shift (>>) - Shift bits right
 
 ### Control Flow
 
@@ -282,13 +282,13 @@
 ## Summary Statistics
 
 **Total Features**: 211
-**Implemented**: 120 (57%)
-**Core Language Complete**: 95% (control flow, variables, operators, procedures, functions)
+**Implemented**: 122 (58%)
+**Core Language Complete**: 100% (control flow, variables, operators complete, procedures, functions)
 **I/O Complete**: 75% (console done, file I/O done, graphics/sound none)
 **Functions Complete**: 95% (math complete, string complete)
 
-**Test Coverage**: 179 passing unit tests
-**Code Size**: ~8000 lines of Rust
+**Test Coverage**: 180 passing unit tests
+**Code Size**: ~8100 lines of Rust
 
 ## Implementation Priority
 
