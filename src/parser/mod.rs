@@ -154,6 +154,13 @@ pub enum Statement {
         name: String,
         args: Vec<Expression>,
     },
+    /// DEF PROC - define a procedure
+    DefProc {
+        name: String,
+        params: Vec<String>,
+    },
+    /// ENDPROC - end procedure definition
+    EndProc,
     /// DATA statement - stores data values
     Data {
         values: Vec<DataValue>,
@@ -353,6 +360,12 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         
         // CLS statement
         Token::Keyword(0xDB) => Ok(Statement::Cls),
+        
+        // DEF statement (DEF PROC or DEF FN)
+        Token::Keyword(0xDD) => parse_def_statement(&tokens[1..], line.line_number),
+        
+        // ENDPROC statement
+        Token::Keyword(0xE1) => Ok(Statement::EndProc),
         
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
@@ -865,6 +878,118 @@ fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     // Parse the condition expression
     let condition = parse_expression(tokens)?;
     Ok(Statement::Until { condition })
+}
+
+/// Parse DEF statement (DEF PROC or DEF FN)
+/// Supports: DEF PROCname(param1, param2, ...)
+/// Supports: DEF FNname(param1, param2, ...)
+fn parse_def_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "DEF requires PROC or FN".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Check if it's DEF PROC or DEF FN
+    match &tokens[0] {
+        Token::Keyword(0xF2) => {
+            // DEF PROC
+            parse_def_proc(&tokens[1..], line_number)
+        }
+        Token::Keyword(_) => {
+            // DEF FN (to be implemented)
+            Err(BBCBasicError::SyntaxError {
+                message: "DEF FN not yet implemented".to_string(),
+                line: line_number,
+            })
+        }
+        _ => Err(BBCBasicError::SyntaxError {
+            message: "Expected PROC or FN after DEF".to_string(),
+            line: line_number,
+        })
+    }
+}
+
+/// Parse DEF PROCname(params)
+fn parse_def_proc(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected procedure name after DEF PROC".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Extract procedure name (identifier)
+    let name = match &tokens[0] {
+        Token::Identifier(n) => n.clone(),
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected identifier for procedure name".to_string(),
+            line: line_number,
+        })
+    };
+    
+    // Parse parameters if present
+    let params = if tokens.len() > 1 {
+        // Should be ( param1, param2, ... )
+        parse_parameter_list(&tokens[1..], line_number)?
+    } else {
+        Vec::new()
+    };
+    
+    Ok(Statement::DefProc { name, params })
+}
+
+/// Parse parameter list: (param1, param2, ...)
+fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<String>> {
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    // Expect opening parenthesis
+    if !matches!(tokens[0], Token::Operator('(')) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected ( after procedure name".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Find closing parenthesis
+    let close_pos = tokens.iter().position(|t| matches!(t, Token::Operator(')')))
+        .ok_or(BBCBasicError::SyntaxError {
+            message: "Expected ) after parameter list".to_string(),
+            line: line_number,
+        })?;
+    
+    // Extract parameter names between parentheses
+    let mut params = Vec::new();
+    let mut i = 1;
+    while i < close_pos {
+        match &tokens[i] {
+            Token::Identifier(name) => {
+                params.push(name.clone());
+                i += 1;
+                
+                // Check for comma or end
+                if i < close_pos {
+                    if matches!(tokens[i], Token::Separator(',')) {
+                        i += 1; // Skip comma
+                    } else {
+                        return Err(BBCBasicError::SyntaxError {
+                            message: "Expected , between parameters".to_string(),
+                            line: line_number,
+                        });
+                    }
+                }
+            }
+            _ => return Err(BBCBasicError::SyntaxError {
+                message: "Expected identifier in parameter list".to_string(),
+                line: line_number,
+            })
+        }
+    }
+    
+    Ok(params)
 }
 
 /// Parse IF statement
