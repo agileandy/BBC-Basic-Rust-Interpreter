@@ -241,10 +241,362 @@ pub enum ExpressionType {
 }
 
 /// Parse a tokenized line into a statement
-pub fn parse_statement(tokens: &TokenizedLine) -> Result<Statement> {
-    // For now, return a basic implementation
-    // Full implementation will be done in task 8
-    Ok(Statement::Empty)
+pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
+    let tokens = &line.tokens;
+    
+    if tokens.is_empty() {
+        return Ok(Statement::Empty);
+    }
+    
+    // Check first token to determine statement type
+    match &tokens[0] {
+        // PRINT statement
+        Token::Keyword(0xF1) => parse_print_statement(&tokens[1..]),
+        
+        // LET statement (optional keyword)
+        Token::Keyword(0xE9) => {
+            // LET is optional, parse assignment from token 1 onward
+            if tokens.len() < 2 {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected variable after LET".to_string(),
+                    line: line.line_number,
+                });
+            }
+            parse_assignment(&tokens[1..], line.line_number)
+        }
+        
+        // Variable assignment (without LET keyword)
+        Token::Identifier(_) => parse_assignment(tokens, line.line_number),
+        
+        // FOR loop
+        Token::Keyword(0xE3) => parse_for_statement(&tokens[1..], line.line_number),
+        
+        // NEXT statement
+        Token::Keyword(0xED) => parse_next_statement(&tokens[1..]),
+        
+        // GOTO statement
+        Token::Keyword(0xE5) => parse_goto_statement(&tokens[1..], line.line_number),
+        
+        // GOSUB statement  
+        Token::Keyword(0xE4) => parse_gosub_statement(&tokens[1..], line.line_number),
+        
+        // RETURN statement
+        Token::Keyword(0xF8) => Ok(Statement::Return),
+        
+        // INPUT statement
+        Token::Keyword(0xE8) => parse_input_statement(&tokens[1..]),
+        
+        // DIM statement
+        Token::Keyword(0xDE) => parse_dim_statement(&tokens[1..], line.line_number),
+        
+        // END statement
+        Token::Keyword(0xE0) => Ok(Statement::End),
+        
+        // STOP statement
+        Token::Keyword(0xFA) => Ok(Statement::Stop),
+        
+        // REM statement (comment)
+        Token::Keyword(0xF4) => {
+            // Everything after REM is a comment
+            let comment = tokens[1..].iter()
+                .map(|t| format!("{:?}", t))
+                .collect::<Vec<_>>()
+                .join(" ");
+            Ok(Statement::Rem { comment })
+        }
+        
+        _ => Err(BBCBasicError::SyntaxError {
+            message: format!("Unknown statement: {:?}", tokens[0]),
+            line: line.line_number,
+        }),
+    }
+}
+
+/// Parse PRINT statement
+fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
+    let mut items = Vec::new();
+    let mut pos = 0;
+    
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Separator(';') => {
+                items.push(PrintItem::Semicolon);
+                pos += 1;
+            }
+            Token::Separator(',') => {
+                items.push(PrintItem::Comma);
+                pos += 1;
+            }
+            _ => {
+                // Parse an expression
+                let start_pos = pos;
+                let mut end_pos = pos;
+                
+                // Find end of expression (stop at separator or end)
+                while end_pos < tokens.len() {
+                    if matches!(tokens[end_pos], Token::Separator(';') | Token::Separator(',')) {
+                        break;
+                    }
+                    end_pos += 1;
+                }
+                
+                if end_pos > start_pos {
+                    let expr = parse_expression(&tokens[start_pos..end_pos])?;
+                    items.push(PrintItem::Expression(expr));
+                    pos = end_pos;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    
+    Ok(Statement::Print { items })
+}
+
+/// Parse assignment statement (A% = 42 or LET A% = 42)
+fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.len() < 3 {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Invalid assignment".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let target = match &tokens[0] {
+        Token::Identifier(name) => name.clone(),
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected variable name".to_string(),
+            line: line_number,
+        }),
+    };
+    
+    if !matches!(tokens[1], Token::Operator('=')) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected '='".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let expression = parse_expression(&tokens[2..])?;
+    
+    Ok(Statement::Assignment { target, expression })
+}
+
+/// Parse FOR statement
+fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // FOR variable = start TO end [STEP step]
+    if tokens.len() < 5 {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Invalid FOR statement".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let variable = match &tokens[0] {
+        Token::Identifier(name) => name.clone(),
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected variable name after FOR".to_string(),
+            line: line_number,
+        }),
+    };
+    
+    if !matches!(tokens[1], Token::Operator('=')) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected '=' in FOR statement".to_string(),
+            line: line_number,
+        });
+    }
+    
+    // Find TO keyword
+    let to_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0xB8)))
+        .ok_or(BBCBasicError::SyntaxError {
+            message: "Expected TO in FOR statement".to_string(),
+            line: line_number,
+        })?;
+    
+    let start = parse_expression(&tokens[2..to_pos])?;
+    
+    // Check for STEP keyword
+    let step_pos = tokens.iter().position(|t| matches!(t, Token::Keyword(0x88)));
+    
+    let (end, step) = if let Some(step_pos) = step_pos {
+        let end = parse_expression(&tokens[to_pos + 1..step_pos])?;
+        let step = parse_expression(&tokens[step_pos + 1..])?;
+        (end, Some(step))
+    } else {
+        let end = parse_expression(&tokens[to_pos + 1..])?;
+        (end, None)
+    };
+    
+    Ok(Statement::For { variable, start, end, step })
+}
+
+/// Parse NEXT statement
+fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
+    let mut variables = Vec::new();
+    
+    if tokens.is_empty() {
+        // NEXT without variable
+        return Ok(Statement::Next { variables });
+    }
+    
+    // Parse variable list (comma-separated)
+    let mut pos = 0;
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Identifier(name) => {
+                variables.push(name.clone());
+                pos += 1;
+                
+                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
+                    pos += 1; // skip comma
+                }
+            }
+            _ => break,
+        }
+    }
+    
+    Ok(Statement::Next { variables })
+}
+
+/// Parse GOTO statement
+fn parse_goto_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected line number after GOTO".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let line_num = match &tokens[0] {
+        Token::Integer(n) => *n as u16,
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected line number after GOTO".to_string(),
+            line: line_number,
+        }),
+    };
+    
+    Ok(Statement::Goto { line_number: line_num })
+}
+
+/// Parse GOSUB statement
+fn parse_gosub_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected line number after GOSUB".to_string(),
+            line: line_number,
+        });
+    }
+    
+    let line_num = match &tokens[0] {
+        Token::Integer(n) => *n as u16,
+        _ => return Err(BBCBasicError::SyntaxError {
+            message: "Expected line number after GOSUB".to_string(),
+            line: line_number,
+        }),
+    };
+    
+    Ok(Statement::Gosub { line_number: line_num })
+}
+
+/// Parse INPUT statement
+fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
+    let mut variables = Vec::new();
+    let mut pos = 0;
+    
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Identifier(name) => {
+                variables.push(name.clone());
+                pos += 1;
+                
+                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
+                    pos += 1; // skip comma
+                }
+            }
+            _ => break,
+        }
+    }
+    
+    Ok(Statement::Input { variables })
+}
+
+/// Parse DIM statement
+fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mut arrays = Vec::new();
+    let mut pos = 0;
+    
+    while pos < tokens.len() {
+        // Get array name
+        let name = match &tokens[pos] {
+            Token::Identifier(n) => {
+                // Array names have opening paren
+                format!("{}(", n.trim_end_matches('('))
+            }
+            _ => return Err(BBCBasicError::SyntaxError {
+                message: "Expected array name in DIM".to_string(),
+                line: line_number,
+            }),
+        };
+        pos += 1;
+        
+        // Expect opening paren
+        if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected '(' after array name".to_string(),
+                line: line_number,
+            });
+        }
+        pos += 1;
+        
+        // Parse dimension expressions
+        let mut dimensions = Vec::new();
+        loop {
+            // Find the extent of this dimension (until comma or closing paren)
+            let start = pos;
+            let mut depth = 0;
+            while pos < tokens.len() {
+                match &tokens[pos] {
+                    Token::Separator('(') => depth += 1,
+                    Token::Separator(')') if depth == 0 => break,
+                    Token::Separator(')') => depth -= 1,
+                    Token::Separator(',') if depth == 0 => break,
+                    _ => {}
+                }
+                pos += 1;
+            }
+            
+            if pos > start {
+                let dim_expr = parse_expression(&tokens[start..pos])?;
+                dimensions.push(dim_expr);
+            }
+            
+            if pos >= tokens.len() {
+                break;
+            }
+            
+            match &tokens[pos] {
+                Token::Separator(',') => pos += 1, // next dimension
+                Token::Separator(')') => {
+                    pos += 1; // end of this array
+                    break;
+                }
+                _ => break,
+            }
+        }
+        
+        arrays.push((name, dimensions));
+        
+        // Check for comma (multiple arrays in one DIM)
+        if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
+            pos += 1;
+        } else {
+            break;
+        }
+    }
+    
+    Ok(Statement::Dim { arrays })
 }
 
 /// Parse a sequence of tokens into an expression
@@ -625,5 +977,170 @@ mod tests {
             op: UnaryOperator::Minus,
             operand: Box::new(Expression::Integer(5)),
         });
+    }
+
+    // TDD Tests for statement parsing
+
+    #[test]
+    fn test_parse_print_simple() {
+        // RED: Parse "PRINT 42"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("PRINT 42").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Print {
+            items: vec![PrintItem::Expression(Expression::Integer(42))],
+        });
+    }
+
+    #[test]
+    fn test_parse_print_string() {
+        // RED: Parse "PRINT \"Hello\""
+        use crate::tokenizer::tokenize;
+        let line = tokenize(r#"PRINT "Hello""#).unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Print {
+            items: vec![PrintItem::Expression(Expression::String("Hello".to_string()))],
+        });
+    }
+
+    #[test]
+    fn test_parse_assignment() {
+        // RED: Parse "A% = 42"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("A% = 42").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Assignment {
+            target: "A%".to_string(),
+            expression: Expression::Integer(42),
+        });
+    }
+
+    #[test]
+    fn test_parse_let_assignment() {
+        // RED: Parse "LET B = 3.14"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("LET B = 3.14").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Assignment {
+            target: "B".to_string(),
+            expression: Expression::Real(3.14),
+        });
+    }
+
+    #[test]
+    fn test_parse_for_loop() {
+        // RED: Parse "FOR I% = 1 TO 10"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("FOR I% = 1 TO 10").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(1),
+            end: Expression::Integer(10),
+            step: None,
+        });
+    }
+
+    #[test]
+    fn test_parse_for_loop_with_step() {
+        // RED: Parse "FOR I% = 10 TO 1 STEP -1"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("FOR I% = 10 TO 1 STEP -1").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::For {
+            variable: "I%".to_string(),
+            start: Expression::Integer(10),
+            end: Expression::Integer(1),
+            step: Some(Expression::Integer(-1)),
+        });
+    }
+
+    #[test]
+    fn test_parse_next() {
+        // RED: Parse "NEXT I%"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("NEXT I%").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Next {
+            variables: vec!["I%".to_string()],
+        });
+    }
+
+    #[test]
+    fn test_parse_goto() {
+        // RED: Parse "GOTO 100"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("GOTO 100").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Goto {
+            line_number: 100,
+        });
+    }
+
+    #[test]
+    fn test_parse_gosub() {
+        // RED: Parse "GOSUB 1000"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("GOSUB 1000").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Gosub {
+            line_number: 1000,
+        });
+    }
+
+    #[test]
+    fn test_parse_return() {
+        // RED: Parse "RETURN"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("RETURN").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Return);
+    }
+
+    #[test]
+    fn test_parse_input() {
+        // RED: Parse "INPUT A%, B$"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("INPUT A%, B$").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Input {
+            variables: vec!["A%".to_string(), "B$".to_string()],
+        });
+    }
+
+    #[test]
+    fn test_parse_dim() {
+        // RED: Parse "DIM A%(10), B(5, 5)"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("DIM A%(10), B(5, 5)").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::Dim {
+            arrays: vec![
+                ("A%(".to_string(), vec![Expression::Integer(10)]),
+                ("B(".to_string(), vec![Expression::Integer(5), Expression::Integer(5)]),
+            ],
+        });
+    }
+
+    #[test]
+    fn test_parse_end() {
+        // RED: Parse "END"
+        use crate::tokenizer::tokenize;
+        let line = tokenize("END").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+        
+        assert_eq!(stmt, Statement::End);
     }
 }
