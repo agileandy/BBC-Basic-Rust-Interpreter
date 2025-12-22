@@ -107,6 +107,9 @@ impl Executor {
                 // UNTIL is handled as control flow in main.rs
                 Ok(())
             }
+            Statement::Cls => {
+                self.execute_cls()
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -530,6 +533,22 @@ impl Executor {
         // For now, just reset to beginning
         // TODO: Support RESTORE to specific line number
         self.data_pointer = 0;
+        Ok(())
+    }
+    
+    /// Execute CLS statement - clear screen
+    fn execute_cls(&mut self) -> Result<()> {
+        // Output ANSI escape sequences to clear screen and move cursor to home
+        // ESC[2J clears the entire screen
+        // ESC[H moves cursor to home position (0,0)
+        #[cfg(test)]
+        {
+            self.output.push_str("\x1b[2J\x1b[H");
+        }
+        #[cfg(not(test))]
+        {
+            print!("\x1b[2J\x1b[H");
+        }
         Ok(())
     }
     
@@ -2293,6 +2312,20 @@ mod tests {
         }
         
         assert_eq!(executor.get_variable_int("X%").unwrap(), 5);
+    }
+    
+    #[test]
+    fn test_cls() {
+        // RED: Test CLS outputs ANSI clear screen escape sequence
+        let mut executor = Executor::new();
+        
+        let cls_stmt = Statement::Cls;
+        executor.execute_statement(&cls_stmt).unwrap();
+        
+        // CLS should output the ANSI escape sequence: ESC[2J ESC[H
+        // ESC[2J clears screen, ESC[H moves cursor to home
+        assert!(executor.output.contains("\x1b[2J\x1b[H"), 
+               "CLS should output ANSI clear screen sequence");
     }
 }
 

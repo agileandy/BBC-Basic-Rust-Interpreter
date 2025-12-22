@@ -172,6 +172,8 @@ pub enum Statement {
     Until {
         condition: Expression,
     },
+    /// CLS statement - clear screen
+    Cls,
     /// Empty statement
     Empty,
 }
@@ -348,6 +350,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         
         // UNTIL statement
         Token::Keyword(0xFD) => parse_until_statement(&tokens[1..], line.line_number),
+        
+        // CLS statement
+        Token::Keyword(0xDB) => Ok(Statement::Cls),
         
         _ => Err(BBCBasicError::SyntaxError {
             message: format!("Unknown statement: {:?}", tokens[0]),
