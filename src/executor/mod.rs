@@ -1469,5 +1469,23 @@ mod tests {
         let result = executor.eval_real(&pi_expr).unwrap();
         assert!((result - std::f64::consts::PI).abs() < 0.0001);
     }
+    
+    #[test]
+    fn test_function_in_assignment() {
+        // Test that functions work in assignments
+        let mut executor = Executor::new();
+        
+        // X% = ABS(-5)
+        let stmt = Statement::Assignment {
+            target: "X%".to_string(),
+            expression: Expression::FunctionCall {
+                name: "ABS".to_string(),
+                args: vec![Expression::Integer(-5)],
+            },
+        };
+        
+        executor.execute_statement(&stmt).unwrap();
+        assert_eq!(executor.get_variable_int("X%").unwrap(), 5);
+    }
 }
 
