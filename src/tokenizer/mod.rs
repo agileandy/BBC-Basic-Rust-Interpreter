@@ -55,16 +55,271 @@ impl TokenizedLine {
 
 /// Tokenize a BBC BASIC source line
 pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
-    // For now, return a basic implementation
-    // Full implementation will be done in task 2
-    Ok(TokenizedLine::empty())
+    let mut tokens = Vec::new();
+    let mut line_number = None;
+    let (keyword_map, extended_map) = create_keyword_maps();
+    
+    // Trim the input
+    let line = source_line.trim();
+    if line.is_empty() {
+        return Ok(TokenizedLine::empty());
+    }
+    
+    let mut chars = line.chars().peekable();
+    
+    // Check for line number at the start (only if followed by whitespace and a keyword/identifier)
+    if let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            // Peek ahead to check if this looks like a line number
+            let mut temp_chars = chars.clone();
+            let mut num_str = String::new();
+            
+            // Manually collect digits to avoid consuming past them
+            while let Some(&ch) = temp_chars.peek() {
+                if ch.is_ascii_digit() {
+                    num_str.push(ch);
+                    temp_chars.next();
+                } else {
+                    break;
+                }
+            }
+            
+            // Line numbers must be followed by whitespace AND start of statement
+            let has_whitespace = temp_chars.peek().map(|c| c.is_whitespace()).unwrap_or(false);
+            if has_whitespace {
+                // Skip whitespace
+                while temp_chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+                    temp_chars.next();
+                }
+                // Check if what follows looks like a statement (keyword or identifier, not operator)
+                let next_is_statement = temp_chars.peek()
+                    .map(|c| c.is_alphabetic() || *c == '_')
+                    .unwrap_or(false);
+                
+                if next_is_statement {
+                    // This is a line number - consume it from the actual iterator
+                    let mut actual_num_str = String::new();
+                    while let Some(&ch) = chars.peek() {
+                        if ch.is_ascii_digit() {
+                            actual_num_str.push(ch);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if let Ok(num) = actual_num_str.parse::<u16>() {
+                        line_number = Some(num);
+                        // Skip whitespace after line number
+                        while let Some(&ch) = chars.peek() {
+                            if ch.is_whitespace() {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Tokenize the rest of the line
+    while let Some(&ch) = chars.peek() {
+        // Skip whitespace
+        if ch.is_whitespace() {
+            chars.next();
+            continue;
+        }
+        
+        // String literal
+        if ch == '"' {
+            chars.next(); // consume opening quote
+            let mut string_content = String::new();
+            
+            while let Some(ch) = chars.next() {
+                if ch == '"' {
+                    break; // found closing quote
+                }
+                string_content.push(ch);
+            }
+            
+            tokens.push(Token::String(string_content));
+            continue;
+        }
+        
+        // Numbers (integer or real, including negative)
+        if ch.is_ascii_digit() || (ch == '-' && chars.clone().nth(1).map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+            let mut num_str = String::new();
+            let mut is_real = false;
+            
+            // Handle negative sign
+            if ch == '-' {
+                num_str.push(ch);
+                chars.next();
+            }
+            
+            // Collect digits before decimal point
+            while let Some(&ch) = chars.peek() {
+                if ch.is_ascii_digit() {
+                    num_str.push(ch);
+                    chars.next();
+                } else if ch == '.' {
+                    // Check if the next character is a digit (to distinguish from range operator)
+                    let mut temp_chars = chars.clone();
+                    temp_chars.next(); // skip the '.'
+                    if temp_chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        is_real = true;
+                        num_str.push(ch);
+                        chars.next(); // consume the '.'
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            
+            // Parse the number
+            if is_real {
+                if let Ok(val) = num_str.parse::<f64>() {
+                    tokens.push(Token::Real(val));
+                }
+            } else {
+                if let Ok(val) = num_str.parse::<i32>() {
+                    tokens.push(Token::Integer(val));
+                }
+            }
+            continue;
+        }
+        
+        // Keywords and identifiers
+        if ch.is_alphabetic() || ch == '_' {
+            let mut word = String::new();
+            
+            // Collect alphanumeric characters, underscores, % (integer), $ (string)
+            while let Some(&ch) = chars.peek() {
+                if ch.is_alphanumeric() || ch == '_' || ch == '%' || ch == '$' {
+                    word.push(ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            
+            // Convert to uppercase for keyword matching
+            let upper_word = word.to_uppercase();
+            
+            // Check if it's a keyword
+            if let Some(&token_byte) = keyword_map.get(&upper_word) {
+                tokens.push(Token::Keyword(token_byte));
+            } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word) {
+                tokens.push(Token::ExtendedKeyword(prefix, token_byte));
+            } else {
+                // It's an identifier (variable, procedure, or function name)
+                tokens.push(Token::Identifier(word));
+            }
+            continue;
+        }
+        
+        // Operators and separators
+        match ch {
+            '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
+                chars.next();
+                tokens.push(Token::Operator(ch));
+            }
+            '-' => {
+                // Only treat as operator if not followed by digit (handled above)
+                chars.next();
+                tokens.push(Token::Operator(ch));
+            }
+            ',' | ';' | ':' | '(' | ')' => {
+                chars.next();
+                tokens.push(Token::Separator(ch));
+            }
+            _ => {
+                // Unknown character, skip it
+                chars.next();
+            }
+        }
+    }
+    
+    Ok(TokenizedLine::new(line_number, tokens))
 }
 
 /// Convert tokens back to BBC BASIC source
 pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
-    // For now, return a basic implementation
-    // Full implementation will be done in task 2
-    Ok(String::new())
+    let (main_reverse, extended_reverse) = create_reverse_keyword_maps();
+    let mut result = String::new();
+    
+    // Add line number if present
+    if let Some(line_num) = tokenized_line.line_number {
+        result.push_str(&format!("{} ", line_num));
+    }
+    
+    // Convert each token
+    for (i, token) in tokenized_line.tokens.iter().enumerate() {
+        // Add space before token (except first one or after certain tokens)
+        if i > 0 {
+            let needs_space = match (&tokenized_line.tokens[i - 1], token) {
+                // No space after opening paren or before closing paren
+                (_, Token::Separator(')')) => false,
+                (Token::Separator('('), _) => false,
+                // No space before/after certain operators
+                (Token::Separator(_), _) => false,
+                (_, Token::Separator(',')) => false,
+                (_, Token::Separator(';')) => false,
+                (_, Token::Separator(':')) => false,
+                // Need space between most tokens
+                _ => true,
+            };
+            
+            if needs_space {
+                result.push(' ');
+            }
+        }
+        
+        match token {
+            Token::Keyword(byte) => {
+                if let Some(keyword) = main_reverse.get(byte) {
+                    result.push_str(keyword);
+                }
+            }
+            Token::ExtendedKeyword(prefix, byte) => {
+                if let Some(keyword) = extended_reverse.get(&(*prefix, *byte)) {
+                    result.push_str(keyword);
+                }
+            }
+            Token::LineNumber(num) => {
+                result.push_str(&num.to_string());
+            }
+            Token::Integer(val) => {
+                result.push_str(&val.to_string());
+            }
+            Token::Real(val) => {
+                result.push_str(&val.to_string());
+            }
+            Token::String(s) => {
+                result.push('"');
+                result.push_str(s);
+                result.push('"');
+            }
+            Token::Identifier(name) => {
+                result.push_str(name);
+            }
+            Token::Operator(op) => {
+                result.push(*op);
+            }
+            Token::Separator(sep) => {
+                result.push(*sep);
+            }
+            Token::EndOfLine => {
+                // End of line marker
+            }
+        }
+    }
+    
+    Ok(result)
 }
 
 // BBC BASIC keyword to token mappings
@@ -359,5 +614,149 @@ mod tests {
         assert_eq!(extended_reverse.get(&(0xC6, 0x8E)), Some(&"SUM".to_string()));
         assert_eq!(extended_reverse.get(&(0xC7, 0x8F)), Some(&"AUTO".to_string()));
         assert_eq!(extended_reverse.get(&(0xC8, 0x8E)), Some(&"CASE".to_string()));
+    }
+
+    // TDD Tests for tokenization
+
+    #[test]
+    fn test_tokenize_integer_literal() {
+        // RED: Test tokenizing a simple integer
+        let result = tokenize("42").unwrap();
+        assert_eq!(result.line_number, None);
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::Integer(42));
+    }
+
+    #[test]
+    fn test_tokenize_negative_integer() {
+        // RED: Test tokenizing a negative integer
+        let result = tokenize("-123").unwrap();
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::Integer(-123));
+    }
+
+    #[test]
+    fn test_tokenize_real_number() {
+        // RED: Test tokenizing a real number
+        let result = tokenize("3.14159").unwrap();
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::Real(3.14159));
+    }
+
+    #[test]
+    fn test_tokenize_print_keyword() {
+        // RED: Test tokenizing PRINT keyword
+        let result = tokenize("PRINT").unwrap();
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::Keyword(0xF1));
+    }
+
+    #[test]
+    fn test_tokenize_print_with_integer() {
+        // RED: Test tokenizing "PRINT 42"
+        let result = tokenize("PRINT 42").unwrap();
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[0], Token::Keyword(0xF1));
+        assert_eq!(result.tokens[1], Token::Integer(42));
+    }
+
+    #[test]
+    fn test_tokenize_string_literal() {
+        // RED: Test tokenizing string literal
+        let result = tokenize(r#""Hello, World!""#).unwrap();
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::String("Hello, World!".to_string()));
+    }
+
+    #[test]
+    fn test_tokenize_print_with_string() {
+        // RED: Test tokenizing PRINT "hello"
+        let result = tokenize(r#"PRINT "hello""#).unwrap();
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[0], Token::Keyword(0xF1));
+        assert_eq!(result.tokens[1], Token::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_tokenize_identifier() {
+        // RED: Test tokenizing variable identifier
+        let result = tokenize("A%").unwrap();
+        assert_eq!(result.tokens.len(), 1);
+        assert_eq!(result.tokens[0], Token::Identifier("A%".to_string()));
+    }
+
+    #[test]
+    fn test_tokenize_assignment() {
+        // RED: Test tokenizing "A% = 42"
+        let result = tokenize("A% = 42").unwrap();
+        assert_eq!(result.tokens.len(), 3);
+        assert_eq!(result.tokens[0], Token::Identifier("A%".to_string()));
+        assert_eq!(result.tokens[1], Token::Operator('='));
+        assert_eq!(result.tokens[2], Token::Integer(42));
+    }
+
+    #[test]
+    fn test_tokenize_line_with_line_number() {
+        // RED: Test tokenizing line with line number
+        let result = tokenize("10 PRINT 42").unwrap();
+        assert_eq!(result.line_number, Some(10));
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[0], Token::Keyword(0xF1));
+        assert_eq!(result.tokens[1], Token::Integer(42));
+    }
+
+    #[test]
+    fn test_tokenize_expression_with_operators() {
+        // RED: Test tokenizing "2 + 3 * 4"
+        let result = tokenize("2 + 3 * 4").unwrap();
+        assert_eq!(result.tokens.len(), 5);
+        assert_eq!(result.tokens[0], Token::Integer(2));
+        assert_eq!(result.tokens[1], Token::Operator('+'));
+        assert_eq!(result.tokens[2], Token::Integer(3));
+        assert_eq!(result.tokens[3], Token::Operator('*'));
+        assert_eq!(result.tokens[4], Token::Integer(4));
+    }
+
+    // Detokenization tests
+
+    #[test]
+    fn test_detokenize_simple_integer() {
+        let line = TokenizedLine::new(None, vec![Token::Integer(42)]);
+        let result = detokenize(&line).unwrap();
+        assert_eq!(result, "42");
+    }
+
+    #[test]
+    fn test_detokenize_print_statement() {
+        let line = TokenizedLine::new(
+            Some(10),
+            vec![Token::Keyword(0xF1), Token::Integer(42)]
+        );
+        let result = detokenize(&line).unwrap();
+        assert_eq!(result, "10 PRINT 42");
+    }
+
+    #[test]
+    fn test_detokenize_print_with_string() {
+        let line = TokenizedLine::new(
+            None,
+            vec![Token::Keyword(0xF1), Token::String("Hello".to_string())]
+        );
+        let result = detokenize(&line).unwrap();
+        assert_eq!(result, r#"PRINT "Hello""#);
+    }
+
+    #[test]
+    fn test_detokenize_assignment() {
+        let line = TokenizedLine::new(
+            None,
+            vec![
+                Token::Identifier("A%".to_string()),
+                Token::Operator('='),
+                Token::Integer(42)
+            ]
+        );
+        let result = detokenize(&line).unwrap();
+        assert_eq!(result, "A% = 42");
     }
 }
