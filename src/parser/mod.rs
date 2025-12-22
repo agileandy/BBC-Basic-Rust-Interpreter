@@ -32,6 +32,10 @@ pub enum BinaryOperator {
     Or,
     Eor, // Exclusive OR
 
+    // Bitwise
+    LeftShift,  // <<
+    RightShift, // >>
+
     // String
     StringConcat, // String concatenation
 }
@@ -263,7 +267,9 @@ impl Expression {
                 | BinaryOperator::GreaterThanOrEqual
                 | BinaryOperator::And
                 | BinaryOperator::Or
-                | BinaryOperator::Eor => ExpressionType::Integer,
+                | BinaryOperator::Eor
+                | BinaryOperator::LeftShift
+                | BinaryOperator::RightShift => ExpressionType::Integer,
                 BinaryOperator::StringConcat => ExpressionType::String,
             },
             Expression::UnaryOp { op, .. } => match op {

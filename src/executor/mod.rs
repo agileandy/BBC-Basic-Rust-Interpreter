@@ -737,6 +737,19 @@ impl Executor {
                     BinaryOperator::And => Ok(left_val & right_val),
                     BinaryOperator::Or => Ok(left_val | right_val),
                     BinaryOperator::Eor => Ok(left_val ^ right_val),
+                    // Bitwise shift operators
+                    BinaryOperator::LeftShift => {
+                        if right_val < 0 {
+                            return Err(BBCBasicError::IllegalFunction);
+                        }
+                        Ok(left_val << right_val)
+                    }
+                    BinaryOperator::RightShift => {
+                        if right_val < 0 {
+                            return Err(BBCBasicError::IllegalFunction);
+                        }
+                        Ok(left_val >> right_val)
+                    }
                     _ => Err(BBCBasicError::IllegalFunction),
                 }
             }
@@ -962,9 +975,61 @@ impl Executor {
                 let handle = self.eval_integer(&args[0])?;
                 self.check_eof(handle)
             }
+            "TRUE" => {
+                // TRUE constant = -1 (BBC BASIC convention)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "TRUE takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(-1)
+            }
+            "FALSE" => {
+                // FALSE constant = 0 (BBC BASIC convention)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "FALSE takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(0)
+            }
+            "INSTR" => {
+                // INSTR(haystack, needle) or INSTR(haystack, needle, start)
+                // Returns 1-based position of needle in haystack, or 0 if not found
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "INSTR requires 2 or 3 arguments".to_string(),
+                        line: None,
+                    });
+                }
+
+                let haystack = self.eval_string(&args[0])?;
+                let needle = self.eval_string(&args[1])?;
+
+                let start_pos = if args.len() == 3 {
+                    let start = self.eval_integer(&args[2])? as usize;
+                    // BBC BASIC uses 1-based indexing
+                    if start < 1 {
+                        return Ok(0);
+                    }
+                    start - 1
+                } else {
+                    0
+                };
+
+                // Search for needle in haystack starting from start_pos
+                if let Some(pos) = haystack[start_pos.min(haystack.len())..].find(&needle) {
+                    // Return 1-based position relative to start of string
+                    Ok((start_pos + pos + 1) as i32)
+                } else {
+                    Ok(0)
+                }
+            }
             // Real-only functions should not be called as integers
-            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "EXP" | "LN" | "LOG" | "DEG" | "RAD" | "PI"
-            | "RND" => Err(BBCBasicError::TypeMismatch),
+            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN" | "LOG"
+            | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -1151,6 +1216,48 @@ impl Executor {
                 let s = self.eval_string(&args[0])?;
                 s.trim().parse::<f64>().or_else(|_| Ok(0.0)) // BBC BASIC returns 0 for non-numeric strings
             }
+            "SQRT" => {
+                // SQRT is an alias for SQR in BBC BASIC
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "SQRT requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < 0.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.sqrt())
+            }
+            "ACS" => {
+                // ACS(x) = arccosine in radians
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ACS requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < -1.0 || val > 1.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.acos())
+            }
+            "ASN" => {
+                // ASN(x) = arcsine in radians
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ASN requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let val = self.eval_real(&args[0])?;
+                if val < -1.0 || val > 1.0 {
+                    return Err(BBCBasicError::IllegalFunction);
+                }
+                Ok(val.asin())
+            }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -1266,6 +1373,43 @@ impl Executor {
                             Err(BBCBasicError::TypeMismatch)
                         }
                     }
+                }
+            }
+            "UPPER$" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "UPPER$ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let s = self.eval_string(&args[0])?;
+                Ok(s.to_uppercase())
+            }
+            "LOWER$" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "LOWER$ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                let s = self.eval_string(&args[0])?;
+                Ok(s.to_lowercase())
+            }
+            "STRING$" => {
+                if args.len() != 2 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "STRING$ requires 2 arguments (count, string)".to_string(),
+                        line: None,
+                    });
+                }
+                let count = self.eval_integer(&args[0])? as usize;
+                let s = self.eval_string(&args[1])?;
+
+                // BBC BASIC STRING$(n, string) repeats first character n times
+                if let Some(first_char) = s.chars().next() {
+                    Ok(first_char.to_string().repeat(count))
+                } else {
+                    Ok(String::new())
                 }
             }
             _ => Err(BBCBasicError::SyntaxError {
@@ -2598,6 +2742,52 @@ mod tests {
     }
 
     #[test]
+    fn test_sqrt_asc_asn_functions() {
+        // RED: Test SQRT (alias for SQR), ACS (arccosine), ASN (arcsine)
+        let mut executor = Executor::new();
+
+        // Test SQRT(16) = 4 (alias for SQR)
+        let sqrt_expr = Expression::FunctionCall {
+            name: "SQRT".to_string(),
+            args: vec![Expression::Integer(16)],
+        };
+        let result = executor.eval_real(&sqrt_expr).unwrap();
+        assert!((result - 4.0).abs() < 0.0001);
+
+        // Test ACS(0.5) ≈ 1.047 radians (60 degrees)
+        let acs_expr = Expression::FunctionCall {
+            name: "ACS".to_string(),
+            args: vec![Expression::Real(0.5)],
+        };
+        let result = executor.eval_real(&acs_expr).unwrap();
+        assert!((result - 1.047).abs() < 0.001);
+
+        // Test ASN(0.5) ≈ 0.524 radians (30 degrees)
+        let asn_expr = Expression::FunctionCall {
+            name: "ASN".to_string(),
+            args: vec![Expression::Real(0.5)],
+        };
+        let result = executor.eval_real(&asn_expr).unwrap();
+        assert!((result - 0.524).abs() < 0.001);
+
+        // Test ACS(1) = 0 (cos(0) = 1)
+        let acs_one = Expression::FunctionCall {
+            name: "ACS".to_string(),
+            args: vec![Expression::Integer(1)],
+        };
+        let result = executor.eval_real(&acs_one).unwrap();
+        assert!((result - 0.0).abs() < 0.0001);
+
+        // Test ASN(0) = 0 (sin(0) = 0)
+        let asn_zero = Expression::FunctionCall {
+            name: "ASN".to_string(),
+            args: vec![Expression::Integer(0)],
+        };
+        let result = executor.eval_real(&asn_zero).unwrap();
+        assert!((result - 0.0).abs() < 0.0001);
+    }
+
+    #[test]
     fn test_sgn_function() {
         // RED: Test SGN(-5) = -1, SGN(0) = 0, SGN(10) = 1
         let mut executor = Executor::new();
@@ -2633,6 +2823,63 @@ mod tests {
 
         let result = executor.eval_real(&pi_expr).unwrap();
         assert!((result - std::f64::consts::PI).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_true_false_constants() {
+        // RED: Test TRUE = -1, FALSE = 0 (BBC BASIC convention)
+        let mut executor = Executor::new();
+
+        let true_expr = Expression::FunctionCall {
+            name: "TRUE".to_string(),
+            args: vec![],
+        };
+
+        let false_expr = Expression::FunctionCall {
+            name: "FALSE".to_string(),
+            args: vec![],
+        };
+
+        assert_eq!(executor.eval_integer(&true_expr).unwrap(), -1);
+        assert_eq!(executor.eval_integer(&false_expr).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_bitwise_shift_operators() {
+        // RED: Test << (left shift) and >> (right shift) operators
+        let mut executor = Executor::new();
+
+        // Test 5 << 2 = 20 (5 * 4)
+        let left_shift = Expression::BinaryOp {
+            op: BinaryOperator::LeftShift,
+            left: Box::new(Expression::Integer(5)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&left_shift).unwrap(), 20);
+
+        // Test 20 >> 2 = 5 (20 / 4)
+        let right_shift = Expression::BinaryOp {
+            op: BinaryOperator::RightShift,
+            left: Box::new(Expression::Integer(20)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&right_shift).unwrap(), 5);
+
+        // Test 1 << 8 = 256
+        let left_shift_large = Expression::BinaryOp {
+            op: BinaryOperator::LeftShift,
+            left: Box::new(Expression::Integer(1)),
+            right: Box::new(Expression::Integer(8)),
+        };
+        assert_eq!(executor.eval_integer(&left_shift_large).unwrap(), 256);
+
+        // Test -8 >> 2 = -2 (arithmetic right shift preserves sign)
+        let right_shift_negative = Expression::BinaryOp {
+            op: BinaryOperator::RightShift,
+            left: Box::new(Expression::Integer(-8)),
+            right: Box::new(Expression::Integer(2)),
+        };
+        assert_eq!(executor.eval_integer(&right_shift_negative).unwrap(), -2);
     }
 
     #[test]
@@ -2813,6 +3060,93 @@ mod tests {
 
         let result = executor.eval_real(&val_real).unwrap();
         assert!((result - 3.14).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_upper_lower_string_functions() {
+        // RED: Test UPPER$, LOWER$, and STRING$ functions
+        let mut executor = Executor::new();
+
+        // Test UPPER$("hello") = "HELLO"
+        let upper_expr = Expression::FunctionCall {
+            name: "UPPER$".to_string(),
+            args: vec![Expression::String("hello".to_string())],
+        };
+        assert_eq!(executor.eval_string(&upper_expr).unwrap(), "HELLO");
+
+        // Test LOWER$("WORLD") = "world"
+        let lower_expr = Expression::FunctionCall {
+            name: "LOWER$".to_string(),
+            args: vec![Expression::String("WORLD".to_string())],
+        };
+        assert_eq!(executor.eval_string(&lower_expr).unwrap(), "world");
+
+        // Test STRING$(5, "*") = "*****"
+        let string_expr = Expression::FunctionCall {
+            name: "STRING$".to_string(),
+            args: vec![
+                Expression::Integer(5),
+                Expression::String("*".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_string(&string_expr).unwrap(), "*****");
+
+        // Test STRING$(3, "ABC") - should repeat first char only
+        let string_expr2 = Expression::FunctionCall {
+            name: "STRING$".to_string(),
+            args: vec![
+                Expression::Integer(3),
+                Expression::String("ABC".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_string(&string_expr2).unwrap(), "AAA");
+    }
+
+    #[test]
+    fn test_instr_function() {
+        // RED: Test INSTR for substring search
+        let mut executor = Executor::new();
+
+        // Test INSTR("Hello World", "World") = 7 (1-based)
+        let instr1 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("World".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr1).unwrap(), 7);
+
+        // Test INSTR("Hello World", "o") = 5 (first occurrence)
+        let instr2 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("o".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr2).unwrap(), 5);
+
+        // Test INSTR("Hello World", "o", 6) = 8 (search from position 6)
+        let instr3 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello World".to_string()),
+                Expression::String("o".to_string()),
+                Expression::Integer(6),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr3).unwrap(), 8);
+
+        // Test INSTR("Hello", "xyz") = 0 (not found)
+        let instr4 = Expression::FunctionCall {
+            name: "INSTR".to_string(),
+            args: vec![
+                Expression::String("Hello".to_string()),
+                Expression::String("xyz".to_string()),
+            ],
+        };
+        assert_eq!(executor.eval_integer(&instr4).unwrap(), 0);
     }
 
     #[test]
