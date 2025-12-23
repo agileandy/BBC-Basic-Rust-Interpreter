@@ -138,6 +138,8 @@ pub enum Statement {
     End,
     /// STOP statement
     Stop,
+    /// QUIT statement (like END but exits immediately)
+    Quit,
     /// Procedure call
     ProcCall { name: String, args: Vec<Expression> },
     /// DEF PROC - define a procedure
@@ -222,7 +224,7 @@ impl Statement {
 
     /// Check if this statement ends program execution
     pub fn is_terminating(&self) -> bool {
-        matches!(self, Statement::End | Statement::Stop)
+        matches!(self, Statement::End | Statement::Stop | Statement::Quit)
     }
 }
 
@@ -373,6 +375,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // STOP statement
         Token::Keyword(0xFA) => Ok(Statement::Stop),
+
+        // QUIT statement
+        Token::Keyword(0x98) => Ok(Statement::Quit),
 
         // REM statement (comment)
         Token::Keyword(0xF4) => {
@@ -2686,5 +2691,13 @@ mod tests {
             }
             _ => panic!("Expected Assignment statement, got {:?}", stmt),
         }
+    }
+
+    #[test]
+    fn test_parse_quit() {
+        // RED: Test that QUIT is parsed correctly
+        let line = TokenizedLine::new(None, vec![Token::Keyword(0x98)]); // QUIT token
+        let stmt = parse_statement(&line).unwrap();
+        assert_eq!(stmt, Statement::Quit);
     }
 }

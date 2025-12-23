@@ -246,6 +246,13 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
 
         // Operators and separators
         match ch {
+            '\'' => {
+                // Apostrophe is shorthand for REM - rest of line is a comment
+                chars.next(); // consume apostrophe
+                tokens.push(Token::Keyword(0xF4)); // REM token
+                // Consume rest of line (don't tokenize comment text)
+                while chars.next().is_some() {}
+            }
             '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
                 chars.next();
                 tokens.push(Token::Operator(ch));
@@ -783,5 +790,20 @@ mod tests {
         );
         let result = detokenize(&line).unwrap();
         assert_eq!(result, "A% = 42");
+    }
+
+    #[test]
+    fn test_apostrophe_comment() {
+        // RED: Test that apostrophe (') is tokenized as REM
+        let line = tokenize("10 PRINT 42 ' This is a comment").unwrap();
+
+        // Should tokenize as: LineNumber(10), Keyword(PRINT), Integer(42), Keyword(REM)
+        assert_eq!(line.line_number, Some(10));
+        assert_eq!(line.tokens.len(), 3); // PRINT, 42, REM
+
+        // Check tokens
+        assert!(matches!(line.tokens[0], Token::Keyword(0xF1))); // PRINT
+        assert!(matches!(line.tokens[1], Token::Integer(42)));
+        assert!(matches!(line.tokens[2], Token::Keyword(0xF4))); // REM
     }
 }

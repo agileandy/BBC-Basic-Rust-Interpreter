@@ -76,8 +76,12 @@ pub struct Executor {
     while_stack: Vec<u16>,
     // DATA storage: stores all DATA values in program order
     data_values: Vec<DataValue>,
+    // DATA line numbers: tracks which line each DATA value came from (parallel to data_values)
+    data_line_numbers: Vec<Option<u16>>,
     // DATA pointer: current index in data_values
     data_pointer: usize,
+    // Current line number being executed (for DATA tracking)
+    current_line: Option<u16>,
     // Random number generator for RND function (wrapped in RefCell for interior mutability)
     rng: RefCell<rand::rngs::ThreadRng>,
     // Procedure definitions: name -> (line_number, params)
@@ -110,7 +114,9 @@ impl Executor {
             repeat_stack: Vec::new(),
             while_stack: Vec::new(),
             data_values: Vec::new(),
+            data_line_numbers: Vec::new(),
             data_pointer: 0,
+            current_line: None,
             rng: RefCell::new(rand::thread_rng()),
             procedures: HashMap::new(),
             functions: HashMap::new(),
@@ -124,6 +130,11 @@ impl Executor {
         }
     }
 
+    /// Set the current line number (for tests and program execution tracking)
+    pub fn set_line_number(&mut self, line_number: Option<u16>) {
+        self.current_line = line_number;
+    }
+
     /// Execute a statement
     pub fn execute_statement(&mut self, statement: &Statement) -> Result<()> {
         match statement {
@@ -131,8 +142,8 @@ impl Executor {
                 self.execute_assignment(target, expression)
             }
             Statement::Print { items } => self.execute_print(items),
-            Statement::End | Statement::Stop => {
-                // END and STOP both stop execution
+            Statement::End | Statement::Stop | Statement::Quit => {
+                // END, STOP, and QUIT all stop execution
                 // In a full program, this would signal the interpreter to halt
                 Ok(())
             }
@@ -589,8 +600,12 @@ impl Executor {
 
     /// Execute DATA statement - stores data values for READ
     fn execute_data(&mut self, values: &[DataValue]) -> Result<()> {
-        // DATA statements just append values to the data pool
-        self.data_values.extend(values.iter().cloned());
+        // DATA statements append values to the data pool
+        // Track which line each value came from
+        for value in values {
+            self.data_values.push(value.clone());
+            self.data_line_numbers.push(self.current_line);
+        }
         Ok(())
     }
 
@@ -598,7 +613,10 @@ impl Executor {
     /// This is used to collect all DATA statements before program execution begins
     pub fn collect_data(&mut self, statement: &Statement) -> Result<()> {
         if let Statement::Data { values } = statement {
-            self.data_values.extend(values.iter().cloned());
+            for value in values {
+                self.data_values.push(value.clone());
+                self.data_line_numbers.push(self.current_line);
+            }
         }
         Ok(())
     }
@@ -607,6 +625,7 @@ impl Executor {
     /// Called at the start of RUN to prepare for fresh program execution
     pub fn reset_data(&mut self) {
         self.data_values.clear();
+        self.data_line_numbers.clear();
         self.data_pointer = 0;
     }
 
@@ -656,10 +675,26 @@ impl Executor {
     }
 
     /// Execute RESTORE statement - resets data pointer
-    fn execute_restore(&mut self, _line_number: Option<u16>) -> Result<()> {
-        // For now, just reset to beginning
-        // TODO: Support RESTORE to specific line number
-        self.data_pointer = 0;
+    fn execute_restore(&mut self, line_number: Option<u16>) -> Result<()> {
+        if let Some(target_line) = line_number {
+            // Find the first DATA value at or after the target line
+            for (i, data_line) in self.data_line_numbers.iter().enumerate() {
+                if let Some(line) = data_line {
+                    if *line >= target_line {
+                        self.data_pointer = i;
+                        return Ok(());
+                    }
+                }
+            }
+            // If no DATA found at or after target line, error
+            return Err(BBCBasicError::SyntaxError {
+                message: format!("No DATA at line {}", target_line),
+                line: None,
+            });
+        } else {
+            // No line number: reset to beginning
+            self.data_pointer = 0;
+        }
         Ok(())
     }
 
@@ -685,6 +720,30 @@ impl Executor {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => Ok(*val as i32),
             Expression::Variable(name) => {
+                // Check for pseudo-variables first
+                if name == "TIME" {
+                    // TIME returns centiseconds since program start or system boot
+                    // For now, use system time
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap();
+                    // Convert to centiseconds (1/100th of a second)
+                    let centiseconds = (now.as_millis() / 10) as i32;
+                    return Ok(centiseconds);
+                } else if name == "HIMEM" {
+                    // HIMEM returns top of available memory
+                    return Ok(self.memory.get_himem() as i32);
+                } else if name == "LOMEM" {
+                    // LOMEM returns bottom of user memory (PAGE)
+                    return Ok(self.memory.get_page() as i32);
+                } else if name == "ERR" {
+                    // ERR returns the last error number (0 if no error)
+                    return Ok(self.last_error.as_ref().map(|e| e.error_number).unwrap_or(0));
+                } else if name == "ERL" {
+                    // ERL returns the line number where the last error occurred (0 if no error)
+                    return Ok(self.last_error.as_ref().map(|e| e.error_line as i32).unwrap_or(0));
+                }
+
                 if name.ends_with('%') {
                     self.variables
                         .get_integer_var(name)
@@ -1411,6 +1470,16 @@ impl Executor {
                 } else {
                     Ok(String::new())
                 }
+            }
+            "REPORT$" => {
+                // REPORT$ returns the last error message (empty string if no error)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "REPORT$ takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(self.last_error.as_ref().map(|e| e.message.clone()).unwrap_or_default())
             }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown string function: {}", name),
@@ -3267,6 +3336,57 @@ mod tests {
     }
 
     #[test]
+    fn test_restore_with_line_number() {
+        // RED: Test RESTORE line_number jumps to specific DATA statement
+        let mut executor = Executor::new();
+
+        // Simulate:
+        // 10 DATA 100, 200
+        // 20 DATA 300, 400
+        // 30 READ A%, B%
+        // 40 RESTORE 20
+        // 50 READ C%, D%
+
+        // Line 10: DATA 100, 200
+        executor.set_line_number(Some(10));
+        let data_stmt1 = Statement::Data {
+            values: vec![DataValue::Integer(100), DataValue::Integer(200)],
+        };
+        executor.execute_statement(&data_stmt1).unwrap();
+
+        // Line 20: DATA 300, 400
+        executor.set_line_number(Some(20));
+        let data_stmt2 = Statement::Data {
+            values: vec![DataValue::Integer(300), DataValue::Integer(400)],
+        };
+        executor.execute_statement(&data_stmt2).unwrap();
+
+        // READ A%, B% (should get 100, 200)
+        let read_stmt1 = Statement::Read {
+            variables: vec!["A%".to_string(), "B%".to_string()],
+        };
+        executor.execute_statement(&read_stmt1).unwrap();
+
+        assert_eq!(executor.get_variable_int("A%").unwrap(), 100);
+        assert_eq!(executor.get_variable_int("B%").unwrap(), 200);
+
+        // RESTORE 20 (jump to line 20's DATA)
+        let restore_stmt = Statement::Restore {
+            line_number: Some(20),
+        };
+        executor.execute_statement(&restore_stmt).unwrap();
+
+        // READ C%, D% (should get 300, 400 from line 20)
+        let read_stmt2 = Statement::Read {
+            variables: vec!["C%".to_string(), "D%".to_string()],
+        };
+        executor.execute_statement(&read_stmt2).unwrap();
+
+        assert_eq!(executor.get_variable_int("C%").unwrap(), 300);
+        assert_eq!(executor.get_variable_int("D%").unwrap(), 400);
+    }
+
+    #[test]
     fn test_multiple_data_statements() {
         // RED: Test multiple DATA statements accumulate
         let mut executor = Executor::new();
@@ -3408,6 +3528,119 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_time_function() {
+        // RED: Test TIME returns centiseconds
+        let mut executor = Executor::new();
+
+        // TIME is a pseudo-variable that returns current time
+        let time_var = Expression::Variable("TIME".to_string());
+
+        let result1 = executor.eval_integer(&time_var).unwrap();
+
+        // Sleep a tiny bit
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let result2 = executor.eval_integer(&time_var).unwrap();
+
+        // Second reading should be >= first (time moves forward)
+        assert!(result2 >= result1, "TIME should increase: {} >= {}", result2, result1);
+
+        // Both should be positive
+        assert!(result1 >= 0, "TIME should be positive");
+        assert!(result2 >= 0, "TIME should be positive");
+    }
+
+    #[test]
+    fn test_himem_function() {
+        // RED: Test HIMEM returns top of memory
+        let mut executor = Executor::new();
+
+        let himem_var = Expression::Variable("HIMEM".to_string());
+
+        let result = executor.eval_integer(&himem_var).unwrap();
+
+        // HIMEM should return a positive memory address
+        assert!(result > 0, "HIMEM should be positive");
+
+        // Should be consistent across multiple reads
+        let result2 = executor.eval_integer(&himem_var).unwrap();
+        assert_eq!(result, result2, "HIMEM should be consistent");
+    }
+
+    #[test]
+    fn test_lomem_function() {
+        // RED: Test LOMEM returns bottom of memory (PAGE)
+        let mut executor = Executor::new();
+
+        let lomem_var = Expression::Variable("LOMEM".to_string());
+
+        let result = executor.eval_integer(&lomem_var).unwrap();
+
+        // LOMEM should return a positive memory address
+        assert!(result > 0, "LOMEM should be positive");
+
+        // Should be consistent across multiple reads
+        let result2 = executor.eval_integer(&lomem_var).unwrap();
+        assert_eq!(result, result2, "LOMEM should be consistent");
+
+        // LOMEM should be less than HIMEM
+        let himem_var = Expression::Variable("HIMEM".to_string());
+        let himem = executor.eval_integer(&himem_var).unwrap();
+        assert!(result < himem, "LOMEM should be < HIMEM");
+    }
+
+    #[test]
+    fn test_err_erl_report_functions() {
+        // RED: Test ERR, ERL, and REPORT$ return error information
+        let mut executor = Executor::new();
+
+        // Set a test error
+        executor.set_last_error(18, 100, "Division by zero".to_string());
+
+        // Test ERR (error number)
+        let err_var = Expression::Variable("ERR".to_string());
+        let err_result = executor.eval_integer(&err_var).unwrap();
+        assert_eq!(err_result, 18, "ERR should return error number");
+
+        // Test ERL (error line)
+        let erl_var = Expression::Variable("ERL".to_string());
+        let erl_result = executor.eval_integer(&erl_var).unwrap();
+        assert_eq!(erl_result, 100, "ERL should return error line");
+
+        // Test REPORT$ (error message)
+        let report_call = Expression::FunctionCall {
+            name: "REPORT$".to_string(),
+            args: vec![],
+        };
+        let report_result = executor.eval_string(&report_call).unwrap();
+        assert_eq!(report_result, "Division by zero", "REPORT$ should return error message");
+    }
+
+    #[test]
+    fn test_err_erl_no_error() {
+        // RED: Test ERR/ERL when no error has occurred
+        let mut executor = Executor::new();
+
+        // ERR should return 0 when no error
+        let err_var = Expression::Variable("ERR".to_string());
+        let err_result = executor.eval_integer(&err_var).unwrap();
+        assert_eq!(err_result, 0, "ERR should return 0 when no error");
+
+        // ERL should return 0 when no error
+        let erl_var = Expression::Variable("ERL".to_string());
+        let erl_result = executor.eval_integer(&erl_var).unwrap();
+        assert_eq!(erl_result, 0, "ERL should return 0 when no error");
+
+        // REPORT$ should return empty string when no error
+        let report_call = Expression::FunctionCall {
+            name: "REPORT$".to_string(),
+            args: vec![],
+        };
+        let report_result = executor.eval_string(&report_call).unwrap();
+        assert_eq!(report_result, "", "REPORT$ should return empty string when no error");
     }
 
     #[test]
