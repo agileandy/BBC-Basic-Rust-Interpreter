@@ -216,6 +216,23 @@ pub enum Statement {
     Gcol { mode: Expression, color: Expression },
     /// CLG statement - clear graphics screen
     Clg,
+    /// ELLIPSE statement - draw an ellipse
+    Ellipse {
+        x: Expression,
+        y: Expression,
+        major: Expression,
+        minor: Expression,
+    },
+    /// RECTANGLE statement - draw a rectangle
+    Rectangle {
+        x1: Expression,
+        y1: Expression,
+        width: Expression,
+        height: Expression,
+        filled: bool,
+    },
+    /// FILL statement - flood fill from coordinates
+    Fill { x: Expression, y: Expression },
     /// Empty statement
     Empty,
 }
@@ -477,6 +494,12 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0xA4 => Ok(Statement::EndWhile),
             // CIRCLE statement
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
+            // FILL statement
+            0x90 => parse_fill_statement(&tokens[1..], line.line_number),
+            // RECTANGLE statement
+            0x93 => parse_rectangle_statement(&tokens[1..], line.line_number),
+            // ELLIPSE statement
+            0x9D => parse_ellipse_statement(&tokens[1..], line.line_number),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown extended statement: {:?}", tokens[0]),
                 line: line.line_number,
@@ -1159,6 +1182,89 @@ fn parse_gcol_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
     Ok(Statement::Gcol {
         mode: args[0].clone(),
         color: args[1].clone(),
+    })
+}
+
+/// Parse ELLIPSE statement: ELLIPSE x, y, major, minor
+fn parse_ellipse_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "ELLIPSE requires x, y, major, minor parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 4 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "ELLIPSE requires 4 parameters (x, y, major, minor), got {}",
+                args.len()
+            ),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Ellipse {
+        x: args[0].clone(),
+        y: args[1].clone(),
+        major: args[2].clone(),
+        minor: args[3].clone(),
+    })
+}
+
+/// Parse RECTANGLE statement: RECTANGLE x1, y1, width, height
+fn parse_rectangle_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "RECTANGLE requires x1, y1, width, height parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 4 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "RECTANGLE requires 4 parameters (x1, y1, width, height), got {}",
+                args.len()
+            ),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Rectangle {
+        x1: args[0].clone(),
+        y1: args[1].clone(),
+        width: args[2].clone(),
+        height: args[3].clone(),
+        filled: true, // BBC BASIC RECTANGLE draws filled rectangles
+    })
+}
+
+/// Parse FILL statement: FILL x, y
+fn parse_fill_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "FILL requires x, y parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 2 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("FILL requires 2 parameters (x, y), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Fill {
+        x: args[0].clone(),
+        y: args[1].clone(),
     })
 }
 

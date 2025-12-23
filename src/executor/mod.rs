@@ -213,6 +213,15 @@ impl Executor {
             Statement::Circle { x, y, radius } => self.execute_circle(x, y, radius),
             Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
             Statement::Clg => self.execute_clg(),
+            Statement::Ellipse { x, y, major, minor } => self.execute_ellipse(x, y, major, minor),
+            Statement::Rectangle {
+                x1,
+                y1,
+                width,
+                height,
+                filled,
+            } => self.execute_rectangle(x1, y1, width, height, *filled),
+            Statement::Fill { x, y } => self.execute_fill(x, y),
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -779,6 +788,54 @@ impl Executor {
     /// Execute CLG statement - clear graphics screen
     fn execute_clg(&mut self) -> Result<()> {
         self.graphics.clear();
+        Ok(())
+    }
+
+    /// Execute ELLIPSE statement - draw an ellipse
+    fn execute_ellipse(
+        &mut self,
+        x: &Expression,
+        y: &Expression,
+        major: &Expression,
+        minor: &Expression,
+    ) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+        let major_val = self.eval_integer(major)?;
+        let minor_val = self.eval_integer(minor)?;
+
+        self.graphics.draw_ellipse(x_val, y_val, major_val, minor_val);
+        Ok(())
+    }
+
+    /// Execute RECTANGLE statement - draw a rectangle
+    fn execute_rectangle(
+        &mut self,
+        x1: &Expression,
+        y1: &Expression,
+        width: &Expression,
+        height: &Expression,
+        filled: bool,
+    ) -> Result<()> {
+        let x1_val = self.eval_integer(x1)?;
+        let y1_val = self.eval_integer(y1)?;
+        let width_val = self.eval_integer(width)?;
+        let height_val = self.eval_integer(height)?;
+
+        let x2_val = x1_val + width_val;
+        let y2_val = y1_val + height_val;
+
+        self.graphics
+            .draw_rectangle(x1_val, y1_val, x2_val, y2_val, filled);
+        Ok(())
+    }
+
+    /// Execute FILL statement - flood fill from coordinates
+    fn execute_fill(&mut self, x: &Expression, y: &Expression) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+
+        self.graphics.flood_fill(x_val, y_val);
         Ok(())
     }
 
