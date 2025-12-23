@@ -1,5 +1,13 @@
 # BBC BASIC Interpreter - Implementation Plan
 
+## Reference Documentation
+
+**BBC BASIC for Windows Manual:** https://www.bbcbasic.co.uk/bbcwin/manual/index.html
+
+This comprehensive manual covers BBC BASIC syntax, functions, statements, and extensions. Use this as the authoritative reference when implementing features.
+
+---
+
 ## Current Status (December 22, 2024)
 
 ### Session Summary

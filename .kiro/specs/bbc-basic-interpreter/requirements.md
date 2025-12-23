@@ -1,5 +1,13 @@
 # Requirements Document
 
+## Reference Documentation
+
+**BBC BASIC for Windows Manual:** https://www.bbcbasic.co.uk/bbcwin/manual/index.html
+
+This comprehensive manual provides the authoritative specification for BBC BASIC syntax, functions, statements, and behavior. All requirements in this document are based on the BBC BASIC language as documented in this manual and as implemented in the BBC Micro Model B.
+
+---
+
 ## Introduction
 
 This document specifies the requirements for a BBC BASIC interpreter that emulates the functionality of the BBC Micro Model B computer. The interpreter will support the complete BBC BASIC language as implemented on the 6502-based Model B, including all standard commands, functions, and ROM extensions, with 32K RAM emulation.
