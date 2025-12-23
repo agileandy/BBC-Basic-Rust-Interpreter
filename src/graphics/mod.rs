@@ -255,6 +255,202 @@ impl GraphicsSystem {
         };
     }
 
+    /// Draw an ellipse using midpoint ellipse algorithm
+    pub fn draw_ellipse(&mut self, center_x: i32, center_y: i32, rx: i32, ry: i32) {
+        if rx <= 0 || ry <= 0 {
+            return;
+        }
+
+        let rx = rx.abs();
+        let ry = ry.abs();
+
+        // Region 1
+        let mut x = 0;
+        let mut y = ry;
+        let mut rx_sq = rx * rx;
+        let mut ry_sq = ry * ry;
+        let mut two_rx_sq = 2 * rx_sq;
+        let mut two_ry_sq = 2 * ry_sq;
+
+        let mut px = 0;
+        let mut py = two_rx_sq * y;
+
+        // Plot initial points
+        self.plot_ellipse_points(center_x, center_y, x, y);
+
+        // Region 1
+        let mut p = ry_sq - (rx_sq * ry) + (rx_sq / 4);
+        while px < py {
+            x += 1;
+            px += two_ry_sq;
+
+            if p < 0 {
+                p += ry_sq + px;
+            } else {
+                y -= 1;
+                py -= two_rx_sq;
+                p += ry_sq + px - py;
+            }
+            self.plot_ellipse_points(center_x, center_y, x, y);
+        }
+
+        // Region 2
+        p = ry_sq * (x + 1) * (x + 1) + rx_sq * (y - 1) * (y - 1) - rx_sq * ry_sq;
+        while y > 0 {
+            y -= 1;
+            py -= two_rx_sq;
+
+            if p > 0 {
+                p += rx_sq - py;
+            } else {
+                x += 1;
+                px += two_ry_sq;
+                p += rx_sq - py + px;
+            }
+            self.plot_ellipse_points(center_x, center_y, x, y);
+        }
+
+        // Update current position to ellipse center
+        self.current_pos = Point {
+            x: center_x,
+            y: center_y,
+        };
+    }
+
+    /// Helper to plot 4 quadrants of ellipse
+    fn plot_ellipse_points(&mut self, cx: i32, cy: i32, x: i32, y: i32) {
+        self.set_pixel(cx + x, cy + y);
+        self.set_pixel(cx - x, cy + y);
+        self.set_pixel(cx + x, cy - y);
+        self.set_pixel(cx - x, cy - y);
+    }
+
+    /// Draw a filled rectangle
+    pub fn draw_rectangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, filled: bool) {
+        let min_x = x1.min(x2);
+        let max_x = x1.max(x2);
+        let min_y = y1.min(y2);
+        let max_y = y1.max(y2);
+
+        if filled {
+            // Fill the rectangle
+            for y in min_y..=max_y {
+                for x in min_x..=max_x {
+                    self.set_pixel(x, y);
+                }
+            }
+        } else {
+            // Draw outline
+            for x in min_x..=max_x {
+                self.set_pixel(x, min_y);
+                self.set_pixel(x, max_y);
+            }
+            for y in min_y..=max_y {
+                self.set_pixel(min_x, y);
+                self.set_pixel(max_x, y);
+            }
+        }
+
+        // Update current position
+        self.current_pos = Point { x: x2, y: y2 };
+    }
+
+    /// Draw a triangle
+    pub fn draw_triangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, filled: bool) {
+        if filled {
+            // Filled triangle using scanline algorithm
+            self.fill_triangle(x1, y1, x2, y2, x3, y3);
+        } else {
+            // Outline triangle - draw three lines
+            self.draw_line(x1, y1, x2, y2);
+            self.draw_line(x2, y2, x3, y3);
+            self.draw_line(x3, y3, x1, y1);
+        }
+
+        // Update current position to last vertex
+        self.current_pos = Point { x: x3, y: y3 };
+    }
+
+    /// Fill a triangle using scanline algorithm
+    fn fill_triangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32) {
+        // Sort vertices by y-coordinate
+        let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
+        verts.sort_by_key(|v| v.1);
+        let (x1, y1) = verts[0];
+        let (x2, y2) = verts[1];
+        let (x3, y3) = verts[2];
+
+        // Fill scanlines
+        for y in y1..=y3 {
+            let mut x_left = x1;
+            let mut x_right = x1;
+
+            // Calculate x intersections with triangle edges
+            if y <= y2 {
+                // Upper part of triangle
+                if y2 != y1 {
+                    x_left = x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+                }
+                if y3 != y1 {
+                    x_right = x1 + (x3 - x1) * (y - y1) / (y3 - y1);
+                }
+            } else {
+                // Lower part of triangle
+                if y3 != y2 {
+                    x_left = x2 + (x3 - x2) * (y - y2) / (y3 - y2);
+                }
+                if y3 != y1 {
+                    x_right = x1 + (x3 - x1) * (y - y1) / (y3 - y1);
+                }
+            }
+
+            // Ensure x_left <= x_right
+            if x_left > x_right {
+                std::mem::swap(&mut x_left, &mut x_right);
+            }
+
+            // Draw horizontal line
+            for x in x_left..=x_right {
+                self.set_pixel(x, y);
+            }
+        }
+    }
+
+    /// Flood fill starting from a point
+    pub fn flood_fill(&mut self, start_x: i32, start_y: i32) {
+        // Get the target color to replace
+        let target_color = match self.get_pixel(start_x, start_y) {
+            Some(color) => color,
+            None => return, // Outside bounds
+        };
+
+        let fill_color = self.foreground_color > 0;
+
+        // Don't fill if already the target color
+        if target_color == fill_color {
+            return;
+        }
+
+        // Stack-based flood fill (avoids recursion stack overflow)
+        let mut stack = Vec::new();
+        stack.push((start_x, start_y));
+
+        while let Some((x, y)) = stack.pop() {
+            // Check if pixel is valid and matches target color
+            if let Some(color) = self.get_pixel(x, y) {
+                if color == target_color {
+                    self.set_pixel(x, y);
+
+                    // Add adjacent pixels to stack
+                    stack.push((x + 1, y));
+                    stack.push((x - 1, y));
+                    stack.push((x, y + 1));
+                    stack.push((x, y - 1));
+                }
+            }
+        }
+    }
+
     /// Get current graphics cursor position
     pub fn get_position(&self) -> (i32, i32) {
         (self.current_pos.x, self.current_pos.y)

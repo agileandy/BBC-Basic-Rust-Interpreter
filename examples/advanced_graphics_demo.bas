@@ -1,0 +1,57 @@
+10 REM Advanced Graphics Demo for BBC BASIC
+20 REM Demonstrates ELLIPSE, RECTANGLE, and FILL commands
+30 REM
+40 CLG
+50 GCOL 0, 255
+60 REM
+70 REM Draw a robot face using shapes
+80 REM
+90 REM Head (ellipse)
+100 ELLIPSE 400, 600, 120, 150
+110 REM
+120 REM Eyes (circles)
+130 CIRCLE 350, 650, 25
+140 CIRCLE 450, 650, 25
+150 REM
+160 REM Nose (small ellipse)
+170 ELLIPSE 400, 600, 15, 25
+180 REM
+190 REM Mouth (rectangle)
+200 RECTANGLE 350, 530, 100, 20
+210 REM
+220 REM Body (large rectangle)
+230 RECTANGLE 320, 250, 160, 250
+240 REM
+250 REM Arms (rectangles)
+260 RECTANGLE 200, 350, 100, 30
+270 RECTANGLE 500, 350, 100, 30
+280 REM
+290 REM Draw a sun in the corner
+300 CIRCLE 900, 900, 60
+310 FILL 900, 900
+320 REM
+330 REM Draw some clouds (overlapping ellipses)
+340 ELLIPSE 200, 850, 80, 40
+350 ELLIPSE 250, 860, 70, 35
+360 ELLIPSE 300, 850, 80, 40
+370 REM
+380 ELLIPSE 700, 880, 90, 45
+390 ELLIPSE 760, 890, 80, 40
+400 ELLIPSE 820, 880, 90, 45
+410 REM
+420 REM Draw ground
+430 RECTANGLE 100, 150, 1000, 50
+440 FILL 500, 175
+450 REM
+460 REM Draw a house using various shapes
+470 RECTANGLE 650, 250, 150, 120
+480 RECTANGLE 690, 250, 70, 80
+490 REM
+500 REM House roof (triangle approximation using lines)
+510 MOVE 650, 370
+520 DRAW 725, 440
+530 DRAW 800, 370
+540 DRAW 650, 370
+550 REM
+560 PRINT "Advanced Graphics Demo Complete!"
+570 PRINT "Robot, sun, clouds, ground, and house"
