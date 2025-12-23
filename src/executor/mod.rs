@@ -2177,6 +2177,99 @@ impl Executor {
             }
         }
     }
+
+    /// PTR# function - Get current file position
+    pub fn get_ptr(&mut self, handle: i32) -> Result<i32> {
+        use std::io::Seek;
+
+        // Get the file handle
+        let file_handle = self.open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Get current position from the underlying file
+        match file_handle {
+            FileHandle::Input(reader) => {
+                let pos = reader.stream_position()
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+                Ok(pos as i32)
+            }
+            FileHandle::Output(writer) => {
+                let pos = writer.stream_position()
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+                Ok(pos as i32)
+            }
+        }
+    }
+
+    /// PTR# assignment - Set file position
+    pub fn set_ptr(&mut self, handle: i32, position: i32) -> Result<()> {
+        use std::io::Seek;
+
+        // Get the file handle
+        let file_handle = self.open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Seek to the specified position
+        let pos = position as u64;
+        match file_handle {
+            FileHandle::Input(reader) => {
+                reader.seek(std::io::SeekFrom::Start(pos))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+                Ok(())
+            }
+            FileHandle::Output(writer) => {
+                writer.seek(std::io::SeekFrom::Start(pos))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+                Ok(())
+            }
+        }
+    }
+
+    /// EXT# function - Get file size
+    pub fn get_ext(&mut self, handle: i32) -> Result<i32> {
+        use std::io::Seek;
+
+        // Get the file handle
+        let file_handle = self.open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // Get file size by seeking to end
+        match file_handle {
+            FileHandle::Input(reader) => {
+                // Save current position
+                let current_pos = reader.stream_position()
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                // Seek to end to get size
+                let size = reader.seek(std::io::SeekFrom::End(0))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                // Restore original position
+                reader.seek(std::io::SeekFrom::Start(current_pos))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                Ok(size as i32)
+            }
+            FileHandle::Output(writer) => {
+                // Save current position
+                let current_pos = writer.stream_position()
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                // Seek to end to get size
+                let size = writer.seek(std::io::SeekFrom::End(0))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                // Restore original position
+                writer.seek(std::io::SeekFrom::Start(current_pos))
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                Ok(size as i32)
+            }
+        }
+    }
 }
 
 impl Default for Executor {
@@ -4585,6 +4678,167 @@ mod tests {
         assert_eq!(bytes, &[0, 1, 44]);
 
         // Clean up
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ptr_get_position() {
+        // RED: Test PTR# function returns current file position
+        use std::fs;
+        let test_file = "test_ptr_get.dat";
+
+        // Create test file with some bytes
+        fs::write(test_file, &[1, 2, 3, 4, 5]).unwrap();
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // Initial position should be 0
+        let pos0 = executor.get_ptr(handle).unwrap();
+        assert_eq!(pos0, 0);
+
+        // Read one byte - position should be 1
+        executor.bget(handle).unwrap();
+        let pos1 = executor.get_ptr(handle).unwrap();
+        assert_eq!(pos1, 1);
+
+        // Read two more bytes - position should be 3
+        executor.bget(handle).unwrap();
+        executor.bget(handle).unwrap();
+        let pos3 = executor.get_ptr(handle).unwrap();
+        assert_eq!(pos3, 3);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ptr_set_position() {
+        // RED: Test PTR# assignment sets file position
+        use std::fs;
+        let test_file = "test_ptr_set.dat";
+
+        // Create test file with bytes
+        fs::write(test_file, &[65, 66, 67, 68, 69]).unwrap(); // A, B, C, D, E
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // Set position to 2 (pointing at 'C')
+        executor.set_ptr(handle, 2).unwrap();
+        let byte = executor.bget(handle).unwrap();
+        assert_eq!(byte, 67); // 'C'
+
+        // Set position to 4 (pointing at 'E')
+        executor.set_ptr(handle, 4).unwrap();
+        let byte2 = executor.bget(handle).unwrap();
+        assert_eq!(byte2, 69); // 'E'
+
+        // Set position to 0 (back to start)
+        executor.set_ptr(handle, 0).unwrap();
+        let byte3 = executor.bget(handle).unwrap();
+        assert_eq!(byte3, 65); // 'A'
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ptr_with_output_file() {
+        // RED: Test PTR# works with output files too
+        use std::fs;
+        let test_file = "test_ptr_output.dat";
+
+        let _ = fs::remove_file(test_file);
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_writing(test_file).unwrap();
+
+        // Write some bytes
+        executor.bput(handle, 65).unwrap();
+        executor.bput(handle, 66).unwrap();
+
+        // Position should be 2
+        let pos = executor.get_ptr(handle).unwrap();
+        assert_eq!(pos, 2);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ext_returns_file_size() {
+        // RED: Test EXT# function returns file size
+        use std::fs;
+        let test_file = "test_ext.dat";
+
+        // Create test file with 10 bytes
+        fs::write(test_file, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // File size should be 10
+        let size = executor.get_ext(handle).unwrap();
+        assert_eq!(size, 10);
+
+        // Size shouldn't change after reading
+        executor.bget(handle).unwrap();
+        executor.bget(handle).unwrap();
+        let size2 = executor.get_ext(handle).unwrap();
+        assert_eq!(size2, 10);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ext_with_empty_file() {
+        // RED: Test EXT# with empty file returns 0
+        use std::fs;
+        let test_file = "test_ext_empty.dat";
+
+        // Create empty file
+        fs::write(test_file, &[]).unwrap();
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // File size should be 0
+        let size = executor.get_ext(handle).unwrap();
+        assert_eq!(size, 0);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_ext_with_output_file() {
+        // RED: Test EXT# works with output files
+        use std::fs;
+        let test_file = "test_ext_output.dat";
+
+        let _ = fs::remove_file(test_file);
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_writing(test_file).unwrap();
+
+        // Write 5 bytes
+        for i in 1..=5 {
+            executor.bput(handle, i).unwrap();
+        }
+
+        // Size should be 5
+        let size = executor.get_ext(handle).unwrap();
+        assert_eq!(size, 5);
+
+        // Clean up
+        drop(executor);
         let _ = fs::remove_file(test_file);
     }
 }
