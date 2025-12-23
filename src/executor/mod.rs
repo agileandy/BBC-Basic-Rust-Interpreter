@@ -2115,6 +2115,68 @@ impl Executor {
 
         Ok(())
     }
+
+    /// BGET# function - Read a single byte from file
+    /// Returns the byte value (0-255) or -1 at EOF
+    pub fn bget(&mut self, handle: i32) -> Result<i32> {
+        use std::io::Read;
+
+        // Get the file handle
+        let file_handle = self.open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // BGET# only works on input files
+        match file_handle {
+            FileHandle::Input(reader) => {
+                // Read a single byte
+                let mut buf = [0u8; 1];
+                match reader.read_exact(&mut buf) {
+                    Ok(_) => Ok(buf[0] as i32),
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        // EOF reached - return -1
+                        Ok(-1)
+                    }
+                    Err(e) => Err(BBCBasicError::DiskError(e.to_string())),
+                }
+            }
+            FileHandle::Output(_) => {
+                Err(BBCBasicError::TypeMismatch) // Cannot read from output file
+            }
+        }
+    }
+
+    /// BPUT# statement - Write a single byte to file
+    /// Values > 255 are wrapped using MOD 256
+    pub fn bput(&mut self, handle: i32, value: i32) -> Result<()> {
+        use std::io::Write;
+
+        // Get the file handle
+        let file_handle = self.open_files
+            .get_mut(&handle)
+            .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // BPUT# only works on output files
+        match file_handle {
+            FileHandle::Output(writer) => {
+                // Convert value to byte (MOD 256)
+                let byte = (value % 256) as u8;
+
+                // Write the byte
+                writer.write_all(&[byte])
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                // Flush to ensure byte is written
+                writer.flush()
+                    .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
+
+                Ok(())
+            }
+            FileHandle::Input(_) => {
+                Err(BBCBasicError::TypeMismatch) // Cannot write to input file
+            }
+        }
+    }
 }
 
 impl Default for Executor {
@@ -4406,6 +4468,124 @@ mod tests {
         executor.variables.set_integer_var("I%".to_string(), 3);
         executor.check_endwhile(&outer_condition).unwrap();
         assert_eq!(executor.while_stack.len(), 0, "Outer loop should be popped");
+    }
+
+    #[test]
+    fn test_bget_reads_single_byte() {
+        // RED: Test BGET# reads a single byte from file
+        use std::fs;
+        let test_file = "test_bget.dat";
+
+        // Create a test file with some bytes
+        fs::write(test_file, &[65, 66, 67, 255, 0]).unwrap();
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // Read first byte (65 = 'A')
+        let byte1 = executor.bget(handle).unwrap();
+        assert_eq!(byte1, 65);
+
+        // Read second byte (66 = 'B')
+        let byte2 = executor.bget(handle).unwrap();
+        assert_eq!(byte2, 66);
+
+        // Read third byte (67 = 'C')
+        let byte3 = executor.bget(handle).unwrap();
+        assert_eq!(byte3, 67);
+
+        // Read fourth byte (255)
+        let byte4 = executor.bget(handle).unwrap();
+        assert_eq!(byte4, 255);
+
+        // Read fifth byte (0)
+        let byte5 = executor.bget(handle).unwrap();
+        assert_eq!(byte5, 0);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_bget_at_eof() {
+        // RED: Test BGET# at end of file returns -1
+        use std::fs;
+        let test_file = "test_bget_eof.dat";
+
+        // Create a test file with one byte
+        fs::write(test_file, &[42]).unwrap();
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_reading(test_file).unwrap();
+
+        // Read the one byte
+        let byte = executor.bget(handle).unwrap();
+        assert_eq!(byte, 42);
+
+        // Try to read past EOF - should return -1
+        let eof_byte = executor.bget(handle).unwrap();
+        assert_eq!(eof_byte, -1);
+
+        // Clean up
+        drop(executor);
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_bput_writes_single_byte() {
+        // RED: Test BPUT# writes a single byte to file
+        use std::fs;
+        let test_file = "test_bput.dat";
+
+        let _ = fs::remove_file(test_file);
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_writing(test_file).unwrap();
+
+        // Write some bytes
+        executor.bput(handle, 65).unwrap();  // 'A'
+        executor.bput(handle, 66).unwrap();  // 'B'
+        executor.bput(handle, 67).unwrap();  // 'C'
+        executor.bput(handle, 255).unwrap(); // Max byte value
+        executor.bput(handle, 0).unwrap();   // Zero
+
+        // Close the file
+        drop(executor);
+
+        // Read the file back to verify
+        let bytes = fs::read(test_file).unwrap();
+        assert_eq!(bytes, &[65, 66, 67, 255, 0]);
+
+        // Clean up
+        let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_bput_with_large_numbers() {
+        // RED: Test BPUT# with numbers > 255 (should wrap using MOD 256)
+        use std::fs;
+        let test_file = "test_bput_wrap.dat";
+
+        let _ = fs::remove_file(test_file);
+
+        let mut executor = Executor::new();
+        let handle = executor.open_file_for_writing(test_file).unwrap();
+
+        // Write numbers > 255 (should MOD 256)
+        executor.bput(handle, 256).unwrap();  // Should write 0
+        executor.bput(handle, 257).unwrap();  // Should write 1
+        executor.bput(handle, 300).unwrap();  // Should write 44
+
+        // Close the file
+        drop(executor);
+
+        // Read the file back to verify
+        let bytes = fs::read(test_file).unwrap();
+        assert_eq!(bytes, &[0, 1, 44]);
+
+        // Clean up
+        let _ = fs::remove_file(test_file);
     }
 }
 
