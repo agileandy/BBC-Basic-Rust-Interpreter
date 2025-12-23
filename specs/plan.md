@@ -8,7 +8,7 @@ This comprehensive manual covers BBC BASIC syntax, functions, statements, and ex
 
 ---
 
-## Current Status (December 22, 2024)
+## Current Status (December 23, 2024)
 
 ### Session Summary
 **Completed Features:**
@@ -19,9 +19,10 @@ This comprehensive manual covers BBC BASIC syntax, functions, statements, and ex
 5. ✅ Error handling (ON ERROR/ERL/ERR) (2024-12-22)
 6. ✅ File I/O (OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF#) (2024-12-22)
 7. ✅ WHILE...ENDWHILE loops (2024-12-22)
+8. ✅ Extended File I/O (BGET#/BPUT#/PTR#/EXT#) (2024-12-23)
 
-**Test Count:** 169 passing unit tests
-**Lines of Code:** ~7900 LOC
+**Test Count:** 198 passing unit tests (was 169)
+**Lines of Code:** ~8300 LOC (was 7900)
 
 ### Active Branches
 - `main` - Stable baseline
@@ -30,7 +31,7 @@ This comprehensive manual covers BBC BASIC syntax, functions, statements, and ex
 ### Implementation Progress
 - **Core Language:** ~98% complete (all arithmetic, control flow, procedures, functions, error handling, all loop types)
 - **Console I/O:** 100% complete (PRINT, INPUT, CLS)
-- **File Operations:** 80% complete (SAVE/LOAD/CHAIN/OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF# done)
+- **File Operations:** 100% complete (SAVE/LOAD/CHAIN/OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF#/BGET#/BPUT#/PTR#/EXT# done) ✅
 - **Math Functions:** 80% complete (basic math + trig done)
 - **String Functions:** 70% complete (core operations done)
 - **Error Handling:** 75% complete (ON ERROR/ERL/ERR done, ERROR/REPORT pending)
