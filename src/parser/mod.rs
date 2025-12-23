@@ -196,6 +196,26 @@ pub enum Statement {
     },
     /// CLOSE# statement - close file
     CloseFile { handle: Expression },
+    /// PLOT statement - general plotting with mode code
+    Plot {
+        mode: Expression,
+        x: Expression,
+        y: Expression,
+    },
+    /// MOVE statement - move graphics cursor
+    Move { x: Expression, y: Expression },
+    /// DRAW statement - draw line to coordinates
+    Draw { x: Expression, y: Expression },
+    /// CIRCLE statement - draw a circle
+    Circle {
+        x: Expression,
+        y: Expression,
+        radius: Expression,
+    },
+    /// GCOL statement - set graphics color
+    Gcol { mode: Expression, color: Expression },
+    /// CLG statement - clear graphics screen
+    Clg,
     /// Empty statement
     Empty,
 }
@@ -433,12 +453,30 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             }
         }
 
+        // Graphics statements
+        // PLOT statement
+        Token::Keyword(0xF0) => parse_plot_statement(&tokens[1..], line.line_number),
+
+        // DRAW statement
+        Token::Keyword(0xDF) => parse_draw_statement(&tokens[1..], line.line_number),
+
+        // MOVE statement
+        Token::Keyword(0xEC) => parse_move_statement(&tokens[1..], line.line_number),
+
+        // GCOL statement
+        Token::Keyword(0xE6) => parse_gcol_statement(&tokens[1..], line.line_number),
+
+        // CLG statement
+        Token::Keyword(0xDA) => Ok(Statement::Clg),
+
         // Extended statements (0xC8 prefix)
         Token::ExtendedKeyword(0xC8, extended_token) => match extended_token {
             // WHILE statement
             0x95 => parse_while_statement(&tokens[1..], line.line_number),
             // ENDWHILE statement
             0xA4 => Ok(Statement::EndWhile),
+            // CIRCLE statement
+            0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown extended statement: {:?}", tokens[0]),
                 line: line.line_number,
@@ -987,18 +1025,181 @@ fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
 /// Parse CLOSE# statement (file I/O)
 fn parse_close_file_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // Format: CLOSE# handle
-    
+
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected file handle after CLOSE#".to_string(),
             line: line_number,
         });
     }
-    
+
     // Parse handle expression
     let handle = parse_expression(tokens)?;
-    
+
     Ok(Statement::CloseFile { handle })
+}
+
+/// Parse PLOT statement: PLOT mode, x, y
+fn parse_plot_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "PLOT requires mode, x, y parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    // Parse comma-separated arguments: mode, x, y
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 3 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("PLOT requires 3 parameters (mode, x, y), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Plot {
+        mode: args[0].clone(),
+        x: args[1].clone(),
+        y: args[2].clone(),
+    })
+}
+
+/// Parse MOVE statement: MOVE x, y
+fn parse_move_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "MOVE requires x, y parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 2 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("MOVE requires 2 parameters (x, y), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Move {
+        x: args[0].clone(),
+        y: args[1].clone(),
+    })
+}
+
+/// Parse DRAW statement: DRAW x, y
+fn parse_draw_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "DRAW requires x, y parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 2 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("DRAW requires 2 parameters (x, y), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Draw {
+        x: args[0].clone(),
+        y: args[1].clone(),
+    })
+}
+
+/// Parse CIRCLE statement: CIRCLE x, y, radius
+fn parse_circle_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "CIRCLE requires x, y, radius parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 3 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("CIRCLE requires 3 parameters (x, y, radius), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Circle {
+        x: args[0].clone(),
+        y: args[1].clone(),
+        radius: args[2].clone(),
+    })
+}
+
+/// Parse GCOL statement: GCOL mode, color
+fn parse_gcol_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "GCOL requires mode, color parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 2 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("GCOL requires 2 parameters (mode, color), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Gcol {
+        mode: args[0].clone(),
+        color: args[1].clone(),
+    })
+}
+
+/// Helper function to parse comma-separated expressions
+fn parse_comma_separated_expressions(
+    tokens: &[Token],
+    line_number: Option<u16>,
+) -> Result<Vec<Expression>> {
+    let mut expressions = Vec::new();
+    let mut start = 0;
+    let mut pos = 0;
+
+    while pos <= tokens.len() {
+        // Check if we hit a comma or end of tokens
+        if pos == tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
+            if start < pos {
+                // Parse the expression between commas
+                let expr = parse_expression(&tokens[start..pos])?;
+                expressions.push(expr);
+            }
+
+            if pos < tokens.len() {
+                // Skip the comma
+                pos += 1;
+                start = pos;
+            } else {
+                break;
+            }
+        } else {
+            pos += 1;
+        }
+    }
+
+    if expressions.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected at least one expression".to_string(),
+            line: line_number,
+        });
+    }
+
+    Ok(expressions)
 }
 
 /// Helper function to parse print items (extracted for reuse)

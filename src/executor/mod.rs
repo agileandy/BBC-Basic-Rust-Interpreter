@@ -3,6 +3,7 @@
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
 use crate::error::{BBCBasicError, Result};
+use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, Expression, Statement};
 use crate::variables::{Variable, VariableStore};
@@ -66,6 +67,7 @@ pub struct ErrorInfo {
 pub struct Executor {
     variables: VariableStore,
     memory: MemoryManager,
+    graphics: GraphicsSystem,
     // Control flow stack for GOSUB/RETURN
     return_stack: Vec<u16>,
     // FOR loop state: (variable, end_value, step_value, loop_line)
@@ -109,6 +111,7 @@ impl Executor {
         Self {
             variables: VariableStore::new(),
             memory: MemoryManager::new(),
+            graphics: GraphicsSystem::new(),
             return_stack: Vec::new(),
             for_loops: Vec::new(),
             repeat_stack: Vec::new(),
@@ -203,6 +206,13 @@ impl Executor {
                 Ok(())
             }
             Statement::Cls => self.execute_cls(),
+            // Graphics statements
+            Statement::Plot { mode, x, y } => self.execute_plot(mode, x, y),
+            Statement::Move { x, y } => self.execute_move(x, y),
+            Statement::Draw { x, y } => self.execute_draw(x, y),
+            Statement::Circle { x, y, radius } => self.execute_circle(x, y, radius),
+            Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
+            Statement::Clg => self.execute_clg(),
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -712,6 +722,69 @@ impl Executor {
             print!("\x1b[2J\x1b[H");
         }
         Ok(())
+    }
+
+    /// Execute PLOT statement - plot with mode code
+    fn execute_plot(&mut self, mode: &Expression, x: &Expression, y: &Expression) -> Result<()> {
+        let mode_val = self.eval_integer(mode)?;
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+
+        self.graphics.plot(mode_val as u8, x_val, y_val);
+        Ok(())
+    }
+
+    /// Execute MOVE statement - move graphics cursor
+    fn execute_move(&mut self, x: &Expression, y: &Expression) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+
+        self.graphics.move_to(x_val, y_val);
+        Ok(())
+    }
+
+    /// Execute DRAW statement - draw line to coordinates
+    fn execute_draw(&mut self, x: &Expression, y: &Expression) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+
+        self.graphics.draw_line_to(x_val, y_val);
+        Ok(())
+    }
+
+    /// Execute CIRCLE statement - draw a circle
+    fn execute_circle(
+        &mut self,
+        x: &Expression,
+        y: &Expression,
+        radius: &Expression,
+    ) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+        let radius_val = self.eval_integer(radius)?;
+
+        self.graphics.draw_circle(x_val, y_val, radius_val);
+        Ok(())
+    }
+
+    /// Execute GCOL statement - set graphics color
+    fn execute_gcol(&mut self, mode: &Expression, color: &Expression) -> Result<()> {
+        let mode_val = self.eval_integer(mode)?;
+        let color_val = self.eval_integer(color)?;
+
+        self.graphics.set_color(mode_val as u8, color_val as u8);
+        Ok(())
+    }
+
+    /// Execute CLG statement - clear graphics screen
+    fn execute_clg(&mut self) -> Result<()> {
+        self.graphics.clear();
+        Ok(())
+    }
+
+    /// Get graphics output as string (for display or testing)
+    pub fn get_graphics_output(&self) -> String {
+        self.graphics.render()
     }
 
     /// Evaluate an expression to an integer value
