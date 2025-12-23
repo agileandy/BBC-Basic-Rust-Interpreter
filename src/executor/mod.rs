@@ -736,6 +736,12 @@ impl Executor {
                 } else if name == "LOMEM" {
                     // LOMEM returns bottom of user memory (PAGE)
                     return Ok(self.memory.get_page() as i32);
+                } else if name == "ERR" {
+                    // ERR returns the last error number (0 if no error)
+                    return Ok(self.last_error.as_ref().map(|e| e.error_number).unwrap_or(0));
+                } else if name == "ERL" {
+                    // ERL returns the line number where the last error occurred (0 if no error)
+                    return Ok(self.last_error.as_ref().map(|e| e.error_line as i32).unwrap_or(0));
                 }
 
                 if name.ends_with('%') {
@@ -1464,6 +1470,16 @@ impl Executor {
                 } else {
                     Ok(String::new())
                 }
+            }
+            "REPORT$" => {
+                // REPORT$ returns the last error message (empty string if no error)
+                if !args.is_empty() {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "REPORT$ takes no arguments".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(self.last_error.as_ref().map(|e| e.message.clone()).unwrap_or_default())
             }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown string function: {}", name),
@@ -3574,6 +3590,57 @@ mod tests {
         let himem_var = Expression::Variable("HIMEM".to_string());
         let himem = executor.eval_integer(&himem_var).unwrap();
         assert!(result < himem, "LOMEM should be < HIMEM");
+    }
+
+    #[test]
+    fn test_err_erl_report_functions() {
+        // RED: Test ERR, ERL, and REPORT$ return error information
+        let mut executor = Executor::new();
+
+        // Set a test error
+        executor.set_last_error(18, 100, "Division by zero".to_string());
+
+        // Test ERR (error number)
+        let err_var = Expression::Variable("ERR".to_string());
+        let err_result = executor.eval_integer(&err_var).unwrap();
+        assert_eq!(err_result, 18, "ERR should return error number");
+
+        // Test ERL (error line)
+        let erl_var = Expression::Variable("ERL".to_string());
+        let erl_result = executor.eval_integer(&erl_var).unwrap();
+        assert_eq!(erl_result, 100, "ERL should return error line");
+
+        // Test REPORT$ (error message)
+        let report_call = Expression::FunctionCall {
+            name: "REPORT$".to_string(),
+            args: vec![],
+        };
+        let report_result = executor.eval_string(&report_call).unwrap();
+        assert_eq!(report_result, "Division by zero", "REPORT$ should return error message");
+    }
+
+    #[test]
+    fn test_err_erl_no_error() {
+        // RED: Test ERR/ERL when no error has occurred
+        let mut executor = Executor::new();
+
+        // ERR should return 0 when no error
+        let err_var = Expression::Variable("ERR".to_string());
+        let err_result = executor.eval_integer(&err_var).unwrap();
+        assert_eq!(err_result, 0, "ERR should return 0 when no error");
+
+        // ERL should return 0 when no error
+        let erl_var = Expression::Variable("ERL".to_string());
+        let erl_result = executor.eval_integer(&erl_var).unwrap();
+        assert_eq!(erl_result, 0, "ERL should return 0 when no error");
+
+        // REPORT$ should return empty string when no error
+        let report_call = Expression::FunctionCall {
+            name: "REPORT$".to_string(),
+            args: vec![],
+        };
+        let report_result = executor.eval_string(&report_call).unwrap();
+        assert_eq!(report_result, "", "REPORT$ should return empty string when no error");
     }
 
     #[test]
