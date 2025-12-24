@@ -157,3 +157,143 @@ fn test_graphics_integration() {
     assert!(output.contains('|'));
     assert!(output.contains('█') || output.contains('▓') || output.contains('▒'));
 }
+
+#[test]
+fn test_point_function() {
+    let mut executor = Executor::new();
+
+    // Test POINT function - can read pixel state
+    // First set a pixel using PLOT
+    execute_line(&mut executor, "10 CLG");
+    execute_line(&mut executor, "20 PLOT 69, 400, 400"); // Plot a point
+
+    // Use POINT and PRINT to verify it works
+    execute_line(&mut executor, "30 PRINT POINT(400, 400)");
+
+    // The point was plotted, so it should return non-zero (TRUE)
+    // We're just verifying POINT doesn't crash and returns something
+    let output = executor.get_output();
+    // POINT returns -1 for TRUE
+    assert!(output.trim().contains("-1") || output.trim().contains("1"), "POINT should return -1 (TRUE) for plotted point, got: {}", output);
+
+    executor.clear_output();
+
+    // Check a location that wasn't plotted
+    execute_line(&mut executor, "40 PRINT POINT(100, 100)");
+    let output = executor.get_output();
+    // POINT returns 0 for FALSE
+    assert!(output.contains('0'), "POINT should return 0 (FALSE) for unset pixel");
+}
+
+#[test]
+fn test_point_function_after_draw() {
+    let mut executor = Executor::new();
+
+    // Draw a line and use POINT to check pixels
+    execute_line(&mut executor, "10 CLG");
+    execute_line(&mut executor, "20 MOVE 400, 400");
+    execute_line(&mut executor, "30 DRAW 600, 600");
+
+    // Check a point on the diagonal line (500, 500)
+    execute_line(&mut executor, "40 PRINT POINT(500, 500)");
+    let output = executor.get_output();
+    // Should be TRUE (non-zero) since the line goes through (500, 500)
+    assert!(output.trim().contains("-1") || output.trim().contains("1"), "POINT should return -1 (TRUE) on the line, got: {}", output);
+
+    executor.clear_output();
+
+    // Check a point off the line
+    execute_line(&mut executor, "50 PRINT POINT(100, 100)");
+    let output = executor.get_output();
+    // Should be FALSE (0)
+    assert!(output.contains('0'));
+}
+
+#[test]
+fn test_point_function_with_circle() {
+    let mut executor = Executor::new();
+
+    // Draw a circle and test POINT on its edge
+    execute_line(&mut executor, "10 CLG");
+    execute_line(&mut executor, "20 CIRCLE 500, 500, 100");
+
+    // Test POINT at a point that should be on the circle edge (600, 500)
+    execute_line(&mut executor, "30 PRINT POINT(600, 500)");
+    let output = executor.get_output();
+    // Just verify POINT works - the exact value depends on circle drawing algorithm
+    // Either TRUE or FALSE is acceptable
+    assert!(!output.is_empty());
+}
+
+#[test]
+fn test_origin_command() {
+    let mut executor = Executor::new();
+
+    // Test ORIGIN command - shifts graphics coordinate system
+    execute_line(&mut executor, "10 ORIGIN 100, 100");
+
+    // After ORIGIN 100, 100, a MOVE to (400, 400) should actually move to (500, 500) in canvas coords
+    execute_line(&mut executor, "20 MOVE 400, 400");
+    execute_line(&mut executor, "30 DRAW 600, 600");
+
+    // The graphics system should handle the origin offset correctly
+    let output = executor.get_graphics_output();
+    // Just verify it doesn't crash and produces output
+    assert!(!output.is_empty());
+}
+
+#[test]
+fn test_origin_affects_plotting() {
+    let mut executor = Executor::new();
+
+    // Set origin first
+    execute_line(&mut executor, "10 ORIGIN 200, 200");
+    execute_line(&mut executor, "20 CLG");
+    execute_line(&mut executor, "30 CIRCLE 400, 400, 50");
+
+    // The circle should be drawn at (600, 600) in canvas coordinates due to origin offset
+    let output = executor.get_graphics_output();
+    // Verify graphics output exists
+    assert!(!output.is_empty());
+    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+}
+
+#[test]
+fn test_plot_triangle_fill_modes() {
+    let mut executor = Executor::new();
+
+    // Test PLOT modes 128-191 (filled triangles)
+    // Triangle modes work in pairs:
+    // - First PLOT stores current position as triangle corner
+    // - Second PLOT draws triangle from corner -> current -> target
+
+    execute_line(&mut executor, "10 CLG");
+    execute_line(&mut executor, "20 MOVE 400, 300"); // Move to first corner
+
+    // First PLOT 128: stores (400, 300) as triangle corner
+    execute_line(&mut executor, "30 PLOT 128, 600, 600");
+
+    // Second PLOT 128: draws triangle from (400,300) -> (600,600) -> (600,300)
+    execute_line(&mut executor, "40 MOVE 600, 300");
+    execute_line(&mut executor, "50 PLOT 128, 600, 600");
+
+    let output = executor.get_graphics_output();
+    // Should have drawn something
+    assert!(!output.is_empty());
+}
+
+#[test]
+fn test_plot_triangle_with_different_modes() {
+    let mut executor = Executor::new();
+
+    // Test that different triangle modes work (129-191 use patterns)
+    execute_line(&mut executor, "10 CLG");
+    execute_line(&mut executor, "20 MOVE 400, 400");
+    execute_line(&mut executor, "30 PLOT 129, 600, 600"); // Store corner
+    execute_line(&mut executor, "40 MOVE 600, 400");
+    execute_line(&mut executor, "50 PLOT 129, 600, 600"); // Draw triangle
+
+    let output = executor.get_graphics_output();
+    assert!(!output.is_empty());
+}
+

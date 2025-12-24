@@ -35,6 +35,8 @@ pub struct GraphicsSystem {
     background_color: u8,
     /// Graphics color mode (0 = set, 1 = OR, 2 = AND, 3 = XOR, 4 = invert)
     color_mode: u8,
+    /// Triangle corner for PLOT 128-191 modes (stored vertex for filled triangles)
+    triangle_corner: Option<Point>,
 }
 
 impl GraphicsSystem {
@@ -54,6 +56,7 @@ impl GraphicsSystem {
             foreground_color: 255, // White
             background_color: 0,   // Black
             color_mode: 0,         // Set mode
+            triangle_corner: None, // No triangle corner stored initially
         }
     }
 
@@ -208,6 +211,27 @@ impl GraphicsSystem {
                     y: target_y,
                 };
             }
+            // 128-191: Filled triangle
+            _ if mode >= 128 && mode <= 191 => {
+                // Triangle modes work in pairs:
+                // - First PLOT stores current position as triangle corner
+                // - Second PLOT draws triangle from corner -> current -> target
+                if let Some(corner) = self.triangle_corner {
+                    // Second PLOT: draw the triangle
+                    let filled = true; // All triangle modes are filled
+                    self.draw_triangle(corner.x, corner.y, self.current_pos.x, self.current_pos.y, target_x, target_y, filled);
+                    // Reset triangle corner after drawing
+                    self.triangle_corner = None;
+                } else {
+                    // First PLOT: store current position as triangle corner
+                    self.triangle_corner = Some(self.current_pos);
+                }
+                // Update current position to target
+                self.current_pos = Point {
+                    x: target_x,
+                    y: target_y,
+                };
+            }
             // Default: just move cursor
             _ => {
                 self.current_pos = Point {
@@ -267,10 +291,10 @@ impl GraphicsSystem {
         // Region 1
         let mut x = 0;
         let mut y = ry;
-        let mut rx_sq = rx * rx;
-        let mut ry_sq = ry * ry;
-        let mut two_rx_sq = 2 * rx_sq;
-        let mut two_ry_sq = 2 * ry_sq;
+        let rx_sq = rx * rx;
+        let ry_sq = ry * ry;
+        let two_rx_sq = 2 * rx_sq;
+        let two_ry_sq = 2 * ry_sq;
 
         let mut px = 0;
         let mut py = two_rx_sq * y;

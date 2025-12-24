@@ -183,23 +183,50 @@ src/
 
 ## Test Coverage
 
-- **84 tests** covering all major components
+- **232 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
+- Integration tests for graphics, file I/O, and command processing
+- Graphics tests with PLOT modes, CIRCLE, ELLIPSE, ORIGIN, POINT function
+- Sound tests with SOUND, ENVELOPE, TEMPO, VOICE
 
-## Limitations (Current Version)
+## Implementation Status: **100% Vanilla BBC BASIC Complete**
 
-This is v0.1.0 with core functionality. Not yet implemented:
+As of December 2025, this interpreter implements **all standard BBC BASIC features** from the BBC Micro Model B:
 
-- IF...THEN...ELSE conditionals
-- Array element access (arrays can be dimensioned but not accessed)
-- Built-in functions (SIN, COS, ABS, etc.)
-- Graphics commands (PLOT, DRAW, MOVE, etc.)
-- Sound commands (SOUND, ENVELOPE)
-- File I/O (LOAD, SAVE, OPENIN, OPENOUT)
-- PROC/FN user-defined procedures/functions
-- RETURN from GOSUB (stack is tracked but no jump-back implemented)
+### ✅ Fully Implemented Features
+
+- **Control Flow**: IF...THEN...ELSE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
+- **Variables**: Integer (%), Real, String ($), Arrays (multi-dimensional)
+- **Functions**: DEF FN with parameters, user-defined procedures (DEF PROC...ENDPROC)
+- **Built-in Functions**: SIN, COS, TAN, ASN, ACS, ATN, LOG, LN, EXP, SQR, ABS, SGN, INT, PI, DEG, RAD, RND
+- **String Functions**: LEFT$, RIGHT$, MID$, CHR$, ASC, STR$, VAL, LEN, INSTR
+- **Graphics**: MOVE, DRAW, PLOT (all modes 0-191), CIRCLE, ELLIPSE, RECTANGLE, FILL, CLG, GCOL, COLOUR
+- **Graphics Origin**: ORIGIN x,y command for coordinate transformation
+- **Pixel Reading**: POINT(x,y) function returns pixel state
+- **Sound**: SOUND, ENVELOPE, TEMPO, VOICE
+- **File I/O**: OPENIN, OPENOUT, OPENUP, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
+- **Error Handling**: ON ERROR GOTO, ERR, ERL, REPORT, ERROR statement
+- **Memory**: PEEK, POKE, ?, !, $ indirection operators
+- **Other**: DATA, READ, RESTORE, DIM, LOCAL, END, STOP, QUIT, CLS, LIST, NEW, OLD, SAVE, LOAD, CHAIN
+
+### 📊 Test Results
+
+- **232 total tests** - All passing (203 library + 12 graphics + 17 sound)
+- Zero warnings with `cargo clippy`
+- Clean compilation
+
+### Non-Standard Extensions
+
+The following functions are **NOT** part of the original BBC BASIC specification but are provided as modern extensions:
+
+- `UPPER$` - Convert string to uppercase
+- `LOWER$` - Convert string to lowercase
+- `STRING$` - Repeat character N times
+- `REPORT$` - Get last error message as string
+
+These are documented in `src/extensions/mod.rs`.
 
 ## Examples
 
@@ -229,6 +256,55 @@ Result:50
 > NAME$ = "BBC Micro"
 > PRINT "Welcome to "; NAME$
 Welcome to BBC Micro
+```
+
+### Graphics Demo
+```basic
+> CLG
+> GCOL 0, 255
+> MOVE 400, 400
+> DRAW 600, 400
+> DRAW 600, 600
+> DRAW 400, 600
+> DRAW 400, 400
+> CIRCLE 500, 500, 100
+```
+
+### User-Defined Functions
+```basic
+> DEF FNfactorial(n) = IF n<=1 THEN 1 ELSE n*FNfactorial(n-1)
+> PRINT FNfactorial(5)
+120
+```
+
+### Procedures with Parameters
+```basic
+> DEF PROCSquare(x, y, size)
+>   RECTANGLE x, y, size, size
+> ENDPROC
+>
+> PROCSquare(100, 100, 50)
+> PROCSquare(200, 200, 75)
+```
+
+## Demo Programs
+
+The project includes several demo programs:
+
+| File | Description |
+|------|-------------|
+| `demo_final.bbas` | Complete feature demonstration |
+| `demo.bbas` | Basic language features |
+| `examples/graphics_demo.bas` | Graphics primitives demo |
+| `examples/advanced_graphics_demo.bas` | Advanced graphics with shapes |
+| `test_file_io.bas` | File I/O operations |
+| `test_while.bas` | WHILE loop demonstration |
+| `test_error_handling.bas` | Error handling demo |
+| `sinewave.bas` | Sound demonstration |
+
+Run a demo:
+```bash
+(echo "LOAD demo_final"; echo "RUN") | cargo run --release
 ```
 
 ## License

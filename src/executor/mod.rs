@@ -101,7 +101,6 @@ pub struct Executor {
     // Next file handle number to allocate
     next_file_handle: i32,
     // Output buffer (for testing)
-    #[cfg(test)]
     output: String,
 }
 
@@ -128,7 +127,6 @@ impl Executor {
             last_error: None,
             open_files: HashMap::new(),
             next_file_handle: 1,
-            #[cfg(test)]
             output: String::new(),
         }
     }
@@ -143,6 +141,9 @@ impl Executor {
         match statement {
             Statement::Assignment { target, expression } => {
                 self.execute_assignment(target, expression)
+            }
+            Statement::ArrayAssignment { name, indices, expression } => {
+                self.execute_array_assignment(name, indices, expression)
             }
             Statement::Print { items } => self.execute_print(items),
             Statement::End | Statement::Stop | Statement::Quit => {
@@ -222,6 +223,7 @@ impl Executor {
                 filled,
             } => self.execute_rectangle(x1, y1, width, height, *filled),
             Statement::Fill { x, y } => self.execute_fill(x, y),
+            Statement::Origin { x, y } => self.execute_origin(x, y),
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -276,6 +278,38 @@ impl Executor {
             self.variables.set_real_var(target.to_string(), value);
             Ok(())
         }
+    }
+
+    /// Execute an array element assignment statement (e.g., numbers%(I%) = 5)
+    fn execute_array_assignment(
+        &mut self,
+        name: &str,
+        indices: &[Expression],
+        expression: &Expression,
+    ) -> Result<()> {
+        use crate::variables::Variable;
+
+        // Evaluate all indices to integers
+        let mut index_values = Vec::with_capacity(indices.len());
+        for index_expr in indices {
+            let idx = self.eval_integer(index_expr)?;
+            if idx < 0 {
+                return Err(BBCBasicError::SubscriptOutOfRange);
+            }
+            index_values.push(idx as usize);
+        }
+
+        // Determine the array type and evaluate the expression accordingly
+        let value = if name.ends_with('%') {
+            Variable::Integer(self.eval_integer(expression)?)
+        } else if name.ends_with('$') {
+            Variable::String(self.eval_string(expression)?)
+        } else {
+            Variable::Real(self.eval_real(expression)?)
+        };
+
+        // Set the array element
+        self.variables.set_array_element(name, &index_values, value)
     }
 
     /// Execute a PRINT statement
@@ -387,10 +421,7 @@ impl Executor {
 
     /// Print output (to buffer in test mode, to stdout in production)
     fn print_output(&mut self, text: &str) {
-        #[cfg(test)]
-        {
-            self.output.push_str(text);
-        }
+        self.output.push_str(text);
         #[cfg(not(test))]
         {
             print!("{}", text);
@@ -398,13 +429,11 @@ impl Executor {
     }
 
     /// Get output buffer (for testing)
-    #[cfg(test)]
     pub fn get_output(&self) -> &str {
         &self.output
     }
 
     /// Clear output buffer (for testing)
-    #[cfg(test)]
     pub fn clear_output(&mut self) {
         self.output.clear();
     }
@@ -839,6 +868,15 @@ impl Executor {
         Ok(())
     }
 
+    /// Execute ORIGIN statement - set graphics origin
+    fn execute_origin(&mut self, x: &Expression, y: &Expression) -> Result<()> {
+        let x_val = self.eval_integer(x)?;
+        let y_val = self.eval_integer(y)?;
+
+        self.graphics.set_origin(x_val, y_val);
+        Ok(())
+    }
+
     /// Get graphics output as string (for display or testing)
     pub fn get_graphics_output(&self) -> String {
         self.graphics.render()
@@ -879,11 +917,33 @@ impl Executor {
                         .get_integer_var(name)
                         .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone()))
                 } else {
-                    let real_val = self
-                        .variables
-                        .get_real_var(name)
-                        .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone()))?;
-                    Ok(real_val as i32)
+                    // Try as real variable first, then as integer (for loop vars without % suffix)
+                    if let Some(real_val) = self.variables.get_real_var(name) {
+                        Ok(real_val as i32)
+                    } else if let Some(int_val) = self.variables.get_integer_var(name) {
+                        Ok(int_val)
+                    } else {
+                        Err(BBCBasicError::NoSuchVariable(name.clone()))
+                    }
+                }
+            }
+            Expression::ArrayAccess { name, indices } => {
+                use crate::variables::Variable;
+                // Evaluate all indices to integers
+                let mut index_values = Vec::with_capacity(indices.len());
+                for index_expr in indices {
+                    let idx = self.eval_integer(index_expr)?;
+                    if idx < 0 {
+                        return Err(BBCBasicError::SubscriptOutOfRange);
+                    }
+                    index_values.push(idx as usize);
+                }
+                // Get the array element
+                let element = self.variables.get_array_element(name, &index_values)?;
+                match element {
+                    Variable::Integer(val) => Ok(val),
+                    Variable::Real(val) => Ok(val as i32),
+                    _ => Err(BBCBasicError::TypeMismatch),
                 }
             }
             Expression::BinaryOp { op, left, right } => {
@@ -982,6 +1042,25 @@ impl Executor {
                     }
                 }
             }
+            Expression::ArrayAccess { name, indices } => {
+                use crate::variables::Variable;
+                // Evaluate all indices to integers
+                let mut index_values = Vec::with_capacity(indices.len());
+                for index_expr in indices {
+                    let idx = self.eval_integer(index_expr)?;
+                    if idx < 0 {
+                        return Err(BBCBasicError::SubscriptOutOfRange);
+                    }
+                    index_values.push(idx as usize);
+                }
+                // Get the array element
+                let element = self.variables.get_array_element(name, &index_values)?;
+                match element {
+                    Variable::Real(val) => Ok(val),
+                    Variable::Integer(val) => Ok(val as f64),
+                    _ => Err(BBCBasicError::TypeMismatch),
+                }
+            }
             Expression::BinaryOp { op, left, right } => {
                 use crate::parser::BinaryOperator;
                 let left_val = self.eval_real(left)?;
@@ -1025,6 +1104,24 @@ impl Executor {
                 .get_string_var(name)
                 .map(|s| s.to_string())
                 .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone())),
+            Expression::ArrayAccess { name, indices } => {
+                use crate::variables::Variable;
+                // Evaluate all indices to integers
+                let mut index_values = Vec::with_capacity(indices.len());
+                for index_expr in indices {
+                    let idx = self.eval_integer(index_expr)?;
+                    if idx < 0 {
+                        return Err(BBCBasicError::SubscriptOutOfRange);
+                    }
+                    index_values.push(idx as usize);
+                }
+                // Get the array element
+                let element = self.variables.get_array_element(name, &index_values)?;
+                match element {
+                    Variable::String(val) => Ok(val),
+                    _ => Err(BBCBasicError::TypeMismatch),
+                }
+            }
             Expression::FunctionCall { name, args } => self.eval_function_string(name, args),
             _ => Err(BBCBasicError::TypeMismatch),
         }
@@ -1215,6 +1312,24 @@ impl Executor {
                 } else {
                     Ok(0)
                 }
+            }
+            "POINT" => {
+                // POINT(x, y) - Read pixel state at coordinates
+                // Returns -1 (TRUE) if pixel is set, 0 (FALSE) if not set
+                if args.len() != 2 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "POINT requires 2 arguments (x, y)".to_string(),
+                        line: None,
+                    });
+                }
+                let x = self.eval_integer(&args[0])?;
+                let y = self.eval_integer(&args[1])?;
+                // Returns -1 if pixel is set, 0 if not (BBC BASIC boolean convention)
+                Ok(if self.graphics.get_pixel(x, y) == Some(true) {
+                    -1
+                } else {
+                    0
+                })
             }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN" | "LOG"
@@ -1564,6 +1679,22 @@ impl Executor {
                     }
                 }
             }
+            _ => {
+                // Check for extension functions (UPPER$, LOWER$, STRING$, REPORT$)
+                // These are NOT standard BBC BASIC functions
+                self.eval_extension_string_function(name, args)
+            }
+        }
+    }
+
+    /// Evaluate a non-standard extension string function
+    ///
+    /// These functions are NOT part of the original BBC BASIC specification
+    /// but are provided as modern extensions.
+    fn eval_extension_string_function(&mut self, name: &str, args: &[Expression]) -> Result<String> {
+        let error_msg = self.last_error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+
+        match name {
             "UPPER$" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -1594,7 +1725,7 @@ impl Executor {
                 let count = self.eval_integer(&args[0])? as usize;
                 let s = self.eval_string(&args[1])?;
 
-                // BBC BASIC STRING$(n, string) repeats first character n times
+                // STRING$(n, string) repeats first character n times
                 if let Some(first_char) = s.chars().next() {
                     Ok(first_char.to_string().repeat(count))
                 } else {
@@ -1602,14 +1733,13 @@ impl Executor {
                 }
             }
             "REPORT$" => {
-                // REPORT$ returns the last error message (empty string if no error)
                 if !args.is_empty() {
                     return Err(BBCBasicError::SyntaxError {
                         message: "REPORT$ takes no arguments".to_string(),
                         line: None,
                     });
                 }
-                Ok(self.last_error.as_ref().map(|e| e.message.clone()).unwrap_or_default())
+                Ok(error_msg)
             }
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown string function: {}", name),
@@ -1873,6 +2003,12 @@ impl Executor {
             .as_ref()
             .map(|e| e.error_number)
             .unwrap_or(0)
+    }
+
+    /// Get last error information (for extension functions)
+    #[cfg(test)]
+    pub fn get_last_error(&self) -> Option<&ErrorInfo> {
+        self.last_error.as_ref()
     }
 
     /// Execute DEF FN statement - define a function

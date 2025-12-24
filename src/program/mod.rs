@@ -2,8 +2,6 @@
 //!
 //! Manages BBC BASIC program lines in tokenized format with automatic sorting.
 
-use crate::error::Result;
-use crate::parser::Statement;
 use crate::tokenizer::TokenizedLine;
 use std::collections::BTreeMap;
 

@@ -5,6 +5,7 @@
 //! compatibility with BBC BASIC programs.
 
 pub mod executor;
+pub mod extensions;
 pub mod filesystem;
 pub mod graphics;
 pub mod memory;

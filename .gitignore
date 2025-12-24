@@ -1,7 +1,66 @@
 /target
+
+# Cargo
 Cargo.lock
-*.pdf
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+
+# Claude Code
 .claude/
+
+# Output directories
 output/
+dist/
+build/
+
+# Test files
 *.bbas
+*.bas
+test_*.bas
+demo*.bas
+demo*.bbas
+
+# Debug / profiling
+*.flamegraph
+*.prof
+*.profraw
+
+# Coverage reports
+*.profdata
+lcov.info
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# OS specific
+Thumbs.db
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# Rust specific
+**/*.rs.bk
+*.pdb
+
+# Documentation builds
+doc/
+
+# Backup files
+*.bak
+*.backup
+*~

@@ -233,6 +233,8 @@ pub enum Statement {
     },
     /// FILL statement - flood fill from coordinates
     Fill { x: Expression, y: Expression },
+    /// ORIGIN statement - set graphics origin
+    Origin { x: Expression, y: Expression },
     /// Empty statement
     Empty,
 }
@@ -496,6 +498,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             // FILL statement
             0x90 => parse_fill_statement(&tokens[1..], line.line_number),
+            // ORIGIN statement
+            0x91 => parse_origin_statement(&tokens[1..], line.line_number),
             // RECTANGLE statement
             0x93 => parse_rectangle_statement(&tokens[1..], line.line_number),
             // ELLIPSE statement
@@ -634,7 +638,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
     Ok(Statement::Print { items })
 }
 
-/// Parse assignment statement (A% = 42 or LET A% = 42)
+/// Parse assignment statement (A% = 42 or LET A% = 42, or array assignment like arr(i) = 5)
 fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     if tokens.len() < 3 {
         return Err(BBCBasicError::SyntaxError {
@@ -653,6 +657,55 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
         }
     };
 
+    // Check if this is an array element assignment: array_name(index) = value
+    if tokens.len() > 1 && matches!(tokens[1], Token::Separator('(')) {
+        // Find the closing parenthesis
+        let mut paren_depth = 0;
+        let mut close_paren_pos = None;
+        for (i, token) in tokens.iter().enumerate() {
+            if matches!(token, Token::Separator('(')) {
+                paren_depth += 1;
+            } else if matches!(token, Token::Separator(')')) {
+                paren_depth -= 1;
+                if paren_depth == 0 {
+                    close_paren_pos = Some(i);
+                    break;
+                }
+            }
+        }
+
+        let close_paren_pos = close_paren_pos.ok_or(BBCBasicError::SyntaxError {
+            message: "Expected ')' in array assignment".to_string(),
+            line: line_number,
+        })?;
+
+        // Parse indices between parentheses
+        let indices_tokens = &tokens[2..close_paren_pos];
+        let indices = if indices_tokens.is_empty() {
+            Vec::new()
+        } else {
+            parse_comma_separated_expressions(indices_tokens, line_number)?
+        };
+
+        // After closing paren, expect '='
+        if close_paren_pos + 1 >= tokens.len() || !matches!(tokens[close_paren_pos + 1], Token::Operator('=')) {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected '=' after array indices".to_string(),
+                line: line_number,
+            });
+        }
+
+        // Parse the value expression
+        let expression = parse_expression(&tokens[close_paren_pos + 2..])?;
+
+        return Ok(Statement::ArrayAssignment {
+            name: target,
+            indices,
+            expression,
+        });
+    }
+
+    // Simple variable assignment
     if !matches!(tokens[1], Token::Operator('=')) {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected '='".to_string(),
@@ -1268,6 +1321,31 @@ fn parse_fill_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
     })
 }
 
+/// Parse ORIGIN statement
+/// ORIGIN x, y - Set graphics origin
+fn parse_origin_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "ORIGIN requires x, y parameters".to_string(),
+            line: line_number,
+        });
+    }
+
+    let args = parse_comma_separated_expressions(tokens, line_number)?;
+
+    if args.len() != 2 {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("ORIGIN requires 2 parameters (x, y), got {}", args.len()),
+            line: line_number,
+        });
+    }
+
+    Ok(Statement::Origin {
+        x: args[0].clone(),
+        y: args[1].clone(),
+    })
+}
+
 /// Helper function to parse comma-separated expressions
 fn parse_comma_separated_expressions(
     tokens: &[Token],
@@ -1419,11 +1497,11 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
     let mut pos = 0;
 
     while pos < tokens.len() {
-        // Get array name
+        // Get array name (without the opening paren suffix if present)
         let name = match &tokens[pos] {
             Token::Identifier(n) => {
-                // Array names have opening paren
-                format!("{}(", n.trim_end_matches('('))
+                // Remove trailing '(' if present (some tokenizers include it)
+                n.trim_end_matches('(').to_string()
             }
             _ => {
                 return Err(BBCBasicError::SyntaxError {
@@ -2068,6 +2146,8 @@ fn get_keyword_precedence(keyword_code: u8) -> Option<u8> {
     match keyword_code {
         0x81 => Some(50), // DIV - same as / (integer division)
         0x83 => Some(50), // MOD - same as / (modulo)
+        0x80 => Some(20), // AND - lower than comparison
+        0x82 => Some(15), // OR - lower than AND
         _ => None,
     }
 }
@@ -2092,6 +2172,8 @@ fn keyword_to_binary_op(keyword_code: u8) -> Option<BinaryOperator> {
     match keyword_code {
         0x81 => Some(BinaryOperator::IntegerDivide), // DIV
         0x83 => Some(BinaryOperator::Modulo),        // MOD
+        0x80 => Some(BinaryOperator::And),           // AND
+        0x82 => Some(BinaryOperator::Or),            // OR
         _ => None,
     }
 }
@@ -2104,11 +2186,30 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
     // Parse binary operators with precedence
     while *pos < tokens.len() {
         // Check if current token is a binary operator (either operator or keyword)
-        let (prec, op) = match &tokens[*pos] {
+        let (prec, op, consumed) = match &tokens[*pos] {
             Token::Operator(ch) => {
-                if let Some(p) = get_precedence(*ch) {
+                // Check for >= and <= (two-character operators)
+                if (*ch == '>' || *ch == '<') && *pos + 1 < tokens.len() {
+                    if let Token::Operator('=') = tokens[*pos + 1] {
+                        // This is >= or <=
+                        let op = if *ch == '>' {
+                            BinaryOperator::GreaterThanOrEqual
+                        } else {
+                            BinaryOperator::LessThanOrEqual
+                        };
+                        (30, op, 2) // Consume 2 tokens
+                    } else if let Some(p) = get_precedence(*ch) {
+                        if let Some(binary_op) = char_to_binary_op(*ch) {
+                            (p, binary_op, 1)
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                } else if let Some(p) = get_precedence(*ch) {
                     if let Some(binary_op) = char_to_binary_op(*ch) {
-                        (p, binary_op)
+                        (p, binary_op, 1)
                     } else {
                         break;
                     }
@@ -2119,7 +2220,7 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
             Token::Keyword(code) => {
                 if let Some(p) = get_keyword_precedence(*code) {
                     if let Some(binary_op) = keyword_to_binary_op(*code) {
-                        (p, binary_op)
+                        (p, binary_op, 1)
                     } else {
                         break;
                     }
@@ -2135,7 +2236,7 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
             break;
         }
 
-        *pos += 1; // consume operator
+        *pos += consumed; // consume operator(s)
 
         // Parse right-hand side with higher precedence
         let right = parse_expr_precedence(tokens, pos, prec + 1)?;
@@ -2177,10 +2278,52 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
             Ok(Expression::String(s.clone()))
         }
 
-        // Variables
+        // Variables and array access
         Token::Identifier(name) => {
             *pos += 1;
-            Ok(Expression::Variable(name.clone()))
+            // Check if this is followed by '(' for array access
+            if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
+                // This is array access: name(index1, index2, ...)
+                *pos += 1; // consume '('
+
+                let mut indices = Vec::new();
+                // Parse indices
+                if *pos < tokens.len() && !matches!(tokens[*pos], Token::Separator(')')) {
+                    loop {
+                        let idx = parse_expr_precedence(tokens, pos, 0)?;
+                        indices.push(idx);
+
+                        if *pos >= tokens.len() {
+                            break;
+                        }
+
+                        match &tokens[*pos] {
+                            Token::Separator(',') => {
+                                *pos += 1;
+                                continue;
+                            }
+                            Token::Separator(')') => break,
+                            _ => break,
+                        }
+                    }
+                }
+
+                // Expect closing parenthesis
+                if *pos >= tokens.len() || !matches!(tokens[*pos], Token::Separator(')')) {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected ')' in array access".to_string(),
+                        line: None,
+                    });
+                }
+                *pos += 1; // consume ')'
+
+                Ok(Expression::ArrayAccess {
+                    name: name.clone(),
+                    indices,
+                })
+            } else {
+                Ok(Expression::Variable(name.clone()))
+            }
         }
 
         // Unary operators
@@ -2741,9 +2884,9 @@ mod tests {
             stmt,
             Statement::Dim {
                 arrays: vec![
-                    ("A%(".to_string(), vec![Expression::Integer(10)]),
+                    ("A%".to_string(), vec![Expression::Integer(10)]),
                     (
-                        "B(".to_string(),
+                        "B".to_string(),
                         vec![Expression::Integer(5), Expression::Integer(5)]
                     ),
                 ],
