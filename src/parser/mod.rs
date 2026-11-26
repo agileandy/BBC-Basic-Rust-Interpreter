@@ -1939,6 +1939,11 @@ fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     Ok(Statement::Local { variables })
 }
 
+/// Check for a parenthesis token. The tokenizer emits parentheses as separators.
+fn is_paren(token: &Token, paren: char) -> bool {
+    matches!(token, Token::Operator(c) | Token::Separator(c) if *c == paren)
+}
+
 /// Parse argument list: (expr1, expr2, ...)
 fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Expression>> {
     if tokens.is_empty() {
@@ -1946,7 +1951,7 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
     }
 
     // Expect opening parenthesis
-    if !matches!(tokens[0], Token::Operator('(')) {
+    if !is_paren(&tokens[0], '(') {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected ( after procedure name".to_string(),
             line: line_number,
@@ -1956,7 +1961,7 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
     // Find closing parenthesis
     let close_pos = tokens
         .iter()
-        .position(|t| matches!(t, Token::Operator(')')))
+        .rposition(|t| is_paren(t, ')'))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected ) after argument list".to_string(),
             line: line_number,
@@ -1974,8 +1979,8 @@ fn parse_argument_list(tokens: &[Token], line_number: Option<u16>) -> Result<Vec
 
     for i in 1..close_pos {
         match &tokens[i] {
-            Token::Operator('(') => depth += 1,
-            Token::Operator(')') => depth -= 1,
+            Token::Operator('(') | Token::Separator('(') => depth += 1,
+            Token::Operator(')') | Token::Separator(')') => depth -= 1,
             Token::Separator(',') if depth == 0 => {
                 // Parse expression from start to i
                 let expr = parse_expression(&tokens[start..i])?;
@@ -2002,7 +2007,7 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     }
 
     // Expect opening parenthesis
-    if !matches!(tokens[0], Token::Operator('(')) {
+    if !is_paren(&tokens[0], '(') {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected ( after procedure name".to_string(),
             line: line_number,
@@ -2012,7 +2017,7 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     // Find closing parenthesis
     let close_pos = tokens
         .iter()
-        .position(|t| matches!(t, Token::Operator(')')))
+        .rposition(|t| is_paren(t, ')'))
         .ok_or(BBCBasicError::SyntaxError {
             message: "Expected ) after parameter list".to_string(),
             line: line_number,
