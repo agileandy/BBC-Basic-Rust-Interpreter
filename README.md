@@ -183,19 +183,18 @@ src/
 
 ## Test Coverage
 
-- **232 tests** covering all major components
+- **245 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
-- Integration tests for graphics, file I/O, and command processing
 - Graphics tests with PLOT modes, CIRCLE, ELLIPSE, ORIGIN, POINT function
-- Sound tests with SOUND, ENVELOPE, TEMPO, VOICE
+- Program tests that run complete programs and the example programs
 
-## Implementation Status: **100% Vanilla BBC BASIC Complete**
+## Implementation Status: Partial
 
-As of December 2025, this interpreter implements **all standard BBC BASIC features** from the BBC Micro Model B:
+This interpreter implements most of the standard BBC BASIC features from the BBC Micro Model B. See "Known Limitations" for the features that do not work.
 
-### ✅ Fully Implemented Features
+### Implemented Features
 
 - **Control Flow**: IF...THEN...ELSE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
 - **Variables**: Integer (%), Real, String ($), Arrays (multi-dimensional)
@@ -205,7 +204,6 @@ As of December 2025, this interpreter implements **all standard BBC BASIC featur
 - **Graphics**: MOVE, DRAW, PLOT (all modes 0-191), CIRCLE, ELLIPSE, RECTANGLE, FILL, CLG, GCOL, COLOUR
 - **Graphics Origin**: ORIGIN x,y command for coordinate transformation
 - **Pixel Reading**: POINT(x,y) function returns pixel state
-- **Sound**: SOUND, ENVELOPE, TEMPO, VOICE
 - **File I/O**: OPENIN, OPENOUT, OPENUP, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
 - **Error Handling**: ON ERROR GOTO, ERR, ERL, REPORT, ERROR statement
 - **Memory**: PEEK, POKE, ?, !, $ indirection operators
@@ -213,9 +211,18 @@ As of December 2025, this interpreter implements **all standard BBC BASIC featur
 
 ### 📊 Test Results
 
-- **232 total tests** - All passing (203 library + 12 graphics + 17 sound)
-- Zero warnings with `cargo clippy`
-- Clean compilation
+- **245 total tests** - All passing (203 library + 29 graphics + 13 program)
+- Zero warnings with `cargo clippy --all-targets -- -D warnings`
+- `cargo fmt --check` passes
+
+### Known Limitations
+
+- **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
+- **Multi-line functions**: `RETURN` with a value does nothing. Only single-line `DEF FN` works.
+- **LOCAL**: an array is not restored when a procedure ends.
+- **INPUT**: a reply that is not a number leaves a numeric variable unchanged, with no error.
+- **ON ... GOTO / GOSUB**: an index out of range makes the program loop on the same line.
+- **Example programs**: 6 of the 16 programs in `examples/` do not run correctly. `tests/program_run_tests.rs` lists them with the cause.
 
 ### Non-Standard Extensions
 
