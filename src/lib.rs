@@ -12,6 +12,7 @@ pub mod memory;
 pub mod os;
 pub mod parser;
 pub mod program;
+pub mod runner;
 pub mod sound;
 pub mod tokenizer;
 pub mod variables;

@@ -379,14 +379,7 @@ impl Executor {
 
         // Add newline unless last item was semicolon
         if items.is_empty() || !matches!(items.last(), Some(PrintItem::Semicolon)) {
-            #[cfg(test)]
-            {
-                self.output.push('\n');
-            }
-            #[cfg(not(test))]
-            {
-                println!();
-            }
+            self.print_output("\n");
         }
 
         Ok(())

@@ -1,0 +1,295 @@
+//! Program run loop for BBC BASIC
+//!
+//! Runs a stored program from its first line and handles the control flow
+//! between lines (GOTO, GOSUB, loops, procedures and ON ERROR).
+
+use std::collections::HashMap;
+
+use crate::error::BBCBasicError;
+use crate::executor::Executor;
+use crate::parser::{parse_statement, Statement};
+use crate::program::ProgramStore;
+
+/// Run the stored program from its first line.
+///
+/// Each line is parsed one time before the run starts.
+pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<(), String> {
+    if program.is_empty() {
+        return Err("No program to run".to_string());
+    }
+
+    // Reset and collect all DATA statements before execution begins.
+    // This lets READ access DATA regardless of program flow (GOTO, etc.)
+    executor.reset_data();
+    executor.clear_procedures();
+
+    // First pass: parse each line, collect DATA statements and procedure definitions
+    let mut statements: HashMap<u16, Statement> = HashMap::new();
+    for (line_number, line) in program.list() {
+        let statement = parse_statement(line)
+            .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
+
+        if matches!(statement, Statement::Data { .. }) {
+            executor
+                .collect_data(&statement)
+                .map_err(|e| format!("Error collecting DATA at line {}: {:?}", line_number, e))?;
+        }
+
+        if let Statement::DefProc { name, params } = &statement {
+            executor.define_procedure(name.clone(), line_number, params.clone());
+        }
+
+        statements.insert(line_number, statement);
+    }
+
+    program.start_execution();
+
+    while let Some(line_number) = program.get_current_line() {
+        let statement = statements
+            .get(&line_number)
+            .ok_or_else(|| format!("Line {} not found", line_number))?;
+
+        // Handle errors with the ON ERROR handler if one is set
+        if let Err(e) = executor.execute_statement(statement) {
+            let Some(handler_line) = executor.get_error_handler() else {
+                return Err(format!("Runtime error at line {}: {:?}", line_number, e));
+            };
+
+            // Set error information (ERL and ERR)
+            executor.set_last_error(error_number(&e), line_number, format!("{:?}", e));
+
+            if !program.goto_line(handler_line) {
+                return Err(format!(
+                    "Error handler line {} not found (from error at line {})",
+                    handler_line, line_number
+                ));
+            }
+            continue;
+        }
+
+        // Handle control flow
+        match statement {
+            Statement::End | Statement::Stop => break,
+            Statement::Goto {
+                line_number: target,
+            } => {
+                if !program.goto_line(*target) {
+                    return Err(format!("Line {} not found (GOTO)", target));
+                }
+            }
+            Statement::Gosub {
+                line_number: target,
+            } => {
+                // Push the current line number so RETURN can come back here
+                executor.push_gosub_return(line_number);
+                if !program.goto_line(*target) {
+                    return Err(format!("Line {} not found (GOSUB)", target));
+                }
+            }
+            Statement::OnGoto {
+                expression,
+                targets,
+            } => {
+                // BBC BASIC uses 1-based indexing
+                let index = executor
+                    .eval_integer(expression)
+                    .map_err(|e| format!("Error evaluating ON GOTO expression: {:?}", e))?;
+
+                if index >= 1 && (index as usize) <= targets.len() {
+                    let target = targets[(index - 1) as usize];
+                    if !program.goto_line(target) {
+                        return Err(format!("Line {} not found (ON GOTO)", target));
+                    }
+                }
+            }
+            Statement::OnGosub {
+                expression,
+                targets,
+            } => {
+                // BBC BASIC uses 1-based indexing
+                let index = executor
+                    .eval_integer(expression)
+                    .map_err(|e| format!("Error evaluating ON GOSUB expression: {:?}", e))?;
+
+                if index >= 1 && (index as usize) <= targets.len() {
+                    let target = targets[(index - 1) as usize];
+                    executor.push_gosub_return(line_number);
+                    if !program.goto_line(target) {
+                        return Err(format!("Line {} not found (ON GOSUB)", target));
+                    }
+                }
+            }
+            Statement::Return { .. } => {
+                let return_line = executor
+                    .pop_gosub_return()
+                    .map_err(|_| "RETURN without GOSUB".to_string())?;
+                // Jump back to the GOSUB line, then move to the line after it
+                if !program.goto_line(return_line) {
+                    return Err(format!("Return line {} not found", return_line));
+                }
+                program.next_line();
+            }
+            Statement::ProcCall { name, args } => {
+                let proc = executor
+                    .get_procedure(name)
+                    .ok_or_else(|| format!("Procedure {} not defined", name))?;
+
+                if args.len() != proc.params.len() {
+                    return Err(format!(
+                        "Procedure {} expects {} parameters, got {}",
+                        name,
+                        proc.params.len(),
+                        args.len()
+                    ));
+                }
+
+                // Clone procedure data before entering local scope
+                let proc_line = proc.line_number;
+                let params_and_args: Vec<_> = proc
+                    .params
+                    .iter()
+                    .zip(args.iter())
+                    .map(|(p, a)| (p.clone(), a.clone()))
+                    .collect();
+
+                executor.enter_local_scope();
+
+                // Bind arguments to parameters (as global variables)
+                for (param_name, arg_expr) in params_and_args {
+                    executor
+                        .execute_statement(&Statement::Assignment {
+                            target: param_name,
+                            expression: arg_expr,
+                        })
+                        .map_err(|e| format!("Error binding parameter: {:?}", e))?;
+                }
+
+                executor.push_gosub_return(line_number);
+
+                if !program.goto_line(proc_line) {
+                    return Err(format!("Procedure {} line {} not found", name, proc_line));
+                }
+
+                // Move to the line after DEF PROC (skip the definition line)
+                program.next_line();
+            }
+            Statement::EndProc => {
+                executor
+                    .exit_local_scope()
+                    .map_err(|e| format!("Error exiting local scope: {:?}", e))?;
+
+                let return_line = executor
+                    .pop_gosub_return()
+                    .map_err(|_| "ENDPROC without PROC call".to_string())?;
+                // Jump back to the PROC call line, then move to the line after it
+                if !program.goto_line(return_line) {
+                    return Err(format!("Return line {} not found", return_line));
+                }
+                program.next_line();
+            }
+            Statement::For { .. } => {
+                // Record this line number for NEXT to loop back to
+                executor.set_for_loop_line(line_number);
+                program.next_line();
+            }
+            Statement::Next { .. } => {
+                if let Some(for_line) = executor.should_loop_back() {
+                    // Loop continues: go to the line after the FOR statement
+                    if !program.goto_line(for_line) {
+                        return Err(format!("FOR loop line {} not found", for_line));
+                    }
+                }
+                program.next_line();
+            }
+            Statement::Repeat => {
+                // Push this line number for UNTIL to loop back to
+                executor.push_repeat(line_number);
+                program.next_line();
+            }
+            Statement::Until { condition } => {
+                let repeat_line = executor
+                    .check_until(condition)
+                    .map_err(|e| format!("Error evaluating UNTIL condition: {:?}", e))?;
+                if let Some(repeat_line) = repeat_line {
+                    // Condition false: loop back to the line after REPEAT
+                    if !program.goto_line(repeat_line) {
+                        return Err(format!("REPEAT line {} not found", repeat_line));
+                    }
+                }
+                program.next_line();
+            }
+            Statement::While { condition } => {
+                let entered = executor
+                    .push_while(line_number, condition)
+                    .map_err(|e| format!("Error evaluating WHILE condition: {:?}", e))?;
+                if entered.is_none() {
+                    // Condition false: scan forward to the matching ENDWHILE
+                    let mut depth = 1;
+                    while depth > 0 {
+                        let Some(current_line) = program.next_line() else {
+                            return Err("WHILE without matching ENDWHILE".to_string());
+                        };
+                        match statements.get(&current_line) {
+                            Some(Statement::While { .. }) => depth += 1,
+                            Some(Statement::EndWhile) => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                }
+                // Enter the loop body, or move past ENDWHILE
+                program.next_line();
+            }
+            Statement::EndWhile => {
+                // The condition is in the matching WHILE statement
+                let while_line = executor
+                    .check_endwhile_get_while_line()
+                    .ok_or_else(|| "ENDWHILE without matching WHILE".to_string())?;
+                let condition = match statements.get(&while_line) {
+                    Some(Statement::While { condition }) => condition,
+                    Some(_) => {
+                        return Err(format!(
+                            "Could not parse WHILE statement at line {}",
+                            while_line
+                        ));
+                    }
+                    None => return Err(format!("WHILE line {} not found", while_line)),
+                };
+                let loop_line = executor.check_endwhile(condition).map_err(|e| {
+                    format!("Error evaluating WHILE condition at ENDWHILE: {:?}", e)
+                })?;
+                if let Some(loop_line) = loop_line {
+                    // Condition still true: loop back to the line after WHILE
+                    if !program.goto_line(loop_line) {
+                        return Err(format!("WHILE line {} not found", loop_line));
+                    }
+                }
+                program.next_line();
+            }
+            _ => {
+                if program.next_line().is_none() {
+                    break;
+                }
+            }
+        }
+    }
+
+    program.stop_execution();
+    Ok(())
+}
+
+/// Convert an interpreter error to its BBC BASIC error number (ERR).
+fn error_number(error: &BBCBasicError) -> i32 {
+    match error {
+        BBCBasicError::DivisionByZero => 18,
+        BBCBasicError::TypeMismatch => 6,
+        BBCBasicError::SubscriptOutOfRange => 15,
+        BBCBasicError::NoRoom => 11,
+        BBCBasicError::StringTooLong => 19,
+        BBCBasicError::NoSuchVariable(_) => 26,
+        BBCBasicError::ArrayNotDimensioned(_) => 14,
+        BBCBasicError::SyntaxError { .. } => 220,
+        BBCBasicError::BadProgram => 254,
+        BBCBasicError::IllegalFunction => 31,
+        _ => 255,
+    }
+}
