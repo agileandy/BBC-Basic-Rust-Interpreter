@@ -100,6 +100,8 @@ pub struct Executor {
     open_files: HashMap<i32, FileHandle>,
     // Next file handle number to allocate
     next_file_handle: i32,
+    // FOR line to jump back to after the last NEXT (None = that loop is complete)
+    next_loop_line: Option<u16>,
     // Start instant: TIME counts centiseconds from here
     start_time: std::time::Instant,
     // Output buffer (for testing)
@@ -129,6 +131,7 @@ impl Executor {
             last_error: None,
             open_files: HashMap::new(),
             next_file_handle: 1,
+            next_loop_line: None,
             start_time: std::time::Instant::now(),
             output: String::new(),
         }
@@ -348,7 +351,7 @@ impl Executor {
                 PrintItem::Tab(expr) => {
                     // TAB accepts both integer and real, truncating real to integer
                     let pos = if let Ok(int_val) = self.eval_integer(expr) {
-                        int_val as usize
+                        int_val.max(0) as usize
                     } else {
                         let real_val = self.eval_real(expr)?;
                         real_val.floor().max(0.0) as usize
@@ -369,7 +372,7 @@ impl Executor {
                 PrintItem::Spc(expr) => {
                     // SPC accepts both integer and real, truncating real to integer
                     let count = if let Ok(int_val) = self.eval_integer(expr) {
-                        int_val as usize
+                        int_val.max(0) as usize
                     } else {
                         let real_val = self.eval_real(expr)?;
                         real_val.floor().max(0.0) as usize
@@ -401,6 +404,10 @@ impl Executor {
                 } else {
                     Ok(self.eval_real(expr)?.to_string())
                 }
+            }
+            // VAL gives a real value, so do not try it as an integer first
+            Expression::FunctionCall { name, .. } if name == "VAL" => {
+                Ok(self.eval_real(expr)?.to_string())
             }
             _ => {
                 // Try to evaluate as different types
@@ -512,11 +519,17 @@ impl Executor {
             next_val < end_val
         };
 
+        // A NEXT for an outer loop closes the loops inside it
+        self.for_loops.truncate(loop_index + 1);
+
         if loop_complete {
             // Remove the loop from the stack
             self.for_loops.remove(loop_index);
+            self.next_loop_line = None;
+        } else {
+            // The run loop jumps back to the FOR line of this loop
+            self.next_loop_line = Some(self.for_loops[loop_index].3);
         }
-        // In a real program, we'd jump back to the FOR statement line if not complete
 
         Ok(())
     }
@@ -1005,6 +1018,15 @@ impl Executor {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
             Expression::Variable(name) => {
+                // Check for pseudo-variables first
+                match name.as_str() {
+                    "PI" => return Ok(std::f64::consts::PI),
+                    "TIME" | "HIMEM" | "LOMEM" | "ERR" | "ERL" => {
+                        return self.eval_integer(expr).map(f64::from);
+                    }
+                    _ => {}
+                }
+
                 if name.ends_with('%') {
                     let int_val = self
                         .variables
@@ -1106,6 +1128,16 @@ impl Executor {
                 }
             }
             Expression::FunctionCall { name, args } => self.eval_function_string(name, args),
+            // String concatenation with +
+            Expression::BinaryOp {
+                op: crate::parser::BinaryOperator::Add | crate::parser::BinaryOperator::StringConcat,
+                left,
+                right,
+            } => {
+                let mut joined = self.eval_string(left)?;
+                joined.push_str(&self.eval_string(right)?);
+                Ok(joined)
+            }
             _ => Err(BBCBasicError::TypeMismatch),
         }
     }
@@ -1189,7 +1221,8 @@ impl Executor {
                     });
                 }
                 let s = self.eval_string(&args[0])?;
-                s.trim().parse::<i32>().or(Ok(0)) // BBC BASIC returns 0 for non-numeric strings
+                // BBC BASIC returns 0 for non-numeric strings. A real value is truncated.
+                Ok(s.trim().parse::<f64>().map(|v| v as i32).unwrap_or(0))
             }
             "ERL" => {
                 // Error line number - returns 0 if no error has occurred
@@ -1765,9 +1798,7 @@ impl Executor {
     /// Check if the last NEXT caused a loop to continue (not complete)
     /// Returns Some(line_number) if should loop back, None if loop completed
     pub fn should_loop_back(&self) -> Option<u16> {
-        // If there are active FOR loops, return the line number of the most recent one
-        // This will be called after execute_next to determine if we should jump back
-        self.for_loops.last().map(|(_, _, _, line)| *line)
+        self.next_loop_line
     }
 
     /// Set the line number for a FOR loop (called when FOR is executed)
