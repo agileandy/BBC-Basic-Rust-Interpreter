@@ -1827,17 +1827,14 @@ fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement>
     };
 
     // Parse parameters if present
-    let (params, rest_start) = if tokens.len() > 1 && matches!(tokens[1], Token::Operator('(')) {
+    let (params, rest_start) = if tokens.len() > 1 && is_paren(&tokens[1], '(') {
         // Find closing parenthesis
-        let close_pos = tokens
-            .iter()
-            .skip(1)
-            .position(|t| matches!(t, Token::Operator(')')))
-            .ok_or(BBCBasicError::SyntaxError {
+        let close_pos = tokens.iter().skip(1).position(|t| is_paren(t, ')')).ok_or(
+            BBCBasicError::SyntaxError {
                 message: "Expected ) after parameter list".to_string(),
                 line: line_number,
-            })?
-            + 1;
+            },
+        )? + 1;
 
         // Parse parameters (comma-separated identifiers between parentheses)
         let mut params = Vec::new();
@@ -2392,6 +2389,17 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
 
             *pos += 1;
 
+            // FN name: a call to a user-defined function. The name follows the keyword.
+            let mut is_user_function = false;
+            let keyword = match tokens.get(*pos) {
+                Some(Token::Identifier(name)) if keyword == "FN" => {
+                    *pos += 1;
+                    is_user_function = true;
+                    name.clone()
+                }
+                _ => keyword,
+            };
+
             // Check if this is a function call (followed by opening paren)
             if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
                 *pos += 1; // consume '('
@@ -2431,6 +2439,12 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                 Ok(Expression::FunctionCall {
                     name: keyword,
                     args,
+                })
+            } else if is_user_function {
+                // A user-defined function with no parameters
+                Ok(Expression::FunctionCall {
+                    name: keyword,
+                    args: Vec::new(),
                 })
             } else {
                 // It's a constant or keyword used as value
