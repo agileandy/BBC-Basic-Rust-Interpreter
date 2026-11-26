@@ -272,7 +272,7 @@ fn catalog_files() -> Result<(), String> {
     let paths = std::fs::read_dir(".").map_err(|e| format!("Failed to read directory: {}", e))?;
 
     println!("\nCatalog:");
-    println!("{:<30} {:>10}  {}", "Filename", "Size", "Modified");
+    println!("{:<30} {:>10}  Modified", "Filename", "Size");
     println!("{}", "-".repeat(60));
 
     let mut count = 0;

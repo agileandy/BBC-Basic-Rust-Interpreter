@@ -148,7 +148,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             chars.next(); // consume opening quote
             let mut string_content = String::new();
 
-            while let Some(ch) = chars.next() {
+            for ch in chars.by_ref() {
                 if ch == '"' {
                     break; // found closing quote
                 }

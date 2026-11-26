@@ -113,7 +113,7 @@ impl Default for ProgramStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tokenizer::{tokenize, Token};
+    use crate::tokenizer::tokenize;
 
     #[test]
     fn test_program_store_creation() {

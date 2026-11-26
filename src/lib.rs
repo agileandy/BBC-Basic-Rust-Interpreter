@@ -4,6 +4,9 @@
 //! This interpreter emulates the original 6502-based system with 32K RAM and full
 //! compatibility with BBC BASIC programs.
 
+// The tests use 3.14 as an arbitrary real value, not as PI.
+#![cfg_attr(test, allow(clippy::approx_constant))]
+
 pub mod executor;
 pub mod extensions;
 pub mod filesystem;

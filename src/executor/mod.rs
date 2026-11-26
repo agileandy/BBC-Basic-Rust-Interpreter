@@ -444,26 +444,6 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute GOSUB statement
-    fn execute_gosub(&mut self, line_number: u16) -> Result<()> {
-        // Push return address to stack
-        // In a real implementation, we'd push the NEXT line after this GOSUB
-        // For now, we push the target line (simplified)
-        self.return_stack.push(line_number);
-        Ok(())
-    }
-
-    /// Execute RETURN statement
-    fn execute_return(&mut self) -> Result<()> {
-        // Pop return address from stack
-        if self.return_stack.is_empty() {
-            Err(BBCBasicError::BadCall)
-        } else {
-            self.return_stack.pop();
-            Ok(())
-        }
-    }
-
     /// Execute FOR statement
     fn execute_for(
         &mut self,
@@ -1209,7 +1189,7 @@ impl Executor {
                     });
                 }
                 let s = self.eval_string(&args[0])?;
-                s.trim().parse::<i32>().or_else(|_| Ok(0)) // BBC BASIC returns 0 for non-numeric strings
+                s.trim().parse::<i32>().or(Ok(0)) // BBC BASIC returns 0 for non-numeric strings
             }
             "ERL" => {
                 // Error line number - returns 0 if no error has occurred
@@ -1521,7 +1501,7 @@ impl Executor {
                     });
                 }
                 let s = self.eval_string(&args[0])?;
-                s.trim().parse::<f64>().or_else(|_| Ok(0.0)) // BBC BASIC returns 0 for non-numeric strings
+                s.trim().parse::<f64>().or(Ok(0.0)) // BBC BASIC returns 0 for non-numeric strings
             }
             "SQRT" => {
                 // SQRT is an alias for SQR in BBC BASIC
@@ -1546,7 +1526,7 @@ impl Executor {
                     });
                 }
                 let val = self.eval_real(&args[0])?;
-                if val < -1.0 || val > 1.0 {
+                if !(-1.0..=1.0).contains(&val) {
                     return Err(BBCBasicError::IllegalFunction);
                 }
                 Ok(val.acos())
@@ -1560,7 +1540,7 @@ impl Executor {
                     });
                 }
                 let val = self.eval_real(&args[0])?;
-                if val < -1.0 || val > 1.0 {
+                if !(-1.0..=1.0).contains(&val) {
                     return Err(BBCBasicError::IllegalFunction);
                 }
                 Ok(val.asin())
@@ -1589,7 +1569,7 @@ impl Executor {
                     });
                 }
                 let code = self.eval_integer(&args[0])?;
-                if code < 0 || code > 255 {
+                if !(0..=255).contains(&code) {
                     return Err(BBCBasicError::SyntaxError {
                         message: "CHR$ argument must be 0-255".to_string(),
                         line: None,
@@ -2585,7 +2565,7 @@ mod tests {
     #[test]
     fn test_executor_creation() {
         // RED: Test creating an executor
-        let mut executor = Executor::new();
+        let executor = Executor::new();
         assert!(executor.return_stack.is_empty());
         assert!(executor.for_loops.is_empty());
     }
@@ -3947,7 +3927,7 @@ mod tests {
         for _ in 0..10 {
             let result = executor.eval_real(&rnd_expr).unwrap();
             assert!(
-                result >= 0.0 && result < 1.0,
+                (0.0..1.0).contains(&result),
                 "RND(1) should be in range [0, 1)"
             );
             values.push(result);
@@ -3974,7 +3954,7 @@ mod tests {
             let result = executor.eval_real(&rnd_10).unwrap();
             let as_int = result as i32;
             assert!(
-                as_int >= 1 && as_int <= 10,
+                (1..=10).contains(&as_int),
                 "RND(10) should return values 1-10, got {}",
                 result
             );
@@ -4267,7 +4247,7 @@ mod tests {
     #[test]
     fn test_procedure_not_found() {
         // RED: Test getting undefined procedure
-        let mut executor = Executor::new();
+        let executor = Executor::new();
 
         // Should return None for undefined procedure
         assert!(executor.get_procedure("undefined").is_none());
@@ -4460,7 +4440,7 @@ mod tests {
     #[test]
     fn test_erl_err_functions_no_error() {
         // RED: Test ERL and ERR when no error has occurred
-        let mut executor = Executor::new();
+        let executor = Executor::new();
 
         // ERL and ERR should return 0 when no error
         assert_eq!(executor.get_error_line(), 0);
@@ -4888,7 +4868,7 @@ mod tests {
         let test_file = "test_bget.dat";
 
         // Create a test file with some bytes
-        fs::write(test_file, &[65, 66, 67, 255, 0]).unwrap();
+        fs::write(test_file, [65, 66, 67, 255, 0]).unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
@@ -4925,7 +4905,7 @@ mod tests {
         let test_file = "test_bget_eof.dat";
 
         // Create a test file with one byte
-        fs::write(test_file, &[42]).unwrap();
+        fs::write(test_file, [42]).unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
@@ -5006,7 +4986,7 @@ mod tests {
         let test_file = "test_ptr_get.dat";
 
         // Create test file with some bytes
-        fs::write(test_file, &[1, 2, 3, 4, 5]).unwrap();
+        fs::write(test_file, [1, 2, 3, 4, 5]).unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
@@ -5038,7 +5018,7 @@ mod tests {
         let test_file = "test_ptr_set.dat";
 
         // Create test file with bytes
-        fs::write(test_file, &[65, 66, 67, 68, 69]).unwrap(); // A, B, C, D, E
+        fs::write(test_file, [65, 66, 67, 68, 69]).unwrap(); // A, B, C, D, E
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
@@ -5094,7 +5074,7 @@ mod tests {
         let test_file = "test_ext.dat";
 
         // Create test file with 10 bytes
-        fs::write(test_file, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
+        fs::write(test_file, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
@@ -5121,7 +5101,7 @@ mod tests {
         let test_file = "test_ext_empty.dat";
 
         // Create empty file
-        fs::write(test_file, &[]).unwrap();
+        fs::write(test_file, []).unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();

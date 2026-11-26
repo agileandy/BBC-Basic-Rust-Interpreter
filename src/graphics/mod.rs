@@ -31,8 +31,6 @@ pub struct GraphicsSystem {
     origin: Point,
     /// Current foreground color (0-255, though we only use on/off for now)
     foreground_color: u8,
-    /// Current background color
-    background_color: u8,
     /// Graphics color mode (0 = set, 1 = OR, 2 = AND, 3 = XOR, 4 = invert)
     color_mode: u8,
     /// Triangle corner for PLOT 128-191 modes (stored vertex for filled triangles)
@@ -54,7 +52,6 @@ impl GraphicsSystem {
             current_pos: Point { x: 0, y: 0 },
             origin: Point { x: 0, y: 0 },
             foreground_color: 255, // White
-            background_color: 0,   // Black
             color_mode: 0,         // Set mode
             triangle_corner: None, // No triangle corner stored initially
         }
@@ -196,7 +193,7 @@ impl GraphicsSystem {
                 }
             }
             // 4-7: Draw line
-            _ if mode >= 4 && mode <= 7 => {
+            _ if (4..=7).contains(&mode) => {
                 if relative {
                     self.draw_line_by(x, y);
                 } else {
@@ -204,7 +201,7 @@ impl GraphicsSystem {
                 }
             }
             // 64-71: Plot point
-            _ if mode >= 64 && mode <= 71 => {
+            _ if (64..=71).contains(&mode) => {
                 self.set_pixel(target_x, target_y);
                 self.current_pos = Point {
                     x: target_x,
@@ -212,7 +209,7 @@ impl GraphicsSystem {
                 };
             }
             // 128-191: Filled triangle
-            _ if mode >= 128 && mode <= 191 => {
+            _ if (128..=191).contains(&mode) => {
                 // Triangle modes work in pairs:
                 // - First PLOT stores current position as triangle corner
                 // - Second PLOT draws triangle from corner -> current -> target
@@ -388,6 +385,7 @@ impl GraphicsSystem {
     }
 
     /// Draw a triangle
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_triangle(
         &mut self,
         x1: i32,
