@@ -150,7 +150,12 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
 
             while let Some(ch) = chars.next() {
                 if ch == '"' {
-                    break; // found closing quote
+                    // A doubled quote is one quote character in the string
+                    if chars.peek() == Some(&'"') {
+                        chars.next();
+                    } else {
+                        break; // found closing quote
+                    }
                 }
                 string_content.push(ch);
             }
@@ -237,6 +242,10 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 tokens.push(Token::Keyword(token_byte));
             } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word) {
                 tokens.push(Token::ExtendedKeyword(prefix, token_byte));
+            } else if let Some((keyword, name)) = split_proc_or_fn(&word) {
+                // PROCname or FNname: the name joins the keyword with no space
+                tokens.push(Token::Keyword(keyword_map[keyword]));
+                tokens.push(Token::Identifier(name.to_string()));
             } else {
                 // It's an identifier (variable, procedure, or function name)
                 tokens.push(Token::Identifier(word));
@@ -250,7 +259,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 // Apostrophe is shorthand for REM - rest of line is a comment
                 chars.next(); // consume apostrophe
                 tokens.push(Token::Keyword(0xF4)); // REM token
-                // Consume rest of line (don't tokenize comment text)
+                                                   // Consume rest of line (don't tokenize comment text)
                 while chars.next().is_some() {}
             }
             '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
@@ -538,6 +547,16 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("OVERLAY", 0xA3),
     ("ENDWHILE", 0xA4),
 ];
+
+/// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
+/// The keyword must be in upper case, as in BBC BASIC.
+fn split_proc_or_fn(word: &str) -> Option<(&'static str, &str)> {
+    ["PROC", "FN"].into_iter().find_map(|keyword| {
+        word.strip_prefix(keyword)
+            .filter(|name| !name.is_empty())
+            .map(|name| (keyword, name))
+    })
+}
 
 /// Create keyword lookup tables for tokenization
 pub fn create_keyword_maps() -> (HashMap<String, u8>, HashMap<String, (u8, u8)>) {

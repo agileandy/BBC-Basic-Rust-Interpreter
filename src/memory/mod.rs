@@ -34,7 +34,7 @@ struct MemoryAllocation {
 
 /// Types of memory allocations
 #[derive(Debug, Clone, PartialEq)]
-enum AllocationType {
+pub enum AllocationType {
     Program,
     Variables,
     Stack,
