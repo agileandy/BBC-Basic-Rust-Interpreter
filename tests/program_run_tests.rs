@@ -154,16 +154,6 @@ fn test_error_without_handler_stops_program() {
     assert_eq!(output, "START\n");
 }
 
-/// Examples that the interpreter cannot run yet. Remove a name when its defect is corrected.
-const KNOWN_FAILING_EXAMPLES: &[&str] = &[
-    "sinewave.bas",            // does not terminate
-    "test_error_handling.bas", // PRINT of ERR fails in the handler, which then loops
-    "test_def_fn.bas",         // parse error: "Expected = after function parameters"
-    "test_functions.bas",      // PI is not known as a variable
-    "test_proc.bas",           // parse error: "Invalid assignment"
-    "test_while.bas",          // TypeMismatch at line 550
-];
-
 #[test]
 fn test_each_example_program_runs_without_error() {
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
@@ -176,9 +166,6 @@ fn test_each_example_program_runs_without_error() {
             continue;
         }
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        if KNOWN_FAILING_EXAMPLES.contains(&name.as_str()) {
-            continue;
-        }
         count += 1;
         let source = std::fs::read_to_string(&path).expect("example is readable");
         // Only numbered lines are program lines
@@ -207,4 +194,148 @@ fn test_data_is_read_before_its_line_runs() {
 
     assert_eq!(result, Ok(()));
     assert_eq!(output, "HELLO\n");
+}
+
+#[test]
+fn test_def_fn_with_parameters_returns_value() {
+    let (result, output) = run(&[
+        "10 DEF FN add(X, Y) = X + Y",
+        "20 IF FN add(5, 3) = 8 THEN PRINT \"OK\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "OK\n");
+}
+
+#[test]
+fn test_print_pi_gives_its_value() {
+    let (result, output) = run(&["10 PRINT PI"]);
+
+    assert_eq!(result, Ok(()));
+    assert!(output.starts_with("3.14159"), "output was {:?}", output);
+}
+
+#[test]
+fn test_error_handler_can_print_err_and_erl() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 X = 1 / 0",
+        "30 END",
+        "100 PRINT ERR",
+        "110 PRINT ERL",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    // 18 is the BBC BASIC error number for "Division by zero"
+    assert_eq!(output, "18\n20\n");
+}
+
+#[test]
+fn test_string_function_result_can_be_joined() {
+    let (result, output) = run(&[
+        "10 N% = 7",
+        "20 S$ = \"A\" + STR$(N%) + \"B\"",
+        "30 PRINT S$",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "A7B\n");
+}
+
+#[test]
+fn test_negative_tab_and_spc_print_no_spaces() {
+    let (result, output) = run(&["10 PRINT TAB(-5); \"*\"", "20 PRINT SPC(-5); \"+\""]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "*\n+\n");
+}
+
+#[test]
+fn test_goto_in_if_jumps_when_condition_is_true() {
+    let (result, output) = run(&[
+        "10 X% = 1",
+        "20 IF X% = 1 THEN GOTO 40",
+        "30 PRINT \"SKIPPED\"",
+        "40 PRINT \"TARGET\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "TARGET\n");
+}
+
+#[test]
+fn test_end_in_else_branch_stops_program() {
+    let (result, output) = run(&[
+        "10 X% = 1",
+        "20 IF X% = 2 THEN PRINT \"THEN\" ELSE END",
+        "30 PRINT \"NOT REACHED\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_on_goto_index_out_of_range_continues_with_next_line() {
+    let (result, output) = run(&[
+        "10 X% = 5",
+        "20 ON X% GOTO 40, 50",
+        "30 PRINT \"NEXT LINE\"",
+        "40 END",
+        "50 END",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "NEXT LINE\n");
+}
+
+#[test]
+fn test_doubled_quote_in_string_gives_one_quote() {
+    let (result, output) = run(&["10 PRINT \"SAY \"\"HI\"\" NOW\""]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "SAY \"HI\" NOW\n");
+}
+
+#[test]
+fn test_nested_for_loops_run_inner_loop_for_each_outer_value() {
+    let (result, output) = run(&[
+        "10 FOR I% = 1 TO 2",
+        "20 FOR J% = 1 TO 2",
+        "30 PRINT \"J\"",
+        "40 NEXT J%",
+        "50 PRINT \"I\"",
+        "60 NEXT I%",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "J\nJ\nI\nJ\nJ\nI\n");
+}
+
+#[test]
+fn test_val_reads_a_real_number() {
+    let (result, output) = run(&[
+        "10 PRINT VAL(\"3.5\")",
+        "20 X% = VAL(\"3.5\")",
+        "30 IF X% = 3 THEN PRINT \"TRUNCATED\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "3.5\nTRUNCATED\n");
+}
+
+#[test]
+fn test_proc_and_fn_names_can_join_the_keyword() {
+    let (result, output) = run(&[
+        "10 DEF FNdouble(N) = N * 2",
+        "20 PROCgreet",
+        "30 IF FNdouble(4) = 8 THEN PRINT \"FN OK\"",
+        "40 END",
+        "100 DEF PROCgreet",
+        "110 PRINT \"HELLO\"",
+        "120 ENDPROC",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "HELLO\nFN OK\n");
 }
