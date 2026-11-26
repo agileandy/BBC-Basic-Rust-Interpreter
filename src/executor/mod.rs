@@ -100,6 +100,8 @@ pub struct Executor {
     open_files: HashMap<i32, FileHandle>,
     // Next file handle number to allocate
     next_file_handle: i32,
+    // Start instant: TIME counts centiseconds from here
+    start_time: std::time::Instant,
     // Output buffer (for testing)
     output: String,
 }
@@ -127,6 +129,7 @@ impl Executor {
             last_error: None,
             open_files: HashMap::new(),
             next_file_handle: 1,
+            start_time: std::time::Instant::now(),
             output: String::new(),
         }
     }
@@ -890,14 +893,10 @@ impl Executor {
             Expression::Variable(name) => {
                 // Check for pseudo-variables first
                 if name == "TIME" {
-                    // TIME returns centiseconds since program start or system boot
-                    // For now, use system time
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap();
-                    // Convert to centiseconds (1/100th of a second)
-                    let centiseconds = (now.as_millis() / 10) as i32;
-                    return Ok(centiseconds);
+                    // TIME returns centiseconds since the executor started.
+                    // A count from the Unix epoch does not fit in an i32.
+                    let centiseconds = self.start_time.elapsed().as_millis() / 10;
+                    return Ok(centiseconds as i32);
                 } else if name == "HIMEM" {
                     // HIMEM returns top of available memory
                     return Ok(self.memory.get_himem() as i32);
