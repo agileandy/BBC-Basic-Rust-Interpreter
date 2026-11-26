@@ -1,8 +1,5 @@
 /target
 
-# Cargo
-Cargo.lock
-
 # Build artifacts
 *.o
 *.so
@@ -25,12 +22,8 @@ output/
 dist/
 build/
 
-# Test files
+# Scratch programs (keep example programs in examples/)
 *.bbas
-*.bas
-test_*.bas
-demo*.bas
-demo*.bbas
 
 # Debug / profiling
 *.flamegraph

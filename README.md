@@ -293,19 +293,11 @@ The project includes several demo programs:
 
 | File | Description |
 |------|-------------|
-| `demo_final.bbas` | Complete feature demonstration |
-| `demo.bbas` | Basic language features |
 | `examples/graphics_demo.bas` | Graphics primitives demo |
 | `examples/advanced_graphics_demo.bas` | Advanced graphics with shapes |
-| `test_file_io.bas` | File I/O operations |
-| `test_while.bas` | WHILE loop demonstration |
-| `test_error_handling.bas` | Error handling demo |
-| `sinewave.bas` | Sound demonstration |
-
-Run a demo:
-```bash
-(echo "LOAD demo_final"; echo "RUN") | cargo run --release
-```
+| `examples/test_while.bas` | WHILE loop demonstration |
+| `examples/test_error_handling.bas` | Error handling demo |
+| `examples/sinewave.bas` | Sine wave text animation |
 
 ## License
 
