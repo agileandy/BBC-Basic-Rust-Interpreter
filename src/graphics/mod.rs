@@ -104,7 +104,7 @@ impl GraphicsSystem {
                 1 => self.canvas[cy][cx] |= self.foreground_color > 0, // OR
                 2 => self.canvas[cy][cx] &= self.foreground_color > 0, // AND
                 3 => self.canvas[cy][cx] ^= self.foreground_color > 0, // XOR
-                4 => self.canvas[cy][cx] = !self.canvas[cy][cx],       // Invert
+                4 => self.canvas[cy][cx] = !self.canvas[cy][cx],      // Invert
                 _ => self.canvas[cy][cx] = self.foreground_color > 0,
             }
         }
@@ -219,7 +219,15 @@ impl GraphicsSystem {
                 if let Some(corner) = self.triangle_corner {
                     // Second PLOT: draw the triangle
                     let filled = true; // All triangle modes are filled
-                    self.draw_triangle(corner.x, corner.y, self.current_pos.x, self.current_pos.y, target_x, target_y, filled);
+                    self.draw_triangle(
+                        corner.x,
+                        corner.y,
+                        self.current_pos.x,
+                        self.current_pos.y,
+                        target_x,
+                        target_y,
+                        filled,
+                    );
                     // Reset triangle corner after drawing
                     self.triangle_corner = None;
                 } else {
@@ -380,7 +388,16 @@ impl GraphicsSystem {
     }
 
     /// Draw a triangle
-    pub fn draw_triangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, filled: bool) {
+    pub fn draw_triangle(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        x3: i32,
+        y3: i32,
+        filled: bool,
+    ) {
         if filled {
             // Filled triangle using scanline algorithm
             self.fill_triangle(x1, y1, x2, y2, x3, y3);

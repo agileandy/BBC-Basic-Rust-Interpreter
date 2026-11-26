@@ -39,11 +39,7 @@ fn test_empty_program_gives_error() {
 
 #[test]
 fn test_goto_skips_lines() {
-    let (result, output) = run(&[
-        "10 GOTO 30",
-        "20 PRINT \"SKIPPED\"",
-        "30 PRINT \"TARGET\"",
-    ]);
+    let (result, output) = run(&["10 GOTO 30", "20 PRINT \"SKIPPED\"", "30 PRINT \"TARGET\""]);
 
     assert_eq!(result, Ok(()));
     assert_eq!(output, "TARGET\n");
@@ -150,7 +146,11 @@ fn test_on_error_jumps_to_handler() {
 fn test_error_without_handler_stops_program() {
     let (result, output) = run(&["10 PRINT \"START\"", "20 X = 1 / 0", "30 PRINT \"END\""]);
 
-    assert!(result.is_err(), "expected a runtime error, got {:?}", result);
+    assert!(
+        result.is_err(),
+        "expected a runtime error, got {:?}",
+        result
+    );
     assert_eq!(output, "START\n");
 }
 
@@ -194,7 +194,11 @@ fn test_each_example_program_runs_without_error() {
     }
 
     assert!(count > 0, "no example programs found");
-    assert!(failures.is_empty(), "examples failed:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "examples failed:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

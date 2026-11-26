@@ -18,7 +18,12 @@ fn test_ellipse_command() {
 
     let output = executor.get_graphics_output();
     // Should have drawn something
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -30,7 +35,12 @@ fn test_rectangle_command() {
 
     let output = executor.get_graphics_output();
     // Should have drawn a filled rectangle
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -49,7 +59,12 @@ fn test_fill_command() {
 
     let output = executor.get_graphics_output();
     // Should have filled the rectangle
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -63,7 +78,12 @@ fn test_multiple_ellipses() {
 
     let output = executor.get_graphics_output();
     // Should have drawn multiple ellipses
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -77,7 +97,12 @@ fn test_rectangle_different_sizes() {
 
     let output = executor.get_graphics_output();
     // Should have drawn multiple rectangles
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -91,7 +116,12 @@ fn test_ellipse_circle_comparison() {
 
     let output = executor.get_graphics_output();
     // Both should have drawn
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -114,7 +144,12 @@ fn test_advanced_graphics_integration() {
     // Should have a border and graphics content
     assert!(output.starts_with('+'));
     assert!(output.contains('|'));
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -129,7 +164,12 @@ fn test_fill_after_circle() {
 
     let output = executor.get_graphics_output();
     // Fill should have worked
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -153,7 +193,12 @@ fn test_ellipse_narrow() {
 
     let output = executor.get_graphics_output();
     // Should have drawn a narrow ellipse
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -165,7 +210,12 @@ fn test_ellipse_wide() {
 
     let output = executor.get_graphics_output();
     // Should have drawn a wide ellipse
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -184,5 +234,10 @@ fn test_combined_shapes() {
 
     let output = executor.get_graphics_output();
     // Complex scene should render
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }

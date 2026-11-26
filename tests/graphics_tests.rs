@@ -58,7 +58,12 @@ fn test_circle_command() {
     let output = executor.get_graphics_output();
     eprintln!("Circle output:\n{}", output);
     // Should have drawn something
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -108,7 +113,12 @@ fn test_draw_square() {
 
     let output = executor.get_graphics_output();
     // Should contain graphics characters
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -134,7 +144,12 @@ fn test_multiple_circles() {
 
     let output = executor.get_graphics_output();
     // Should have drawn multiple circles
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -174,7 +189,11 @@ fn test_point_function() {
     // We're just verifying POINT doesn't crash and returns something
     let output = executor.get_output();
     // POINT returns -1 for TRUE
-    assert!(output.trim().contains("-1") || output.trim().contains("1"), "POINT should return -1 (TRUE) for plotted point, got: {}", output);
+    assert!(
+        output.trim().contains("-1") || output.trim().contains("1"),
+        "POINT should return -1 (TRUE) for plotted point, got: {}",
+        output
+    );
 
     executor.clear_output();
 
@@ -182,7 +201,10 @@ fn test_point_function() {
     execute_line(&mut executor, "40 PRINT POINT(100, 100)");
     let output = executor.get_output();
     // POINT returns 0 for FALSE
-    assert!(output.contains('0'), "POINT should return 0 (FALSE) for unset pixel");
+    assert!(
+        output.contains('0'),
+        "POINT should return 0 (FALSE) for unset pixel"
+    );
 }
 
 #[test]
@@ -198,7 +220,11 @@ fn test_point_function_after_draw() {
     execute_line(&mut executor, "40 PRINT POINT(500, 500)");
     let output = executor.get_output();
     // Should be TRUE (non-zero) since the line goes through (500, 500)
-    assert!(output.trim().contains("-1") || output.trim().contains("1"), "POINT should return -1 (TRUE) on the line, got: {}", output);
+    assert!(
+        output.trim().contains("-1") || output.trim().contains("1"),
+        "POINT should return -1 (TRUE) on the line, got: {}",
+        output
+    );
 
     executor.clear_output();
 
@@ -255,7 +281,12 @@ fn test_origin_affects_plotting() {
     let output = executor.get_graphics_output();
     // Verify graphics output exists
     assert!(!output.is_empty());
-    assert!(output.contains('█') || output.contains('▓') || output.contains('▒') || output.contains('░'));
+    assert!(
+        output.contains('█')
+            || output.contains('▓')
+            || output.contains('▒')
+            || output.contains('░')
+    );
 }
 
 #[test]
@@ -296,4 +327,3 @@ fn test_plot_triangle_with_different_modes() {
     let output = executor.get_graphics_output();
     assert!(!output.is_empty());
 }
-

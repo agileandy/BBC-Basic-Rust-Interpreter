@@ -145,9 +145,11 @@ impl Executor {
             Statement::Assignment { target, expression } => {
                 self.execute_assignment(target, expression)
             }
-            Statement::ArrayAssignment { name, indices, expression } => {
-                self.execute_array_assignment(name, indices, expression)
-            }
+            Statement::ArrayAssignment {
+                name,
+                indices,
+                expression,
+            } => self.execute_array_assignment(name, indices, expression),
             Statement::Print { items } => self.execute_print(items),
             Statement::End | Statement::Stop | Statement::Quit => {
                 // END, STOP, and QUIT all stop execution
@@ -829,7 +831,8 @@ impl Executor {
         let major_val = self.eval_integer(major)?;
         let minor_val = self.eval_integer(minor)?;
 
-        self.graphics.draw_ellipse(x_val, y_val, major_val, minor_val);
+        self.graphics
+            .draw_ellipse(x_val, y_val, major_val, minor_val);
         Ok(())
     }
 
@@ -898,10 +901,18 @@ impl Executor {
                     return Ok(self.memory.get_page() as i32);
                 } else if name == "ERR" {
                     // ERR returns the last error number (0 if no error)
-                    return Ok(self.last_error.as_ref().map(|e| e.error_number).unwrap_or(0));
+                    return Ok(self
+                        .last_error
+                        .as_ref()
+                        .map(|e| e.error_number)
+                        .unwrap_or(0));
                 } else if name == "ERL" {
                     // ERL returns the line number where the last error occurred (0 if no error)
-                    return Ok(self.last_error.as_ref().map(|e| e.error_line as i32).unwrap_or(0));
+                    return Ok(self
+                        .last_error
+                        .as_ref()
+                        .map(|e| e.error_line as i32)
+                        .unwrap_or(0));
                 }
 
                 if name.ends_with('%') {
@@ -1324,8 +1335,8 @@ impl Executor {
                 })
             }
             // Real-only functions should not be called as integers
-            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN" | "LOG"
-            | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
+            "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
+            | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -1683,8 +1694,16 @@ impl Executor {
     ///
     /// These functions are NOT part of the original BBC BASIC specification
     /// but are provided as modern extensions.
-    fn eval_extension_string_function(&mut self, name: &str, args: &[Expression]) -> Result<String> {
-        let error_msg = self.last_error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
+    fn eval_extension_string_function(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+    ) -> Result<String> {
+        let error_msg = self
+            .last_error
+            .as_ref()
+            .map(|e| e.message.clone())
+            .unwrap_or_default();
 
         match name {
             "UPPER$" => {
@@ -2181,8 +2200,8 @@ impl Executor {
         }
 
         // Try to open the file
-        let file = File::open(filename)
-            .map_err(|_| BBCBasicError::FileNotFound(filename.to_string()))?;
+        let file =
+            File::open(filename).map_err(|_| BBCBasicError::FileNotFound(filename.to_string()))?;
         let reader = BufReader::new(file);
 
         // Allocate a handle
@@ -2244,14 +2263,18 @@ impl Executor {
     }
 
     /// Execute PRINT# statement - write to file
-    fn execute_print_file(&mut self, handle_expr: &Expression, items: &[crate::parser::PrintItem]) -> Result<()> {
+    fn execute_print_file(
+        &mut self,
+        handle_expr: &Expression,
+        items: &[crate::parser::PrintItem],
+    ) -> Result<()> {
         // Evaluate the handle
         let handle = self.eval_integer(handle_expr)?;
 
         // Process print items and build output string first (to avoid borrow issues)
         use crate::parser::PrintItem;
         let mut output = String::new();
-        
+
         for item in items {
             match item {
                 PrintItem::Expression(expr) => {
@@ -2350,7 +2373,8 @@ impl Executor {
                 self.variables.set_integer_var(var_name.clone(), value);
             } else if var_name.ends_with('$') {
                 // String variable
-                self.variables.set_string_var(var_name.clone(), value_str.to_string())?;
+                self.variables
+                    .set_string_var(var_name.clone(), value_str.to_string())?;
             } else {
                 // Real variable
                 let value = value_str.parse::<f64>().unwrap_or(0.0);
@@ -2380,7 +2404,8 @@ impl Executor {
         use std::io::Read;
 
         // Get the file handle
-        let file_handle = self.open_files
+        let file_handle = self
+            .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
@@ -2410,7 +2435,8 @@ impl Executor {
         use std::io::Write;
 
         // Get the file handle
-        let file_handle = self.open_files
+        let file_handle = self
+            .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
@@ -2421,11 +2447,13 @@ impl Executor {
                 let byte = (value % 256) as u8;
 
                 // Write the byte
-                writer.write_all(&[byte])
+                writer
+                    .write_all(&[byte])
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 // Flush to ensure byte is written
-                writer.flush()
+                writer
+                    .flush()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 Ok(())
@@ -2441,19 +2469,22 @@ impl Executor {
         use std::io::Seek;
 
         // Get the file handle
-        let file_handle = self.open_files
+        let file_handle = self
+            .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
         // Get current position from the underlying file
         match file_handle {
             FileHandle::Input(reader) => {
-                let pos = reader.stream_position()
+                let pos = reader
+                    .stream_position()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
                 Ok(pos as i32)
             }
             FileHandle::Output(writer) => {
-                let pos = writer.stream_position()
+                let pos = writer
+                    .stream_position()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
                 Ok(pos as i32)
             }
@@ -2465,7 +2496,8 @@ impl Executor {
         use std::io::Seek;
 
         // Get the file handle
-        let file_handle = self.open_files
+        let file_handle = self
+            .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
@@ -2473,12 +2505,14 @@ impl Executor {
         let pos = position as u64;
         match file_handle {
             FileHandle::Input(reader) => {
-                reader.seek(std::io::SeekFrom::Start(pos))
+                reader
+                    .seek(std::io::SeekFrom::Start(pos))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
                 Ok(())
             }
             FileHandle::Output(writer) => {
-                writer.seek(std::io::SeekFrom::Start(pos))
+                writer
+                    .seek(std::io::SeekFrom::Start(pos))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
                 Ok(())
             }
@@ -2490,7 +2524,8 @@ impl Executor {
         use std::io::Seek;
 
         // Get the file handle
-        let file_handle = self.open_files
+        let file_handle = self
+            .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
@@ -2498,30 +2533,36 @@ impl Executor {
         match file_handle {
             FileHandle::Input(reader) => {
                 // Save current position
-                let current_pos = reader.stream_position()
+                let current_pos = reader
+                    .stream_position()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 // Seek to end to get size
-                let size = reader.seek(std::io::SeekFrom::End(0))
+                let size = reader
+                    .seek(std::io::SeekFrom::End(0))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 // Restore original position
-                reader.seek(std::io::SeekFrom::Start(current_pos))
+                reader
+                    .seek(std::io::SeekFrom::Start(current_pos))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 Ok(size as i32)
             }
             FileHandle::Output(writer) => {
                 // Save current position
-                let current_pos = writer.stream_position()
+                let current_pos = writer
+                    .stream_position()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 // Seek to end to get size
-                let size = writer.seek(std::io::SeekFrom::End(0))
+                let size = writer
+                    .seek(std::io::SeekFrom::End(0))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 // Restore original position
-                writer.seek(std::io::SeekFrom::Start(current_pos))
+                writer
+                    .seek(std::io::SeekFrom::Start(current_pos))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
 
                 Ok(size as i32)
@@ -3566,10 +3607,7 @@ mod tests {
         // Test STRING$(5, "*") = "*****"
         let string_expr = Expression::FunctionCall {
             name: "STRING$".to_string(),
-            args: vec![
-                Expression::Integer(5),
-                Expression::String("*".to_string()),
-            ],
+            args: vec![Expression::Integer(5), Expression::String("*".to_string())],
         };
         assert_eq!(executor.eval_string(&string_expr).unwrap(), "*****");
 
@@ -3959,7 +3997,12 @@ mod tests {
         let result2 = executor.eval_integer(&time_var).unwrap();
 
         // Second reading should be >= first (time moves forward)
-        assert!(result2 >= result1, "TIME should increase: {} >= {}", result2, result1);
+        assert!(
+            result2 >= result1,
+            "TIME should increase: {} >= {}",
+            result2,
+            result1
+        );
 
         // Both should be positive
         assert!(result1 >= 0, "TIME should be positive");
@@ -4029,7 +4072,10 @@ mod tests {
             args: vec![],
         };
         let report_result = executor.eval_string(&report_call).unwrap();
-        assert_eq!(report_result, "Division by zero", "REPORT$ should return error message");
+        assert_eq!(
+            report_result, "Division by zero",
+            "REPORT$ should return error message"
+        );
     }
 
     #[test]
@@ -4053,7 +4099,10 @@ mod tests {
             args: vec![],
         };
         let report_result = executor.eval_string(&report_call).unwrap();
-        assert_eq!(report_result, "", "REPORT$ should return empty string when no error");
+        assert_eq!(
+            report_result, "",
+            "REPORT$ should return empty string when no error"
+        );
     }
 
     #[test]
@@ -4498,20 +4547,20 @@ mod tests {
         // RED: Test OPENOUT function creates file and returns handle
         use std::fs;
         let test_file = "test_openout.txt";
-        
+
         // Clean up any existing file
         let _ = fs::remove_file(test_file);
-        
+
         let mut executor = Executor::new();
-        
+
         let result = executor.open_file_for_writing(test_file);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle, 1); // First handle should be 1
-        
+
         // File should exist
         assert!(fs::metadata(test_file).is_ok());
-        
+
         // Clean up
         drop(executor);
         let _ = fs::remove_file(test_file);
@@ -4522,17 +4571,17 @@ mod tests {
         // RED: Test OPENIN function opens existing file
         use std::fs;
         let test_file = "test_openin.txt";
-        
+
         // Create a test file
         fs::write(test_file, "test content").unwrap();
-        
+
         let mut executor = Executor::new();
-        
+
         let result = executor.open_file_for_reading(test_file);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle, 1);
-        
+
         // Clean up
         drop(executor);
         let _ = fs::remove_file(test_file);
@@ -4542,10 +4591,13 @@ mod tests {
     fn test_openin_fails_on_missing_file() {
         // RED: Test OPENIN returns FileNotFound error
         let mut executor = Executor::new();
-        
+
         let result = executor.open_file_for_reading("nonexistent_file.txt");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BBCBasicError::FileNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BBCBasicError::FileNotFound(_)
+        ));
     }
 
     #[test]
@@ -4553,23 +4605,26 @@ mod tests {
         // RED: Test CLOSE# closes a file
         use std::fs;
         let test_file = "test_close.txt";
-        
+
         // Create a test file
         fs::write(test_file, "test").unwrap();
-        
+
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
-        
+
         // Close the file
         let handle_expr = Expression::Integer(handle);
         let result = executor.execute_close_file(&handle_expr);
         assert!(result.is_ok());
-        
+
         // Trying to close again should fail
         let result = executor.execute_close_file(&handle_expr);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BBCBasicError::ChannelNotOpen(_)));
-        
+        assert!(matches!(
+            result.unwrap_err(),
+            BBCBasicError::ChannelNotOpen(_)
+        ));
+
         // Clean up
         let _ = fs::remove_file(test_file);
     }
@@ -4579,12 +4634,12 @@ mod tests {
         // RED: Test PRINT# writes to file
         use std::fs;
         let test_file = "test_print.txt";
-        
+
         let _ = fs::remove_file(test_file);
-        
+
         let mut executor = Executor::new();
         let handle = executor.open_file_for_writing(test_file).unwrap();
-        
+
         // Write some data
         let handle_expr = Expression::Integer(handle);
         let items = vec![
@@ -4592,17 +4647,17 @@ mod tests {
             crate::parser::PrintItem::Comma,
             crate::parser::PrintItem::Expression(Expression::String("World".to_string())),
         ];
-        
+
         let result = executor.execute_print_file(&handle_expr, &items);
         assert!(result.is_ok());
-        
+
         // Close the file
         executor.execute_close_file(&handle_expr).unwrap();
-        
+
         // Read back the content
         let content = fs::read_to_string(test_file).unwrap();
         assert_eq!(content, "Hello\tWorld\n");
-        
+
         // Clean up
         let _ = fs::remove_file(test_file);
     }
@@ -4612,25 +4667,25 @@ mod tests {
         // RED: Test INPUT# reads from file
         use std::fs;
         let test_file = "test_input.txt";
-        
+
         // Create test file with data
         fs::write(test_file, "42,Hello,3.14").unwrap();
-        
+
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
-        
+
         // Read data into variables
         let handle_expr = Expression::Integer(handle);
         let variables = vec!["A%".to_string(), "B$".to_string(), "C".to_string()];
-        
+
         let result = executor.execute_input_file(&handle_expr, &variables);
         assert!(result.is_ok());
-        
+
         // Check the variables were set
         assert_eq!(executor.variables.get_integer_var("A%").unwrap(), 42);
         assert_eq!(executor.variables.get_string_var("B$").unwrap(), "Hello");
         assert!((executor.variables.get_real_var("C").unwrap() - 3.14).abs() < 0.001);
-        
+
         // Clean up
         drop(executor);
         let _ = fs::remove_file(test_file);
@@ -4641,26 +4696,28 @@ mod tests {
         // RED: Test EOF# function
         use std::fs;
         let test_file = "test_eof.txt";
-        
+
         // Create a small test file
         fs::write(test_file, "one line\n").unwrap();
-        
+
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
-        
+
         // Not at EOF initially
         let eof = executor.check_eof(handle).unwrap();
         assert_eq!(eof, 0); // FALSE
-        
+
         // Read the line
         let handle_expr = Expression::Integer(handle);
         let variables = vec!["LINE$".to_string()];
-        executor.execute_input_file(&handle_expr, &variables).unwrap();
-        
+        executor
+            .execute_input_file(&handle_expr, &variables)
+            .unwrap();
+
         // Now at EOF
         let eof = executor.check_eof(handle).unwrap();
         assert_eq!(eof, -1); // TRUE
-        
+
         // Clean up
         drop(executor);
         let _ = fs::remove_file(test_file);
@@ -4672,23 +4729,23 @@ mod tests {
         use std::fs;
         let file1 = "test_multi1.txt";
         let file2 = "test_multi2.txt";
-        
+
         fs::write(file1, "File 1").unwrap();
         let _ = fs::remove_file(file2);
-        
+
         let mut executor = Executor::new();
-        
+
         // Open two files
         let handle1 = executor.open_file_for_reading(file1).unwrap();
         let handle2 = executor.open_file_for_writing(file2).unwrap();
-        
+
         assert_eq!(handle1, 1);
         assert_eq!(handle2, 2);
-        
+
         // Both should be open
         assert!(executor.open_files.contains_key(&handle1));
         assert!(executor.open_files.contains_key(&handle2));
-        
+
         // Clean up
         drop(executor);
         let _ = fs::remove_file(file1);
@@ -4775,7 +4832,10 @@ mod tests {
         };
 
         let result = executor.push_while(20, &condition).unwrap();
-        assert_eq!(result, None, "Should not enter loop when condition is false");
+        assert_eq!(
+            result, None,
+            "Should not enter loop when condition is false"
+        );
 
         // while_stack should be empty (loop was never entered)
         assert!(executor.while_stack.is_empty());
@@ -4895,11 +4955,11 @@ mod tests {
         let handle = executor.open_file_for_writing(test_file).unwrap();
 
         // Write some bytes
-        executor.bput(handle, 65).unwrap();  // 'A'
-        executor.bput(handle, 66).unwrap();  // 'B'
-        executor.bput(handle, 67).unwrap();  // 'C'
+        executor.bput(handle, 65).unwrap(); // 'A'
+        executor.bput(handle, 66).unwrap(); // 'B'
+        executor.bput(handle, 67).unwrap(); // 'C'
         executor.bput(handle, 255).unwrap(); // Max byte value
-        executor.bput(handle, 0).unwrap();   // Zero
+        executor.bput(handle, 0).unwrap(); // Zero
 
         // Close the file
         drop(executor);
@@ -4924,9 +4984,9 @@ mod tests {
         let handle = executor.open_file_for_writing(test_file).unwrap();
 
         // Write numbers > 255 (should MOD 256)
-        executor.bput(handle, 256).unwrap();  // Should write 0
-        executor.bput(handle, 257).unwrap();  // Should write 1
-        executor.bput(handle, 300).unwrap();  // Should write 44
+        executor.bput(handle, 256).unwrap(); // Should write 0
+        executor.bput(handle, 257).unwrap(); // Should write 1
+        executor.bput(handle, 300).unwrap(); // Should write 44
 
         // Close the file
         drop(executor);
@@ -5100,4 +5160,3 @@ mod tests {
         let _ = fs::remove_file(test_file);
     }
 }
-

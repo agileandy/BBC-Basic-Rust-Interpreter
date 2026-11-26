@@ -250,7 +250,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 // Apostrophe is shorthand for REM - rest of line is a comment
                 chars.next(); // consume apostrophe
                 tokens.push(Token::Keyword(0xF4)); // REM token
-                // Consume rest of line (don't tokenize comment text)
+                                                   // Consume rest of line (don't tokenize comment text)
                 while chars.next().is_some() {}
             }
             '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
