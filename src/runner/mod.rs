@@ -1369,8 +1369,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         // No such key is an extension error. BBC BASIC does not use ERR 154 (issue #140).
         BBCBasicError::NoSuchKey(_) => 154,
         // FOR EACH without matching NEXT is an extension error (issue #141).
-        // BBC BASIC does not use ERR 155.
-        BBCBasicError::MissingNext => 155,
+        // BBC BASIC does not use ERR 156.
+        BBCBasicError::MissingNext => 156,
         _ => 255,
     }
 }

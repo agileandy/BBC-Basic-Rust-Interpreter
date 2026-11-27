@@ -215,7 +215,7 @@ fn test_a_trapped_type_mismatch_at_next_closes_the_loop_as_for_a_for_loop() {
 
 #[test]
 fn test_a_missing_next_is_a_trappable_error_and_removes_the_loop() {
-    // K5: ERR 155 is an extension error. BBC BASIC does not use it.
+    // K5: ERR 156 is an extension error. BBC BASIC does not use it.
     let (result, output) = run(&[
         "10 GOTO 40",
         "20 PRINT REPORT$; \" \"; ERR; \" \"; ERL : ON ERROR OFF",
@@ -227,7 +227,7 @@ fn test_a_missing_next_is_a_trappable_error_and_removes_the_loop() {
     ]);
 
     assert_eq!(result, Err("No FOR at line 30".to_string()));
-    assert_eq!(output, "FOR EACH without matching NEXT 155 60\n");
+    assert_eq!(output, "FOR EACH without matching NEXT 156 60\n");
 }
 
 #[test]
