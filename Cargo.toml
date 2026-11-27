@@ -9,6 +9,10 @@ rand = "0.8"
 # For raw terminal mode, so that GET reads one key with no Return key
 crossterm = { version = "0.29", default-features = false, features = ["windows"] }
 
+[target.'cfg(unix)'.dependencies]
+# For poll and non-blocking stdin, so that INKEY waits for a key a maximum time
+libc = "0.2"
+
 [dev-dependencies]
 # For property-based testing
 quickcheck = "1.0"

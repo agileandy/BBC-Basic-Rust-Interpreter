@@ -19,6 +19,19 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// Give the time limit of INKEY(n) or INKEY$(n) for n centiseconds.
+///
+/// A negative n is a key scan on a BBC Micro: INKEY(-99) is TRUE if the
+/// space bar is pressed, and INKEY(-256) gives the machine type. This build
+/// cannot scan the keyboard, so these give None, and the caller gives 0
+/// (FALSE) or "".
+fn inkey_limit(centiseconds: i32) -> Option<Duration> {
+    u64::try_from(centiseconds)
+        .ok()
+        .map(|centiseconds| Duration::from_millis(centiseconds * 10))
+}
 
 /// Convert a real value to an integer. The fraction part is truncated toward zero.
 /// A value outside the range of an i32, or a value that is not finite, gives "Too big".
@@ -780,6 +793,24 @@ impl Executor {
         #[cfg(not(test))]
         {
             key_input::read_key().map(char::from)
+        }
+    }
+
+    /// Take the next key from the queue with no wait. If the queue is empty,
+    /// wait for a maximum of `limit` for one key from stdin. Give None if no
+    /// key comes in that time or at the end of input.
+    fn next_key_within(&mut self, limit: Duration) -> Option<char> {
+        if let Some(key) = self.key_queue.pop_front() {
+            return Some(key);
+        }
+        #[cfg(test)]
+        {
+            let _ = limit;
+            None
+        }
+        #[cfg(not(test))]
+        {
+            key_input::read_key_within(limit).map(char::from)
         }
     }
 
@@ -2158,6 +2189,16 @@ impl Executor {
             }
             // GET waits for one key and gives its code. At the end of input it gives -1.
             "GET" if args.is_empty() => Ok(self.next_key().map_or(-1, |key| key as i32)),
+            // INKEY(n) waits for a maximum of n centiseconds for a key and
+            // gives its code. If no key comes, it gives -1.
+            // A negative n (a key scan) gives 0: see inkey_limit.
+            "INKEY" if args.len() == 1 => {
+                let time = self.eval_integer(&args[0])?;
+                Ok(match inkey_limit(time) {
+                    Some(limit) => self.next_key_within(limit).map_or(-1, |key| key as i32),
+                    None => 0,
+                })
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -2404,6 +2445,15 @@ impl Executor {
         match name {
             // GET$ waits for one key and gives it. At the end of input it gives "".
             "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
+            // INKEY$(n) waits for a maximum of n centiseconds for a key and
+            // gives it. If no key comes, or n is negative, it gives "".
+            "INKEY$" if args.len() == 1 => {
+                let time = self.eval_integer(&args[0])?;
+                Ok(inkey_limit(time)
+                    .and_then(|limit| self.next_key_within(limit))
+                    .map(String::from)
+                    .unwrap_or_default())
+            }
             "CHR$" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -6186,5 +6236,20 @@ mod tests {
         // Clean up
         drop(executor);
         let _ = fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_inkey_with_empty_queue_gives_no_key_with_no_wait() {
+        // A test build does not read stdin, so the time limit is not used.
+        let inkey = |name: &str| Expression::FunctionCall {
+            name: name.to_string(),
+            args: vec![Expression::Integer(100)],
+        };
+        let mut executor = Executor::new();
+        let start = std::time::Instant::now();
+
+        assert_eq!(executor.eval_integer(&inkey("INKEY")).unwrap(), -1);
+        assert_eq!(executor.eval_string(&inkey("INKEY$")).unwrap(), "");
+        assert!(start.elapsed() < std::time::Duration::from_millis(500));
     }
 }

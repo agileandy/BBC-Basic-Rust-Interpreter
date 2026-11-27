@@ -4874,6 +4874,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_inkey_and_inkey_string_with_time_limit() {
+        for (source, name) in [("X% = INKEY(10)", "INKEY"), ("X$ = INKEY$(10)", "INKEY$")] {
+            assert_eq!(
+                parse_assigned_expression(source),
+                Expression::FunctionCall {
+                    name: name.to_string(),
+                    args: vec![Expression::Integer(10)],
+                },
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_inkey_with_negative_argument() {
+        assert_eq!(
+            parse_assigned_expression("X% = INKEY(-99)"),
+            Expression::FunctionCall {
+                name: "INKEY".to_string(),
+                args: vec![parse_assigned_expression("X% = -99")],
+            }
+        );
+    }
+
+    #[test]
     fn test_parse_channel_function_binds_tighter_than_operator() {
         // BGET#G% + 1 is (BGET#G%) + 1, because the channel is a primary.
         assert_eq!(
