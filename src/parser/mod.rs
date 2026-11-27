@@ -2515,20 +2515,29 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 
 /// Parse READ statement
 /// Supports: READ var1, A(I), N$(1, 2), ... (issue #153). The targets are
-/// split at the commas that are not in brackets. An empty part is skipped.
+/// split at the commas that are not in brackets. An empty part is a syntax
+/// error, as in a list of expressions (issue #155).
 fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    let variables = split_at_commas(tokens)
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .map(|part| parse_read_target(part, line_number))
-        .collect::<Result<Vec<_>>>()?;
-
-    if variables.is_empty() {
+    if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "READ requires at least one variable".to_string(),
             line: line_number,
         });
     }
+
+    let variables = split_at_commas(tokens)
+        .into_iter()
+        .map(|part| {
+            if part.is_empty() {
+                Err(BBCBasicError::SyntaxError {
+                    message: "Missing value at a comma".to_string(),
+                    line: line_number,
+                })
+            } else {
+                parse_read_target(part, line_number)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(Statement::Read { variables })
 }

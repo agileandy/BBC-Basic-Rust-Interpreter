@@ -112,3 +112,27 @@ fn test_read_tokens_after_an_element_is_a_syntax_error() {
         Err("Syntax error at line 20: Expected variable name in READ".to_string())
     );
 }
+
+/// An empty target between commas is a syntax error, as an empty value is in
+/// a list of expressions (issue #155).
+#[test]
+fn test_read_with_an_empty_target_is_a_syntax_error() {
+    for line in ["10 READ A,,B", "10 READ A,", "10 READ ,A", "10 READ A(1,)"] {
+        let (result, _) = run(&["5 DIM A(3)", line, "20 DATA 1, 2"]);
+        assert_eq!(
+            result,
+            Err("Syntax error at line 10: Missing value at a comma".to_string()),
+            "{}",
+            line
+        );
+    }
+}
+
+#[test]
+fn test_read_with_no_target_keeps_its_error() {
+    let (result, _) = run(&["10 READ", "20 DATA 1"]);
+    assert_eq!(
+        result,
+        Err("Syntax error at line 10: READ requires at least one variable".to_string())
+    );
+}
