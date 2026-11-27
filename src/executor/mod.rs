@@ -706,8 +706,9 @@ impl Executor {
             next_val
         };
 
-        // Check if loop is complete. A step of 0 uses the test for a negative step.
-        let loop_complete = if step_val > 0.0 {
+        // Check if loop is complete. A step of 0 uses the test for a positive step,
+        // as in BBC BASIC.
+        let loop_complete = if step_val >= 0.0 {
             next_val > end_val
         } else {
             next_val < end_val
