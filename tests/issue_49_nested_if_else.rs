@@ -11,7 +11,7 @@ use std::time::Duration;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
 use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::{detokenize, tokenize};
+use bbc_basic_interpreter::tokenizer::tokenize;
 
 /// Store the source lines, run the program and return the result and the output.
 ///
@@ -156,12 +156,15 @@ fn test_nested_if_else_in_for_loop_on_one_line() {
 }
 
 #[test]
-fn test_list_shows_nested_if_else_line_as_typed() {
-    // LIST shows a ":" with no spaces, so the line is typed with no spaces.
-    let typed = "20 IF A% THEN PRINT \"x\":IF B% THEN PRINT \"y\" ELSE PRINT \"z\"";
-    let mut program = ProgramStore::new();
-    program.store_line(tokenize(typed).expect("line tokenizes"));
-
-    let (_, line) = program.list()[0];
-    assert_eq!(detokenize(line).expect("line detokenizes"), typed);
+fn test_else_in_rem_after_inner_then_is_part_of_the_rem() {
+    // The REM uses the rest of the line, so the line has no ELSE.
+    check_each_value(
+        "20 IF A% THEN IF B% THEN REM note ELSE PRINT \"z\"",
+        [
+            ((0, 0), "end\n"),
+            ((0, 1), "end\n"),
+            ((1, 0), "end\n"),
+            ((1, 1), "end\n"),
+        ],
+    );
 }
