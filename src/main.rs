@@ -276,8 +276,13 @@ fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String
         let tokenized =
             tokenize(line).map_err(|e| format!("Parse error at line {}: {:?}", line_num + 1, e))?;
 
-        if tokenized.line_number.is_some() {
-            program.store_line(tokenized);
+        if let Some(line_number) = tokenized.line_number {
+            // A line number with no statement deletes that line, as a typed line does.
+            if tokenized.tokens.is_empty() {
+                program.delete_line(line_number);
+            } else {
+                program.store_line(tokenized);
+            }
         } else {
             return Err(format!(
                 "Line {} has no line number: {}",
