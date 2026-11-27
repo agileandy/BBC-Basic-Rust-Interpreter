@@ -1191,6 +1191,8 @@ impl Executor {
     /// collection is empty: the run loop then skips to the matching NEXT.
     fn execute_for_each(&mut self, variable: &str, collection: &Expression) -> Result<()> {
         let handle = self.eval_integer(collection)?;
+        // Make room first, as FOR does (issue 151)
+        self.open_for_loop(variable)?;
         self.set_each_variable(variable, handle, 0)?;
         // The run loop sets the FOR position (set_for_loop_line)
         self.for_loops.push(ForLoop {

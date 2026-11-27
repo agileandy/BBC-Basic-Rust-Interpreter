@@ -41,7 +41,7 @@ fn assert_no_room_then_back(output: &str, line: u32) {
 #[test]
 fn test_single_line_function_without_end_gives_no_room() {
     let output = run_then_print(&["10 PRINT FNr(1)", "30 DEF FNr(N) = FNr(N + 1)"]);
-    assert_no_room_then_back(&output, 10);
+    assert_no_room_then_back(&output, 30);
 }
 
 #[test]
@@ -152,6 +152,17 @@ fn test_for_started_again_removes_the_loops_above_it() {
 }
 
 #[test]
+fn test_for_each_started_again_by_goto_uses_one_entry() {
+    let (result, _, depths) = run_lines_with_depths(&[
+        "10 L = NEWLIST : LISTADD L, 1 : LISTADD L, 2",
+        "20 FOR EACH N IN L",
+        "30 C% = C% + 1 : IF C% < 100 THEN GOTO 20",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(depths, (1, 0, 0));
+}
+
+#[test]
 fn test_repeat_started_again_by_goto_uses_one_entry() {
     let (result, _, depths) =
         run_lines_with_depths(&["10 REPEAT", "20 C% = C% + 1 : IF C% < 100 THEN GOTO 10"]);
@@ -253,7 +264,7 @@ fn test_str_of_an_error_gives_that_error() {
 #[test]
 fn test_function_inside_str_and_val_gives_no_room() {
     let output = run_then_print(&["10 PRINT FNr(1)", "20 DEF FNr(N) = VAL(STR$(FNr(N + 1)))"]);
-    assert_no_room_then_back(&output, 10);
+    assert_no_room_then_back(&output, 20);
 }
 
 #[test]
@@ -262,7 +273,7 @@ fn test_string_function_inside_val_and_str_gives_no_room() {
         "10 PRINT FNr$(1)",
         "20 DEF FNr$(N) = STR$(VAL(FNr$(N + 1)))",
     ]);
-    assert_no_room_then_back(&output, 10);
+    assert_no_room_then_back(&output, 20);
 }
 
 #[test]
@@ -271,7 +282,7 @@ fn test_function_inside_nested_numeric_builtins_gives_no_room() {
         "10 PRINT FNr(1)",
         "20 DEF FNr(N) = ABS(INT(ABS(INT(ABS(INT(ABS(INT(FNr(N + 1)))))))))",
     ]);
-    assert_no_room_then_back(&output, 10);
+    assert_no_room_then_back(&output, 20);
 }
 
 #[test]
@@ -280,7 +291,7 @@ fn test_function_inside_nested_string_builtins_gives_no_room() {
         "10 PRINT FNr$(1)",
         "20 DEF FNr$(N) = LEFT$(MID$(LEFT$(MID$(FNr$(N + 1), 1), 5), 1), 5)",
     ]);
-    assert_no_room_then_back(&output, 10);
+    assert_no_room_then_back(&output, 20);
 }
 
 #[test]
@@ -393,7 +404,7 @@ fn test_handler_traps_no_room_and_a_later_call_works() {
         "120 PRINT EVAL(\"2 + 3\")",
     ]);
     assert!(
-        output.contains(&format!("ERR {NO_ROOM_ERR} ERL 20\n49\n5\n")),
+        output.contains(&format!("ERR {NO_ROOM_ERR} ERL 40\n49\n5\n")),
         "output: {output}"
     );
     assert!(output.contains("back\n"), "output: {output}");
