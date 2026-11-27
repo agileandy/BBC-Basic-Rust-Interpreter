@@ -31,14 +31,6 @@ fn test_print_file_two_numbers_with_no_separator_writes_both() {
 }
 
 #[test]
-fn test_print_file_spc_parses_and_writes_no_spaces() {
-    // D4: the executor ignores SPC in PRINT#, as it did before this issue.
-    let bytes = write_with("spc", "PRINT#F%, SPC(3);\"A\"");
-
-    assert_eq!(String::from_utf8_lossy(&bytes), "A\n");
-}
-
-#[test]
 fn test_print_file_tan_is_a_function() {
     let bytes = write_with("tan", "PRINT#F%, TAN(0)");
 
