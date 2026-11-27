@@ -5,7 +5,7 @@
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
-use crate::parser::{DataValue, Expression, InputItem, Statement, TraceMode};
+use crate::parser::{DataValue, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
 use crate::variables::{Variable, VariableStore};
 use rand::Rng;
@@ -359,6 +359,11 @@ impl Executor {
                 indices,
                 expression,
             } => self.execute_array_assignment(name, indices, expression),
+            Statement::MemoryAssignment {
+                width,
+                address,
+                expression,
+            } => self.execute_memory_assignment(*width, address, expression),
             Statement::Print { items } => self.execute_print(items),
             Statement::End | Statement::Stop | Statement::Quit => {
                 // END, STOP, and QUIT all stop execution
@@ -549,6 +554,47 @@ impl Executor {
 
         // Set the array element
         self.variables.set_array_element(name, &index_values, value)
+    }
+
+    /// The addresses of the bytes that a memory operator uses, low byte
+    /// first. An address has 16 bits, as on the BBC Micro, so the high bits
+    /// of the value are ignored.
+    fn memory_addresses(&mut self, width: Indirection, address: &Expression) -> Result<Vec<u16>> {
+        let base = self.eval_integer(address)? as u16;
+        let count = match width {
+            Indirection::Byte => 1,
+            Indirection::Word => 4,
+        };
+        Ok((0..count).map(|i| base.wrapping_add(i)).collect())
+    }
+
+    /// Read `?addr` (one byte, 0 to 255) or `!addr` (four bytes, low byte
+    /// first, as a signed integer).
+    fn read_memory(&mut self, width: Indirection, address: &Expression) -> Result<i32> {
+        let mut bytes = [0u8; 4];
+        for (byte, address) in bytes.iter_mut().zip(self.memory_addresses(width, address)?) {
+            *byte = self.memory.peek(address)?;
+        }
+        Ok(i32::from_le_bytes(bytes))
+    }
+
+    /// Execute `?addr = value` (the low 8 bits) or `!addr = value` (4 bytes).
+    /// If a byte is outside memory, no byte changes.
+    fn execute_memory_assignment(
+        &mut self,
+        width: Indirection,
+        address: &Expression,
+        expression: &Expression,
+    ) -> Result<()> {
+        let addresses = self.memory_addresses(width, address)?;
+        let value = self.eval_integer(expression)?.to_le_bytes();
+        for &address in &addresses {
+            self.memory.peek(address)?;
+        }
+        for (&address, byte) in addresses.iter().zip(value) {
+            self.memory.poke(address, byte)?;
+        }
+        Ok(())
     }
 
     /// Execute a PRINT statement
@@ -1501,11 +1547,15 @@ impl Executor {
             }
             Expression::UnaryOp { op, operand } => {
                 use crate::parser::UnaryOperator;
+                if let UnaryOperator::Indirect(width) = op {
+                    return self.read_memory(*width, operand);
+                }
                 let val = self.eval_integer(operand)?;
                 match op {
                     UnaryOperator::Minus => val.checked_neg().ok_or(BBCBasicError::TooBig),
                     UnaryOperator::Plus => Ok(val),
                     UnaryOperator::Not => Ok(if val == 0 { -1 } else { 0 }),
+                    UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
                 }
             }
             Expression::FunctionCall { name, args } => self.eval_function_int(name, args),
@@ -1602,11 +1652,15 @@ impl Executor {
             }
             Expression::UnaryOp { op, operand } => {
                 use crate::parser::UnaryOperator;
+                if let UnaryOperator::Indirect(width) = op {
+                    return self.read_memory(*width, operand).map(f64::from);
+                }
                 let val = self.eval_real(operand)?;
                 match op {
                     UnaryOperator::Minus => Ok(-val),
                     UnaryOperator::Plus => Ok(val),
                     UnaryOperator::Not => Ok(if val == 0.0 { -1.0 } else { 0.0 }),
+                    UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
                 }
             }
             Expression::FunctionCall { name, args } => {
@@ -1654,7 +1708,7 @@ impl Executor {
             },
             Expression::UnaryOp { op, operand } => match op {
                 UnaryOperator::Plus | UnaryOperator::Minus => self.is_real_expr(operand),
-                UnaryOperator::Not => false,
+                UnaryOperator::Not | UnaryOperator::Indirect(_) => false,
             },
             Expression::FunctionCall { name, args } => {
                 if self.functions.contains_key(name) {
