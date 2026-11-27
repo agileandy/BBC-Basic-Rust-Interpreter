@@ -2925,18 +2925,22 @@ impl Executor {
             .entry(name.to_string())
             .or_insert_with(|| variables.get_variable(name).cloned());
 
-        // Remove the variable from the main scope (creating a new local binding)
-        // We'll set it to a default value for its type
-        if name.ends_with('%') {
-            self.variables.set_integer_var(name.to_string(), 0);
-        } else if name.ends_with('$') {
-            self.variables
-                .set_string_var(name.to_string(), String::new())?;
-        } else {
-            self.variables.set_real_var(name.to_string(), 0.0);
-        }
+        // The local variable starts with the zero value of its type
+        self.variables
+            .restore_variable(name.to_string(), Self::zero_value(name));
 
         Ok(())
+    }
+
+    /// The value that LOCAL gives a scalar: 0, or an empty string
+    fn zero_value(name: &str) -> Variable {
+        if name.ends_with('%') {
+            Variable::Integer(0)
+        } else if name.ends_with('$') {
+            Variable::String(String::new())
+        } else {
+            Variable::Real(0.0)
+        }
     }
 
     /// The number of open local scopes
@@ -2963,11 +2967,11 @@ impl Executor {
                 line: None,
             })?;
 
-        // Restore all saved scalars. A scalar that did not exist before is left as it is.
+        // Restore all saved scalars. As on a BBC Micro, a scalar that did not
+        // exist before keeps the zero value that LOCAL gave it.
         for (name, saved_value) in frame.saved_variables {
-            if let Some(var) = saved_value {
-                self.variables.restore_variable(name, var);
-            }
+            let var = saved_value.unwrap_or_else(|| Self::zero_value(&name));
+            self.variables.restore_variable(name, var);
         }
 
         // Restore all saved arrays. An array that did not exist before is removed.
