@@ -2352,8 +2352,12 @@ impl Executor {
     /// colour is reduced to the colour count of the current mode, as on a BBC
     /// Micro. No escape code goes to the output: colour output to a real
     /// terminal is out of scope (issue #101). A console gets the colours: the
-    /// IDE shows them (issue #174).
+    /// IDE shows them (issue #174). Mode 7 is teletext: the MOS ignores
+    /// VDU 17 there (issue #199).
     fn set_text_colour(&mut self, byte: u8) {
+        if ScreenMode::from_number(7) == Some(self.screen_mode) {
+            return;
+        }
         let colour = (byte & 0x7F) % self.screen_mode.colours;
         if byte < 128 {
             self.text_foreground = colour;

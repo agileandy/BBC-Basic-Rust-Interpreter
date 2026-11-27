@@ -110,6 +110,8 @@ pub enum Outcome {
 
 /// The text of the question when the program has changes that are not saved.
 const QUIT_QUESTION: &str = "Not saved. Press ^Q again to quit";
+/// The status text of the edit and files modes while a program runs.
+const RUNNING: &str = "running";
 /// The longest wait for a terminal event before the next draw.
 const EVENT_WAIT: Duration = Duration::from_millis(20);
 
@@ -136,8 +138,8 @@ pub struct App {
     mode: Mode,
     quit_asked: bool,
     quit: bool,
-    /// True while the help screen shows (issue #174)
-    help: bool,
+    /// The help screen, while it shows (issue #174)
+    help: Option<help::Help>,
     editor: editor::EditorPane,
     run: run::RunPane,
     files: files::FilesPane,
@@ -152,7 +154,7 @@ impl App {
             mode: Mode::Edit,
             quit_asked: false,
             quit: false,
-            help: false,
+            help: None,
             editor: editor::EditorPane::new(&document),
             run: run::RunPane::default(),
             files: files::FilesPane::new(document.file_name()),
@@ -258,9 +260,12 @@ impl App {
         // The status message shows until the next key. The quit question
         // is the only question in the status line: Ctrl-Q sets it again.
         self.context.message.clear();
-        if self.help {
-            // Each key closes the help, and does nothing else
-            self.help = false;
+        if let Some(help) = &mut self.help {
+            // A key that does not scroll the help closes it, and does
+            // nothing else
+            if !help.key(key) {
+                self.help = None;
+            }
             return;
         }
         let is_quit = is_ctrl(key, 'q');
@@ -269,8 +274,8 @@ impl App {
             self.quit_asked = false;
         }
         match key.code {
-            KeyCode::F(1) => self.help = true,
-            _ if is_ctrl(key, 'h') => self.help = true,
+            KeyCode::F(1) => self.help = Some(help::Help::default()),
+            _ if is_ctrl(key, 'h') => self.help = Some(help::Help::default()),
             // Tab never goes to a pane, so it never puts a tab in the text.
             // Some terminals give Shift-Tab as Tab with Shift.
             KeyCode::BackTab => self.set_mode(self.mode.previous()),
@@ -403,17 +408,22 @@ impl App {
         let ctx = &self.context;
         // The help screen is in place of the pane, so that the cursor of
         // the pane does not show in it
-        match (self.help, self.mode) {
-            (true, _) => help::draw(frame, pane),
-            (false, Mode::Edit) => self.editor.draw(frame, pane, ctx),
-            (false, Mode::Run) => self.run.draw(frame, pane, ctx),
-            (false, Mode::Files) => self.files.draw(frame, pane, ctx),
+        match (&self.help, self.mode) {
+            (Some(help), _) => help.draw(frame, pane),
+            (None, Mode::Edit) => self.editor.draw(frame, pane, ctx),
+            (None, Mode::Run) => self.run.draw(frame, pane, ctx),
+            (None, Mode::Files) => self.files.draw(frame, pane, ctx),
         }
-        let detail = match self.mode {
+        let mut detail = match self.mode {
             Mode::Edit => self.editor.status(&ctx.document),
             Mode::Run => self.run.status(),
             Mode::Files => String::new(),
         };
+        // The run mode says running or ready. The other modes say running
+        // while a program runs (issue #199).
+        if self.mode != Mode::Run && self.run.is_running() {
+            detail = [RUNNING, detail.as_str()].join("  ").trim_end().to_string();
+        }
         frame::draw_status(
             frame,
             status,
