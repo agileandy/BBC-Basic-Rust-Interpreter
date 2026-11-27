@@ -136,8 +136,9 @@ pub mod error {
         // The Escape key stopped the program. ERR 17 (issue #171).
         Escape,
 
-        // Custom error for ON ERROR handling
-        UserError(u8),
+        // The error of the statement ERROR number, text$ (issue #201). The
+        // text has no prefix. Number 0 is fatal: ON ERROR does not trap it.
+        UserError { number: u8, message: String },
     }
 
     impl fmt::Display for BBCBasicError {
@@ -196,7 +197,7 @@ pub mod error {
                 BBCBasicError::BadLibrary(detail) => write!(f, "Bad library: {}", detail),
                 BBCBasicError::Escape => write!(f, "Escape"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
-                BBCBasicError::UserError(code) => write!(f, "Error {}", code),
+                BBCBasicError::UserError { message, .. } => write!(f, "{}", message),
             }
         }
     }

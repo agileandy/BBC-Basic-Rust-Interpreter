@@ -335,6 +335,11 @@ pub enum Statement {
     Cls,
     /// REPORT statement - print the text of the last error
     Report,
+    /// ERROR statement - make an error with a number and a text (issue #201)
+    Error {
+        number: Expression,
+        text: Expression,
+    },
     /// CLEAR statement - remove all variables and close the loops and calls
     Clear,
     /// TRACE statement - show the number of each line that runs
@@ -1043,6 +1048,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // REPORT statement
         Token::Keyword(0xF6) => Ok(Statement::Report),
+
+        // ERROR statement: ERROR number, text$ (issue #201)
+        Token::Keyword(0x85) => parse_error_statement(&tokens[1..], line.line_number),
 
         // CLEAR statement
         Token::Keyword(0xD8) => Ok(Statement::Clear),
@@ -2491,6 +2499,27 @@ fn split_at_commas(tokens: &[Token]) -> Vec<&[Token]> {
             depth == 0 && matches!(token, Token::Separator(','))
         })
         .collect()
+}
+
+/// Parse ERROR statement: ERROR number, text$ (issue #201)
+fn parse_error_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let parts = split_at_commas(tokens);
+    let [number, text] = parts.as_slice() else {
+        return Err(syntax_error_at(
+            "ERROR needs a number and a text: ERROR n, text$",
+            line_number,
+        ));
+    };
+    if number.is_empty() || text.is_empty() {
+        return Err(syntax_error_at(
+            "ERROR needs a number and a text: ERROR n, text$",
+            line_number,
+        ));
+    }
+    Ok(Statement::Error {
+        number: parse_expression(number)?,
+        text: parse_expression(text)?,
+    })
 }
 
 /// The position of the first comma that is not in brackets (issue #150).
