@@ -127,7 +127,7 @@ fn test_relative_plot() {
 
     // Test relative plotting (mode with bit 2 set)
     execute_line(&mut executor, "10 PLOT 4, 100, 100");
-    execute_line(&mut executor, "20 PLOT 69, 50, 50"); // 69 = 65 + 4 (relative point plot)
+    execute_line(&mut executor, "20 PLOT 65, 50, 50"); // 65: bit 2 clear (relative point plot)
 
     let output = executor.get_graphics_output();
     assert!(output.len() > 100);
@@ -293,7 +293,7 @@ fn test_origin_affects_plotting() {
 fn test_plot_triangle_fill_modes() {
     let mut executor = Executor::new();
 
-    // Test PLOT modes 128-191 (filled triangles)
+    // Test PLOT modes 128-191 (filled triangles). 132 is absolute (bit 2 set)
     // Triangle modes work in pairs:
     // - First PLOT stores current position as triangle corner
     // - Second PLOT draws triangle from corner -> current -> target
@@ -301,12 +301,12 @@ fn test_plot_triangle_fill_modes() {
     execute_line(&mut executor, "10 CLG");
     execute_line(&mut executor, "20 MOVE 400, 300"); // Move to first corner
 
-    // First PLOT 128: stores (400, 300) as triangle corner
-    execute_line(&mut executor, "30 PLOT 128, 600, 600");
+    // First PLOT 132: stores (400, 300) as triangle corner
+    execute_line(&mut executor, "30 PLOT 132, 600, 600");
 
-    // Second PLOT 128: draws triangle from (400,300) -> (600,600) -> (600,300)
+    // Second PLOT 132: draws triangle from (400,300) -> (600,600) -> (600,300)
     execute_line(&mut executor, "40 MOVE 600, 300");
-    execute_line(&mut executor, "50 PLOT 128, 600, 600");
+    execute_line(&mut executor, "50 PLOT 132, 600, 600");
 
     let output = executor.get_graphics_output();
     // Should have drawn something
@@ -317,12 +317,12 @@ fn test_plot_triangle_fill_modes() {
 fn test_plot_triangle_with_different_modes() {
     let mut executor = Executor::new();
 
-    // Test that different triangle modes work (129-191 use patterns)
+    // Test that different triangle modes work (133 is absolute, bit 2 set)
     execute_line(&mut executor, "10 CLG");
     execute_line(&mut executor, "20 MOVE 400, 400");
-    execute_line(&mut executor, "30 PLOT 129, 600, 600"); // Store corner
+    execute_line(&mut executor, "30 PLOT 133, 600, 600"); // Store corner
     execute_line(&mut executor, "40 MOVE 600, 400");
-    execute_line(&mut executor, "50 PLOT 129, 600, 600"); // Draw triangle
+    execute_line(&mut executor, "50 PLOT 133, 600, 600"); // Draw triangle
 
     let output = executor.get_graphics_output();
     assert!(!output.is_empty());
