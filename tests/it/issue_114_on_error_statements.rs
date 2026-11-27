@@ -4,8 +4,48 @@
 use crate::common::run_with_limit as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::{run_typed_line, RunOutcome};
+use bbc_basic_interpreter::runner::{run_program, run_typed_line, RunOutcome};
 use bbc_basic_interpreter::tokenizer::tokenize;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+
+/// A change to the stored program between the run and the typed line.
+enum Edit {
+    /// Store this line (a new or a changed line)
+    Store(&'static str),
+    /// Delete the line with this number
+    Delete(u16),
+}
+
+/// Store and run the program, apply the edit, then run the typed line. Give
+/// the result of the typed line and all the output. Panic if this takes more
+/// than 5 seconds.
+fn run_edit_and_type(
+    source: &'static [&'static str],
+    edit: Edit,
+    typed_line: &'static str,
+) -> (Result<RunOutcome, String>, String) {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        for line in source {
+            program.store_line(tokenize(line).expect("line tokenizes"));
+        }
+        run_program(&mut executor, &mut program).expect("program runs");
+        match edit {
+            Edit::Store(line) => program.store_line(tokenize(line).expect("line tokenizes")),
+            Edit::Delete(line_number) => program.delete_line(line_number),
+        }
+        let tokenized = tokenize(typed_line).expect("line tokenizes");
+        let result = run_typed_line(&mut executor, &program, &tokenized);
+        let _ = sender.send((result, executor.get_output().to_string()));
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the typed line stops in 5 seconds")
+}
 
 /// Store the program, then run each typed line. Give the result of each
 /// typed line and the output.
@@ -196,6 +236,101 @@ fn test_typed_on_error_goto_still_works() {
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended), Ok(RunOutcome::Ended)]);
     assert_eq!(output, "H\n");
+}
+
+// K1: a handler is valid only while its line keeps the ON ERROR statement
+const PROGRAM_WITH_STATEMENTS_HANDLER: [&str; 3] = [
+    "10 ON ERROR PRINT \"caught\" : END",
+    "20 PRINT 1/0",
+    "30 END",
+];
+
+#[test]
+fn test_changed_handler_line_removes_the_handler() {
+    let (result, output) = run_edit_and_type(
+        &PROGRAM_WITH_STATEMENTS_HANDLER,
+        Edit::Store("10 A=1 : B=2 : PRINT \"stale ran\""),
+        "GOTO 20",
+    );
+
+    assert_eq!(result, Err("Division by zero at line 20".to_string()));
+    assert_eq!(output, "caught\n");
+}
+
+#[test]
+fn test_deleted_handler_line_removes_the_handler() {
+    let (result, output) = run_edit_and_type(
+        &PROGRAM_WITH_STATEMENTS_HANDLER,
+        Edit::Delete(10),
+        "GOTO 20",
+    );
+
+    assert_eq!(result, Err("Division by zero at line 20".to_string()));
+    assert_eq!(output, "caught\n");
+}
+
+// K2: the handler statements must be on one line
+#[test]
+fn test_block_if_in_handler_is_a_syntax_error() {
+    let (result, output) = run(&[
+        "10 ON ERROR IF ERR = 18 THEN",
+        "20 PRINT \"div\"",
+        "30 ENDIF",
+        "40 PRINT \"ok\"",
+    ]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 10: Block IF cannot be in an ON ERROR handler".to_string())
+    );
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_def_proc_in_handler_is_a_syntax_error() {
+    let (result, _) = run(&["10 ON ERROR DEF PROCa", "20 ENDPROC"]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 10: DEF cannot be in an ON ERROR handler".to_string())
+    );
+}
+
+#[test]
+fn test_def_fn_in_handler_is_a_syntax_error() {
+    let (result, _) = run(&["10 ON ERROR DEF FNa = 1"]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 10: DEF cannot be in an ON ERROR handler".to_string())
+    );
+}
+
+// K3: ON ERROR needs a statement after it
+#[test]
+fn test_on_error_with_only_a_colon_is_a_syntax_error() {
+    let (result, output) = run(&["10 ON ERROR :", "20 PRINT 1/0"]);
+
+    assert_eq!(
+        result,
+        Err(
+            "Syntax error at line 10: Expected GOTO, OFF or a statement after ON ERROR".to_string()
+        )
+    );
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_on_error_at_end_of_if_branch_is_a_syntax_error() {
+    let (result, output) = run(&["10 IF TRUE THEN ON ERROR", "20 PRINT 1/0"]);
+
+    assert_eq!(
+        result,
+        Err(
+            "Syntax error at line 10: Expected GOTO, OFF or a statement after ON ERROR".to_string()
+        )
+    );
+    assert_eq!(output, "");
 }
 
 #[test]

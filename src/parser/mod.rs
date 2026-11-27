@@ -1269,6 +1269,53 @@ fn parse_gosub_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     })
 }
 
+/// The error for ON ERROR with nothing to run after it
+const NO_ON_ERROR_STATEMENT: &str = "Expected GOTO, OFF or a statement after ON ERROR";
+
+/// A syntax error with this message at this line
+fn syntax_error_at(message: &str, line_number: Option<u16>) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message: message.to_string(),
+        line: line_number,
+    }
+}
+
+/// Parse the handler statements after ON ERROR. The handler runs from one
+/// line only, so it must have a statement and cannot open a block IF or
+/// define a PROC or FN.
+fn parse_handler_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
+    let statements = parse_statements(tokens, line_number)?;
+    if statements.iter().all(|s| matches!(s, Statement::Empty)) {
+        return Err(syntax_error_at(NO_ON_ERROR_STATEMENT, line_number));
+    }
+    if let Some(Statement::IfBlock { .. }) = statements.last() {
+        return Err(syntax_error_at(
+            "Block IF cannot be in an ON ERROR handler",
+            line_number,
+        ));
+    }
+    if has_def(&statements) {
+        return Err(syntax_error_at(
+            "DEF cannot be in an ON ERROR handler",
+            line_number,
+        ));
+    }
+    Ok(statements)
+}
+
+/// True if a statement or a statement in an IF branch is a DEF PROC or DEF FN
+fn has_def(statements: &[Statement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        Statement::DefProc { .. } | Statement::DefFn { .. } => true,
+        Statement::If {
+            then_part,
+            else_part,
+            ..
+        } => has_def(then_part) || else_part.as_deref().is_some_and(has_def),
+        _ => false,
+    })
+}
+
 /// Parse ON statement (ON GOTO or ON GOSUB)
 fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // Syntax: ON <expression> GOTO|GOSUB <line1>, <line2>, ...
@@ -1287,10 +1334,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     if matches!(tokens[0], Token::Keyword(0x85)) {
         // ERROR keyword (0x85)
         if tokens.len() < 2 {
-            return Err(BBCBasicError::SyntaxError {
-                message: "Expected GOTO or OFF after ON ERROR".to_string(),
-                line: line_number,
-            });
+            return Err(syntax_error_at(NO_ON_ERROR_STATEMENT, line_number));
         }
 
         match tokens[1] {
@@ -1330,7 +1374,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
             _ => {
                 // The handler is the rest of the line
                 return Ok(Statement::OnErrorStatements {
-                    statements: parse_statements(&tokens[1..], line_number)?,
+                    statements: parse_handler_statements(&tokens[1..], line_number)?,
                 });
             }
         }

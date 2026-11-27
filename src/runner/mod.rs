@@ -581,6 +581,22 @@ fn record_error(executor: &mut Executor, error: &BBCBasicError, line_key: u32) {
     );
 }
 
+/// True if the item before the handler position is an ON ERROR statement
+/// with statements, and the position is in its line.
+fn is_on_error_statements(lines: &ProgramLines, handler_position: Position) -> bool {
+    let Some(index) = handler_position.index.checked_sub(1) else {
+        return false;
+    };
+    let on_error = Position {
+        line: handler_position.line,
+        index,
+    };
+    matches!(
+        lines.statement(on_error),
+        Some(Statement::OnErrorStatements { .. })
+    ) && lines.item(handler_position).is_some()
+}
+
 /// Run from `start` until the run stops. A BASIC error in a stored line goes
 /// to the ON ERROR handler.
 fn run_lines(
@@ -663,6 +679,14 @@ fn run_lines(
                         if position.line == handler_position.line
                             && position.index >= handler_position.index =>
                     {
+                        return Err(error_text(&e, error_line));
+                    }
+                    // A program edit after the ON ERROR changed or deleted
+                    // its line: the handler is not valid
+                    ErrorHandler::Statements(handler_position)
+                        if !is_on_error_statements(lines, handler_position) =>
+                    {
+                        executor.clear_error_handler();
                         return Err(error_text(&e, error_line));
                     }
                     ErrorHandler::Statements(handler_position) => cursor.goto(handler_position),
