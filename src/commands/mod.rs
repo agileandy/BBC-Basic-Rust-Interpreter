@@ -81,8 +81,8 @@ pub fn run_command(
         executor.clear_variables();
         // The handler line belongs to the old program
         executor.clear_error_handler();
-        // NEW removes the libraries of INSTALL (issue #185)
-        executor.libraries_mut().clear();
+        // NEW removes the libraries of INSTALL and each routine (issue #185)
+        executor.clear_libraries_and_routines();
         say!(executor, "Program cleared");
         return Ok(Done);
     }
@@ -100,6 +100,9 @@ pub fn run_command(
     if is_file_command && input_upper.starts_with("LOAD ") {
         let filename = extract_filename(input)?;
         load_program(executor, program, &filename)?;
+        // LOAD removes the libraries of INSTALL and each routine (issue
+        // #185). CHAIN keeps the libraries, as the manual says.
+        executor.clear_libraries_and_routines();
         return Ok(Done);
     }
 
@@ -312,15 +315,13 @@ fn load_program(
     executor.clear_variables();
     // The handler line belongs to the old program
     executor.clear_error_handler();
-    // LOAD removes the libraries of INSTALL (issue #185)
-    executor.libraries_mut().clear();
 
     say!(executor, "Loaded from {}", path);
     Ok(())
 }
 
 /// Tokenize each line of the file text into a new program store
-pub(crate) fn parse_program(content: &str) -> Result<ProgramStore, String> {
+fn parse_program(content: &str) -> Result<ProgramStore, String> {
     let mut program = ProgramStore::new();
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();

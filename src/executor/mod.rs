@@ -823,6 +823,12 @@ impl Executor {
                 // The run loop sets the handler, because it knows the position
                 Ok(())
             }
+            // The run loop executes INSTALL, because it adds a line set
+            // (issue #185). With no run loop, INSTALL cannot work.
+            Statement::Install { .. } => Err(BBCBasicError::SyntaxError {
+                message: "INSTALL needs the run loop".to_string(),
+                line: None,
+            }),
             Statement::Trace { mode } => self.execute_trace(mode),
             Statement::PrintFile { handle, items } => self.execute_print_file(handle, items),
             Statement::InputFile { handle, targets } => self.execute_input_file(handle, targets),
@@ -4305,19 +4311,28 @@ impl Executor {
         self.error_handler
     }
 
-    /// The libraries of INSTALL. CLEAR keeps them.
+    /// The libraries of INSTALL. CLEAR, RUN and CHAIN keep them.
     pub fn libraries(&self) -> &LibraryStore {
         &self.libraries
     }
 
-    /// The libraries of INSTALL, to add or remove a library
+    /// The libraries of INSTALL, to add a library
     pub fn libraries_mut(&mut self) -> &mut LibraryStore {
         &mut self.libraries
     }
 
-    /// True if a function with this name is defined
-    pub fn has_function(&self, name: &str) -> bool {
-        self.functions.contains_key(name)
+    /// Remove the libraries and each procedure and function (NEW and LOAD).
+    /// A routine whose DEF is in a removed library must not stay, and a
+    /// single-line function of the old program must not stay.
+    pub fn clear_libraries_and_routines(&mut self) {
+        self.libraries.clear();
+        self.clear_procedures();
+        self.clear_functions();
+    }
+
+    /// The definition of a function, if one has this name
+    pub fn get_function(&self, name: &str) -> Option<&FunctionDefinition> {
+        self.functions.get(name)
     }
 
     /// The value of a string expression: the file name of INSTALL
@@ -7211,6 +7226,18 @@ mod tests {
         executor.execute_statement(&stmt).unwrap();
 
         assert_eq!(executor.get_error_handler(), None);
+    }
+
+    #[test]
+    fn install_outside_the_run_loop_gives_an_error() {
+        // The run loop executes INSTALL (issue #185). The executor alone
+        // cannot add a line set, so it must not do nothing with no error.
+        let mut executor = Executor::new();
+        let stmt = Statement::Install {
+            file: Expression::String("lib".to_string()),
+        };
+
+        assert!(executor.execute_statement(&stmt).is_err());
     }
 
     #[test]

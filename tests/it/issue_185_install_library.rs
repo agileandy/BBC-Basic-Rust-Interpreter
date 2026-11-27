@@ -162,6 +162,62 @@ fn a_second_install_of_the_same_file_does_not_load_it_again() {
 }
 
 #[test]
+fn the_same_file_with_a_different_name_text_loads_again() {
+    // The manual: "a case-sensitive comparison of the supplied path/filename
+    // is performed, so the same library being specified differently will not
+    // be detected". The last library loaded wins.
+    let dir = test_dir("other_name");
+    let path = write_library(
+        &dir,
+        "namelib.bbas",
+        &["10 DEF PROCv", "20 PRINT \"version 1\"", "30 ENDPROC"],
+    );
+    let mut executor = Executor::new();
+    let program = ProgramStore::new();
+    let first = tokenize(&format!("INSTALL \"{}\" : PROCv", path)).expect("line tokenizes");
+    assert!(run_typed_line(&mut executor, &program, &first).is_ok());
+
+    write_library(
+        &dir,
+        "namelib.bbas",
+        &["10 DEF PROCv", "20 PRINT \"version 2\"", "30 ENDPROC"],
+    );
+    let other = dir.join(".").join("namelib.bbas");
+    let second = tokenize(&format!("INSTALL \"{}\" : PROCv", other.to_string_lossy()))
+        .expect("line tokenizes");
+    assert!(run_typed_line(&mut executor, &program, &second).is_ok());
+
+    assert_eq!(executor.get_output(), "version 1\nversion 2\n");
+}
+
+#[test]
+fn a_def_line_in_a_library_does_not_replace_a_function_of_the_program() {
+    let dir = test_dir("def_line");
+    let path = write_library(
+        &dir,
+        "deflib.bbas",
+        &[
+            "10 DEF PROCr",
+            "20 PRINT \"r\"",
+            "25 DEF FNone(x)=x+7",
+            "30 ENDPROC",
+        ],
+    );
+    let mut source = vec![install(10, &path)];
+    source.extend(lines(&[
+        "20 PROCr",
+        "30 PRINT ;FNone(1)",
+        "35 END",
+        "40 DEF FNone(x)=x+1000",
+    ]));
+
+    let (result, output) = run(&source);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "r\n1001\n");
+}
+
+#[test]
 fn a_routine_of_the_program_with_the_same_name_wins() {
     let dir = test_dir("program_wins");
     let path = write_library(
@@ -192,8 +248,8 @@ fn a_routine_of_the_program_with_the_same_name_wins() {
 }
 
 #[test]
-fn the_first_library_that_defines_a_name_wins() {
-    let dir = test_dir("first_wins");
+fn the_last_library_that_defines_a_name_wins() {
+    let dir = test_dir("last_wins");
     let one = write_library(
         &dir,
         "one.bbas",
@@ -217,7 +273,84 @@ fn the_first_library_that_defines_a_name_wins() {
     let (result, output) = run(&source);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "one\ntwo b\n");
+    assert_eq!(output, "two\ntwo b\n");
+}
+
+#[test]
+fn a_library_needs_no_line_numbers() {
+    let dir = test_dir("no_numbers");
+    let path = write_library(
+        &dir,
+        "plainlib.bbas",
+        &[
+            "DEF PROCa(N$)",
+            "LOCAL T$",
+            "T$=\"plain \"+N$",
+            "PRINT T$",
+            "ENDPROC",
+            "",
+            "DEF FNsq(X)=X*X",
+        ],
+    );
+    let mut source = vec![install(10, &path)];
+    source.extend(lines(&["20 PROCa(\"Ann\")", "30 PRINT ;FNsq(5)"]));
+
+    let (result, output) = run(&source);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "plain Ann\n25\n");
+}
+
+#[test]
+fn a_goto_in_a_library_goes_only_to_a_line_with_a_number() {
+    let dir = test_dir("mixed");
+    let path = write_library(
+        &dir,
+        "mixlib.bbas",
+        &[
+            "DEF PROCj",
+            "GOTO 50",
+            "PRINT \"skipped\"",
+            "50 PRINT \"lib 50\"",
+            "ENDPROC",
+            "DEF PROCk",
+            "GOTO 3",
+            "ENDPROC",
+        ],
+    );
+    let mut good = vec![install(10, &path)];
+    good.extend(lines(&["20 PROCj"]));
+    // Line 3 of the file has no number, and the program line 3 is not in
+    // the library
+    let mut bad = vec![install(10, &path)];
+    bad.extend(lines(&["3 PRINT \"program 3\"", "20 PROCk"]));
+
+    assert_eq!(run(&good), (Ok(()), "lib 50\n".to_string()));
+    assert_eq!(
+        run(&bad).0,
+        Err(format!("No such line: 3 at line 7 of \"{}\"", path))
+    );
+}
+
+#[test]
+fn an_error_in_a_library_line_with_no_number_gives_its_place_in_the_file() {
+    let dir = test_dir("no_number_error");
+    let path = write_library(
+        &dir,
+        "placelib.bbas",
+        &["DEF PROCbad", "", "PRINT ;1/0", "ENDPROC"],
+    );
+    let mut untrapped = vec![install(10, &path)];
+    untrapped.extend(lines(&["20 PROCbad"]));
+    let mut trapped = lines(&["5 ON ERROR PRINT \"ERL=\";ERL : END"]);
+    trapped.extend(untrapped.clone());
+
+    assert_eq!(
+        run(&untrapped).0,
+        Err(format!("Division by zero at line 3 of \"{}\"", path))
+    );
+    // A line with no number has no line number for ERL
+    assert_eq!(run(&trapped), (Ok(()), "ERL=0\n".to_string()));
 }
 
 #[test]
@@ -465,41 +598,34 @@ fn a_file_that_is_not_there_gives_file_not_found() {
 }
 
 #[test]
-fn a_library_line_with_a_fault_gives_its_error_at_install() {
+fn a_library_line_with_a_fault_gives_bad_library_at_install() {
     let dir = test_dir("bad_line");
-    let path = write_library(
-        &dir,
-        "faultlib.bbas",
-        &["10 DEF PROCa", "20 PRINT (", "30 ENDPROC"],
-    );
-    let mut source = lines(&["10 PRINT \"before\""]);
-    source.extend([install(20, &path), "30 PRINT \"after\"".to_string()]);
+    let path = write_library(&dir, "faultlib.bbas", &["DEF PROCa", "PRINT (", "ENDPROC"]);
+    let mut untrapped = lines(&["10 PRINT \"before\""]);
+    untrapped.extend([install(20, &path), "30 PRINT \"after\"".to_string()]);
+    let mut trapped = lines(&["5 ON ERROR PRINT ;ERR;\" \";REPORT$ : END"]);
+    trapped.extend(untrapped.clone());
 
-    let (result, output) = run(&source);
+    let (result, output) = run(&untrapped);
 
     assert_eq!(output, "before\n");
     assert_eq!(
         result,
         Err(format!(
-            "Syntax error at line 20 in \"{}\": Unexpected end of expression",
+            "Bad library: line 2 of \"{}\": Unexpected end of expression at line 20",
             path
         ))
     );
-}
-
-#[test]
-fn a_library_line_with_no_line_number_gives_bad_library() {
-    let dir = test_dir("no_number");
-    let path = write_library(&dir, "nonum.bbas", &["10 DEF PROCa", "PRINT \"x\""]);
-
-    let (result, _) = run(&[install(10, &path)]);
-
+    // ON ERROR catches it. Bad library is the extension error 158.
     assert_eq!(
-        result,
-        Err(format!(
-            "Bad library \"{}\": Line 2 has no line number: PRINT \"x\"",
-            path
-        ))
+        run(&trapped),
+        (
+            Ok(()),
+            format!(
+                "before\n158 Bad library: line 2 of \"{}\": Unexpected end of expression\n",
+                path
+            )
+        )
     );
 }
 
@@ -543,21 +669,114 @@ fn a_variable_and_an_array_named_install_still_work() {
 }
 
 #[test]
-fn run_removes_the_libraries_and_a_second_run_installs_them_again() {
-    let dir = test_dir("second_run");
+fn run_and_chain_keep_the_libraries() {
+    // The manual: the libraries "remain resident until the BASIC program's
+    // window is closed (they are not cleared by a CHAIN statement)"
+    let dir = test_dir("run_chain");
     write_library(
         &dir,
         "runlib.bbas",
         &["10 DEF PROCa", "20 PRINT \"lib a\"", "30 ENDPROC"],
     );
+    fs::write(dir.join("chained.bbas"), "10 PROCa\n").expect("program is written");
 
-    let (status, output) = run_in_dir(
+    // The second RUN has no INSTALL
+    let (status, run_output) = run_in_dir(
         &dir,
-        &["10 INSTALL \"runlib\"", "20 PROCa", "RUN", "RUN", "EXIT"],
+        &[
+            "10 INSTALL \"runlib\"",
+            "20 PROCa",
+            "RUN",
+            "10 REM",
+            "RUN",
+            "EXIT",
+        ],
+    );
+    let (_, chain_output) = run_in_dir(
+        &dir,
+        &["10 INSTALL \"runlib\"", "RUN", "CHAIN \"chained\"", "EXIT"],
     );
 
     assert!(status.success());
-    assert_eq!(output.matches("lib a").count(), 2, "output: {}", output);
+    assert_eq!(
+        run_output.matches("lib a").count(),
+        2,
+        "output: {}",
+        run_output
+    );
+    assert!(chain_output.contains("lib a"), "output: {}", chain_output);
+}
+
+#[test]
+fn new_and_load_remove_the_functions_of_a_removed_library() {
+    let dir = test_dir("stale_functions");
+    write_library(
+        &dir,
+        "a.bbas",
+        &["10 DEF FNone(x)=x+1", "20 DEF FNdiv(x)=1/x"],
+    );
+    write_library(
+        &dir,
+        "b.bbas",
+        &["10 DEF FNone(x)=x+100", "15 DEF FNdiv(x)=x"],
+    );
+    fs::write(dir.join("empty.bbas"), "10 REM\n").expect("program is written");
+
+    let (_, after_new) = run_in_dir(
+        &dir,
+        &[
+            "INSTALL \"a\"",
+            "NEW",
+            "INSTALL \"b\"",
+            "PRINT \"one=\";FNone(1)",
+            "PRINT \"div=\";FNdiv(0)",
+            "EXIT",
+        ],
+    );
+    let (_, after_load) = run_in_dir(
+        &dir,
+        &[
+            "INSTALL \"a\"",
+            "LOAD \"empty\"",
+            "INSTALL \"b\"",
+            "PRINT \"one=\";FNone(1)",
+            "EXIT",
+        ],
+    );
+
+    for output in [&after_new, &after_load] {
+        assert!(output.contains("one=101"), "output: {}", output);
+    }
+    assert!(after_new.contains("div=0"), "output: {}", after_new);
+}
+
+#[test]
+fn new_and_load_remove_the_single_line_functions_of_the_program() {
+    let dir = test_dir("program_functions");
+    fs::write(dir.join("other.bbas"), "10 REM\n").expect("program is written");
+
+    let (_, after_new) = run_in_dir(
+        &dir,
+        &["10 DEF FNp(x)=x*2", "RUN", "NEW", "PRINT FNp(1)", "EXIT"],
+    );
+    let (_, after_load) = run_in_dir(
+        &dir,
+        &[
+            "10 DEF FNp(x)=x*2",
+            "RUN",
+            "LOAD \"other\"",
+            "PRINT FNp(1)",
+            "EXIT",
+        ],
+    );
+
+    for output in [&after_new, &after_load] {
+        assert!(
+            output.contains("No such FN/PROC: FNp"),
+            "output: {}",
+            output
+        );
+    }
 }
 
 #[test]

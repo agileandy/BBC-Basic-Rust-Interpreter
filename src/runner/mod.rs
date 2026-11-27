@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::error::BBCBasicError;
 use crate::executor::{ErrorHandler, Executor, FunctionBody, Interrupt, ResultEvaluator};
-use crate::library::{library_path, read_library, Library, ReadError};
+use crate::library::{fault_at, read_library, Library};
 use crate::parser::{parse_line, BinaryOperator, Expression, Statement};
 use crate::program::{key_line, key_set, line_key, Position, ProgramStore, TYPED_LINE};
 use crate::tokenizer::TokenizedLine;
@@ -133,28 +133,73 @@ struct ProgramLines {
     /// The stored line keys. The typed line is not in this set, so a jump
     /// or the end of a stored line never goes to it.
     line_numbers: BTreeSet<u32>,
-    /// The file name of a library (None for the program)
-    file: Option<String>,
+    /// The file and the line numbers of a library (None for the program)
+    library: Option<LibraryLines>,
+}
+
+/// A library line has the key of its place in the file, so the run goes
+/// through the lines in file order. A line can have a number or not.
+struct LibraryLines {
+    /// The file name, for the error messages
+    path: String,
+    /// The key of each line number (the first line with the number)
+    keys: HashMap<u16, u32>,
+    /// The line number of each key of a line with a number
+    numbers: HashMap<u32, u16>,
 }
 
 impl ProgramLines {
     /// The lines of a set. The stored line keys are the keys of `items`.
-    fn new(items: HashMap<u32, Vec<Item>>, file: Option<String>) -> Self {
+    fn new(items: HashMap<u32, Vec<Item>>, library: Option<LibraryLines>) -> Self {
         let line_numbers = items.keys().copied().collect();
         Self {
             items,
             line_numbers,
-            file,
+            library,
         }
     }
 
-    /// " at line N" for a line of this set, with ` in "<file>"` for a
-    /// library line, and nothing for the typed line
-    fn at_line(&self, line_key: u32) -> String {
-        match (&self.file, key_line(line_key)) {
-            (Some(file), Some(line)) => format!(" at line {} in \"{}\"", line, file),
-            _ => at_line(line_key),
+    /// The key of a line number in this set. In a library, only a line with
+    /// a number has one.
+    fn key_of(&self, line_number: u16) -> Option<u32> {
+        match &self.library {
+            Some(library) => library.keys.get(&line_number).copied(),
+            None => Some(line_number.into()),
         }
+    }
+
+    /// The line number of a key, for ERL (None for the typed line and for a
+    /// library line with no number)
+    fn number_of(&self, line_key: u32) -> Option<u16> {
+        match &self.library {
+            Some(library) => library.numbers.get(&line_key).copied(),
+            None => key_line(line_key),
+        }
+    }
+
+    /// The name of a line in a message: `30`, `30 in "lib.bbas"` for a
+    /// library line with a number, or `3 of "lib.bbas"` for the third line
+    /// of the file when it has no number. None for the typed line.
+    fn line_label(&self, line_key: u32) -> Option<String> {
+        let place = key_line(line_key)?;
+        Some(match (&self.library, self.number_of(line_key)) {
+            (None, _) => place.to_string(),
+            (Some(library), Some(number)) => format!("{} in \"{}\"", number, library.path),
+            (Some(library), None) => format!("{} of \"{}\"", place, library.path),
+        })
+    }
+
+    /// " at line N" for a line of this set (see `line_label`), and nothing
+    /// for the typed line
+    fn at_line(&self, line_key: u32) -> String {
+        self.line_label(line_key)
+            .map_or_else(String::new, |label| format!(" at line {}", label))
+    }
+
+    /// The text of the internal error for a position with no line
+    fn line_not_found(&self, line_key: u32) -> String {
+        let label = self.line_label(line_key).unwrap_or_default();
+        format!("Line {} not found", label)
     }
 
     /// The item at a position
@@ -254,13 +299,23 @@ impl RunLines {
     }
 
     /// " at line N" for a line key of any set (see `ProgramLines::at_line`).
-    /// A single-line library function stays after NEW removes its library:
-    /// a key of a set that is not there gives only the line number.
+    /// NEW and LOAD remove each routine with their libraries, so a key of a
+    /// set that is not there is a defect: it gives only the number in the key.
     fn at_line(&self, line_key: u32) -> String {
         match self.sets.borrow().get(key_set(line_key)) {
             Some(lines) => lines.at_line(line_key),
             None => format!(" at line {}", key_line(line_key).unwrap_or(0)),
         }
+    }
+
+    /// The value of ERL for a line key: the line number in its file, or 0
+    /// for the typed line and for a library line with no number
+    fn erl(&self, line_key: u32) -> u16 {
+        let sets = self.sets.borrow();
+        let lines = sets.get(key_set(line_key));
+        lines
+            .and_then(|lines| lines.number_of(line_key))
+            .unwrap_or(0)
     }
 
     /// The BBC BASIC text of an error at a line key of any set
@@ -314,10 +369,12 @@ impl<'a> Cursor<'a> {
     }
 
     /// Go to the first statement of a line of the current line set. A GOTO
-    /// in a library goes to a line of the library. Returns false if the
-    /// line does not exist.
+    /// in a library goes to a line of the library that has this number.
+    /// Returns false if the line does not exist.
     fn goto_line(&mut self, line_number: u16) -> bool {
-        self.goto_key(line_key(self.set, line_number))
+        self.lines
+            .key_of(line_number)
+            .is_some_and(|line_key| self.goto_key(line_key))
     }
 
     /// Go to the first statement of the line with this line key. Returns
@@ -511,8 +568,7 @@ pub fn run_program_with_outcome(
     executor.clear_variables();
     // RUN starts with no ON ERROR handler. CLEAR keeps the handler.
     executor.clear_error_handler();
-    // RUN and CHAIN remove the libraries of INSTALL. CLEAR keeps them.
-    executor.libraries_mut().clear();
+    // RUN and CHAIN keep the libraries of INSTALL, as the manual says
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
@@ -529,7 +585,7 @@ pub fn run_program_with_outcome(
                     .map_err(|e| error_text(&e, line_number.into()))?;
             }
         }
-        define_routines(executor, 0, line_number, &items, false);
+        define_routines(executor, line_number.into(), &items, false);
 
         all_items.insert(line_number.into(), items);
     }
@@ -542,6 +598,7 @@ pub fn run_program_with_outcome(
         index: 0,
     });
     let lines = Rc::new(RunLines::new(program_lines));
+    add_installed_libraries(executor, &lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     let local_depth = executor.local_depth();
@@ -613,7 +670,7 @@ pub fn run_typed_line(
                 data_line_numbers.extend(values.iter().map(|_| Some(line_number)));
             }
         }
-        define_routines(executor, 0, line_number, &items, false);
+        define_routines(executor, line_number.into(), &items, false);
         all_items.insert(line_number.into(), items);
     }
     executor.use_data_pool(data_values, data_line_numbers);
@@ -624,14 +681,7 @@ pub fn run_typed_line(
     // does not count it
     check_if_blocks(&program_lines)?;
     let lines = Rc::new(RunLines::new(program_lines));
-    // The libraries stay between typed lines. Define their routines again
-    // after those of the program, in the order of the INSTALL statements.
-    let libraries = executor.libraries().libraries().to_vec();
-    for library in &libraries {
-        let library_lines = parse_library(library, lines.next_set())?;
-        define_library_routines(executor, &library_lines);
-        lines.add(library_lines);
-    }
+    add_installed_libraries(executor, &lines)?;
     // No CASE check here: a stored CASE mistake must not stop a typed
     // command. A typed line cannot hold a CASE. If the run gets to a stored
     // CASE structure with no ENDCASE, the CASE scan gives the error.
@@ -714,25 +764,21 @@ fn check_case_blocks(lines: &ProgramLines) -> Result<(), String> {
     }
 }
 
-/// Define the DEF PROC and DEF FN statements of a line of a line set before
-/// the run, so that a definition after END works. With `only_new`, a name
-/// that is already defined keeps its definition: the routines of the
-/// program, and of an earlier library, win over those of a library.
-fn define_routines(
-    executor: &mut Executor,
-    set: usize,
-    line_number: u16,
-    items: &[Item],
-    only_new: bool,
-) {
+/// Define the DEF PROC and DEF FN statements of the line with this line key
+/// before the run, so that a definition after END works.
+///
+/// For a library line (`from_library`), a name that the program defines
+/// keeps that definition. A name of an earlier library gets the new one, so
+/// the last library that defines a name wins, as the manual says.
+fn define_routines(executor: &mut Executor, line_key: u32, items: &[Item], from_library: bool) {
     for (index, item) in items.iter().enumerate() {
         let position = Position {
-            line: line_key(set, line_number),
+            line: line_key,
             index,
         };
         match item {
             Item::Statement(Statement::DefProc { name, params }) => {
-                if only_new && executor.get_procedure(name).is_some() {
+                if from_library && program_defines_procedure(executor, name) {
                     continue;
                 }
                 executor.define_procedure(name.clone(), position, params.clone());
@@ -742,7 +788,7 @@ fn define_routines(
                 params,
                 expression,
             }) => {
-                if only_new && executor.has_function(name) {
+                if from_library && program_defines_function(executor, name) {
                     continue;
                 }
                 let body = match expression {
@@ -758,57 +804,93 @@ fn define_routines(
     }
 }
 
-/// Parse each line of a library as line set `set`. A line with a fault
-/// gives its error with the line and the file name, and no part of the
-/// library is used. The DATA of a library is not used (issue #186).
-fn parse_library(library: &Library, set: usize) -> Result<ProgramLines, String> {
+/// True if the procedure of this name has its DEF in the program (set 0)
+fn program_defines_procedure(executor: &Executor, name: &str) -> bool {
+    executor
+        .get_procedure(name)
+        .is_some_and(|procedure| key_set(procedure.position.line) == 0)
+}
+
+/// True if the function of this name has its DEF in the program (set 0),
+/// or the user typed its DEF in immediate mode
+fn program_defines_function(executor: &Executor, name: &str) -> bool {
+    executor
+        .get_function(name)
+        .is_some_and(|function| match &function.body {
+            FunctionBody::Lines(position) => key_set(position.line) == 0,
+            FunctionBody::Expression(_, Some(line_key)) => key_set(*line_key) == 0,
+            FunctionBody::Expression(_, None) => true,
+        })
+}
+
+/// Parse each line of a library as line set `set`. Each line has the key of
+/// its place in the file. A line with a fault gives Bad library with its
+/// place in the file, and no part of the library is used. The DATA of a
+/// library is not used (issue #186).
+fn parse_library(library: &Library, set: usize) -> Result<ProgramLines, BBCBasicError> {
     let mut items = HashMap::new();
-    for (line_number, line) in library.lines.list() {
-        let key = line_key(set, line_number);
-        let statements = parse_line(line).map_err(|error| {
-            let at = format!(" at line {} in \"{}\"", line_number, library.path);
-            error_text_at(&error, &at)
-        })?;
+    let mut keys = HashMap::new();
+    let mut numbers = HashMap::new();
+    for library_line in &library.lines {
+        let key = line_key(set, library_line.place);
+        let statements = parse_line(&library_line.line)
+            .map_err(|error| fault_at(library_line.place, &library.path, &error))?;
         items.insert(key, flatten_line(statements));
+        if let Some(number) = library_line.line.line_number {
+            keys.entry(number).or_insert(key);
+            numbers.insert(key, number);
+        }
     }
-    let lines = ProgramLines::new(items, Some(library.path.clone()));
-    check_if_blocks(&lines)?;
-    check_case_blocks(&lines)?;
+    let library_lines = LibraryLines {
+        path: library.path.clone(),
+        keys,
+        numbers,
+    };
+    let lines = ProgramLines::new(items, Some(library_lines));
+    check_if_blocks(&lines).map_err(BBCBasicError::BadLibrary)?;
+    check_case_blocks(&lines).map_err(BBCBasicError::BadLibrary)?;
     Ok(lines)
 }
 
-/// Define the routines of a library, in line order. A name that is already
-/// defined keeps its definition.
+/// Define the routines of a library, in file order
 fn define_library_routines(executor: &mut Executor, lines: &ProgramLines) {
     for &key in &lines.line_numbers {
-        if let Some(line_number) = key_line(key) {
-            define_routines(
-                executor,
-                key_set(key),
-                line_number,
-                &lines.items[&key],
-                true,
-            );
-        }
+        define_routines(executor, key, &lines.items[&key], true);
     }
 }
 
+/// Add the installed libraries to the line sets of a run, after the
+/// program, in the order of the INSTALL statements. Their routines come
+/// after those of the program.
+///
+/// This parses each library again for each run and each typed line. It is
+/// a cost and not a fault: the parsed lines are not kept between runs.
+fn add_installed_libraries(executor: &mut Executor, lines: &RunLines) -> Result<(), String> {
+    let libraries = executor.libraries().libraries().to_vec();
+    for library in &libraries {
+        // INSTALL parsed each line before it kept the library
+        let library_lines =
+            parse_library(library, lines.next_set()).map_err(|error| error_text_at(&error, ""))?;
+        define_library_routines(executor, &library_lines);
+        lines.add(library_lines);
+    }
+    Ok(())
+}
+
 /// Run `INSTALL file$`: load the file as a library, and add its routines
-/// (issue #185). A library that is already installed is not loaded again.
-/// A file that is not there gives File not found, which ON ERROR can catch.
+/// (issue #185). A library with the same supplied name that is already
+/// installed is not loaded again. A file that is not there gives File not
+/// found, and a bad line gives Bad library. ON ERROR can catch both.
 fn install_library(
     executor: &mut Executor,
     all: &RunLines,
     file: &Expression,
 ) -> Result<(), StepError> {
-    let path = library_path(&executor.eval_file_name(file)?);
-    if executor.libraries().is_installed(&path) {
+    let name = executor.eval_file_name(file)?;
+    if executor.libraries().is_installed(&name) {
         return Ok(());
     }
-    let library = read_library(&path).map_err(|error| match error {
-        ReadError::Basic(error) => StepError::Runtime(error),
-        ReadError::Fatal(message) => StepError::Fatal(message),
-    })?;
+    let library = read_library(&name)?;
     let lines = parse_library(&library, all.next_set())?;
     define_library_routines(executor, &lines);
     all.add(lines);
@@ -867,10 +949,9 @@ fn error_text_at(error: &BBCBasicError, at: &str) -> String {
     }
 }
 
-/// Set ERR, ERL and the text for REPORT to an error. ERL is 0 for the
-/// typed line. For a library line, ERL is the line number in the library.
-fn record_error(executor: &mut Executor, error: &BBCBasicError, line_key: u32) {
-    let error_line = key_line(line_key).unwrap_or(0);
+/// Set ERR, ERL and the text for REPORT to an error. `error_line` is the
+/// value of ERL (see `RunLines::erl`).
+fn record_error(executor: &mut Executor, error: &BBCBasicError, error_line: u16) {
     executor.set_last_error(
         error_number(error),
         error_line,
@@ -912,7 +993,7 @@ fn run_lines(
         let set = Rc::clone(&cursor.lines);
         let item = set
             .item(position)
-            .ok_or_else(|| format!("Line {} not found", line_number))?;
+            .ok_or_else(|| set.line_not_found(line_number))?;
 
         // TRACE: a new stored line starts at its first statement, or when
         // the run comes from a different line
@@ -956,7 +1037,7 @@ fn run_lines(
             (None, StepError::Runtime(e) | StepError::RuntimeAt(e, _)) => {
                 // Set ERL, ERR and the text for REPORT, also when no
                 // handler catches the error
-                record_error(executor, &e, error_line);
+                record_error(executor, &e, lines.erl(error_line));
 
                 // Handle an error in a stored line with the ON ERROR handler
                 // if one is set
@@ -970,7 +1051,10 @@ fn run_lines(
                         if !cursor.goto_key(handler_key) {
                             return Err(format!(
                                 "Error handler line {} not found (from error{})",
-                                key_line(handler_key).unwrap_or(0),
+                                lines
+                                    .set_of(handler_key)
+                                    .line_label(handler_key)
+                                    .unwrap_or_default(),
                                 lines.at_line(error_line)
                             ));
                         }
@@ -1230,17 +1314,30 @@ fn step(
             return Ok(Flow::Jumped);
         }
         Statement::EndIf => return Ok(Flow::Next),
-        // The handler line is in the line set of the ON ERROR GOTO
+        // The handler line is in the line set of the ON ERROR GOTO. In a
+        // library, only a line with a number has a key: with no line of
+        // that number, the error is at the ON ERROR GOTO.
         Statement::OnError {
             line_number: target,
         } => {
-            executor.set_error_handler_line_key(line_key(program.set, *target));
+            let handler_key = program
+                .lines
+                .key_of(*target)
+                .ok_or(BBCBasicError::NoSuchLine((*target).into()))?;
+            executor.set_error_handler_line_key(handler_key);
             return Ok(Flow::Next);
         }
         Statement::Install { file } => {
             install_library(executor, program.all, file)?;
             return Ok(Flow::Next);
         }
+        // INSTALL defined the functions of a library with the precedence of
+        // the manual. A run through a single-line DEF FN of a library must
+        // not define it again over a function that wins.
+        Statement::DefFn {
+            expression: Some(_),
+            ..
+        } if program.set != 0 => return Ok(Flow::Next),
         // Store the handler and continue at the next line. The handler
         // statements run only when an error occurs.
         Statement::OnErrorStatements { .. } => {
@@ -1615,6 +1712,46 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::MissingNext => 156,
         // Singular matrix is an extension error. BBC BASIC does not use ERR 157 (issue #190).
         BBCBasicError::SingularMatrix => 157,
+        // Bad library is an extension error. The manual names no error for
+        // INSTALL, and BBC BASIC does not use ERR 158 (issue #185).
+        BBCBasicError::BadLibrary(_) => 158,
         _ => 255,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A library line set with a numbered line at place 2 (line 30) and a
+    /// line with no number at place 3
+    fn library_set() -> ProgramLines {
+        let library = LibraryLines {
+            path: "lib.bbas".to_string(),
+            keys: HashMap::from([(30, line_key(1, 2))]),
+            numbers: HashMap::from([(line_key(1, 2), 30)]),
+        };
+        ProgramLines::new(HashMap::new(), Some(library))
+    }
+
+    #[test]
+    fn line_not_found_names_the_line_and_the_file_of_a_library() {
+        let lines = library_set();
+
+        assert_eq!(
+            lines.line_not_found(line_key(1, 2)),
+            "Line 30 in \"lib.bbas\" not found"
+        );
+        assert_eq!(
+            lines.line_not_found(line_key(1, 3)),
+            "Line 3 of \"lib.bbas\" not found"
+        );
+    }
+
+    #[test]
+    fn line_not_found_names_a_program_line_as_before() {
+        let lines = ProgramLines::new(HashMap::new(), None);
+
+        assert_eq!(lines.line_not_found(10), "Line 10 not found");
     }
 }

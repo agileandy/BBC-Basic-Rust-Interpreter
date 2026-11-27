@@ -131,6 +131,8 @@ pub mod error {
         MissingNext,
         // MATINVERSE of a matrix with no inverse (issue #190)
         SingularMatrix,
+        // A library file of INSTALL with a fault, with its place (issue #185)
+        BadLibrary(String),
         // The Escape key stopped the program. ERR 17 (issue #171).
         Escape,
 
@@ -191,6 +193,7 @@ pub mod error {
                 BBCBasicError::NoSuchKey(key) => write!(f, "No such key: {}", key),
                 BBCBasicError::MissingNext => write!(f, "FOR EACH without matching NEXT"),
                 BBCBasicError::SingularMatrix => write!(f, "Singular matrix"),
+                BBCBasicError::BadLibrary(detail) => write!(f, "Bad library: {}", detail),
                 BBCBasicError::Escape => write!(f, "Escape"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
