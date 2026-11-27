@@ -5,7 +5,6 @@
 use crate::common::run_binary_read_first as run_binary;
 use crate::common::run_with_limit as run;
 use crate::common::run_with_replies;
-use bbc_basic_interpreter::error::BBCBasicError;
 use bbc_basic_interpreter::tokenizer::{detokenize, tokenize, Token};
 
 // Declare, set and read
@@ -192,13 +191,8 @@ fn test_a_structure_name_that_is_a_short_form() {
 
 #[test]
 fn test_the_forms_of_later_issues_give_a_syntax_error() {
-    let cases: [(&[&str], u16, &str); 7] = [
-        (&["10 DIM p{a(3)}"], 10, "Array members are not supported"),
-        (
-            &["10 DIM p{q{a}}"],
-            10,
-            "Nested structures are not supported",
-        ),
+    // Array members and nested structures are valid since issue #192
+    let cases: [(&[&str], u16, &str); 4] = [
         (
             &["10 DIM p{(3)a}"],
             10,
@@ -215,11 +209,6 @@ fn test_the_forms_of_later_issues_give_a_syntax_error() {
             "A reference to a whole structure is not supported",
         ),
         (
-            &["10 DIM a{x}", "20 PRINT a.x(1)"],
-            20,
-            "Array members are not supported",
-        ),
-        (
             &["10 DIM a{x}", "20 FOR a.x = 1 TO 3 : NEXT"],
             20,
             "A FOR variable that is a structure member is not supported",
@@ -233,15 +222,6 @@ fn test_the_forms_of_later_issues_give_a_syntax_error() {
             "{source:?}"
         );
     }
-}
-
-#[test]
-fn test_a_nested_member_access_is_a_syntax_error() {
-    assert!(matches!(
-        tokenize("PRINT a.b.c"),
-        Err(BBCBasicError::SyntaxError { ref message, .. })
-            if message == "Nested structures are not supported"
-    ));
 }
 
 #[test]
@@ -325,7 +305,7 @@ fn test_tokens_of_a_member_reference() {
     assert_eq!(
         tokens,
         vec![
-            Token::Member("point".to_string(), "name$".to_string()),
+            Token::Member("point".to_string(), vec!["name$".to_string()]),
             Token::Operator('='),
             Token::Integer(1),
         ]
@@ -429,14 +409,10 @@ fn test_a_member_name_can_start_with_an_underscore() {
     let (result, output) = run(&["10 DIM p{_a}", "20 p._a = 2", "30 PRINT ;p._a"]);
     assert_eq!(result, Ok(()));
     assert_eq!(output, "2\n");
-    for text in ["PRINT a.b.c", "PRINT a.b._c"] {
-        assert!(
-            matches!(
-                tokenize(text),
-                Err(BBCBasicError::SyntaxError { ref message, .. })
-                    if message == "Nested structures are not supported"
-            ),
-            "{text}"
-        );
+    // A nested member is valid since issue #192
+    for (text, last) in [("PRINT a.b.c", "c"), ("PRINT a.b._c", "_c")] {
+        let tokens = tokenize(text).unwrap().tokens;
+        let path = vec!["b".to_string(), last.to_string()];
+        assert_eq!(tokens[1], Token::Member("a".to_string(), path), "{text}");
     }
 }

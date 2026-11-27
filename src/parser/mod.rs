@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
 
 mod structures;
+pub use structures::{MemberDecl, MemberPath};
 mod whole_array;
 pub use whole_array::{parse_array_reference, ArrayExpression, ArrayOperand};
 mod matrix;
@@ -108,8 +109,10 @@ pub enum Expression {
     String(String),
     /// Variable reference
     Variable(String),
-    /// A structure member, such as `point.x` (issue #191)
-    Member { structure: String, member: String },
+    /// A structure member, such as `point.x` (issue #191) or
+    /// `shape.pos.x` (issue #192). The box keeps the size of an expression
+    /// small.
+    Member(Box<MemberPath>),
     /// A whole structure, such as `point{}`: an argument for a structure
     /// parameter of a PROC or FN (issue #194)
     Structure(String),
@@ -170,8 +173,8 @@ pub enum InputItem {
         name: String,
         indices: Vec<Expression>,
     },
-    /// A structure member that gets a reply (issue #191)
-    Member { structure: String, member: String },
+    /// A structure member that gets a reply (issues #191 and #192)
+    Member(MemberPath),
 }
 
 /// The form of a TRACE statement
@@ -213,10 +216,10 @@ pub enum Statement {
         target: String,
         source: String,
     },
-    /// A structure member assignment, such as `point.x = 1` (issue #191)
+    /// A structure member assignment, such as `point.x = 1` (issue #191) or
+    /// `layer.weights(1, 2) = 0.5` (issue #192)
     MemberAssignment {
-        structure: String,
-        member: String,
+        target: MemberPath,
         expression: Expression,
     },
     /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
@@ -501,8 +504,23 @@ pub enum DimItem {
     /// A block of `size + 1` bytes, such as `B% 10`. The numeric variable
     /// gets the address of the first byte.
     Block { name: String, size: Expression },
-    /// A structure, such as `point{x, y%, name$}` (issue #191)
-    Structure { name: String, members: Vec<String> },
+    /// A structure, such as `point{x, y%, name$}` (issue #191) or
+    /// `shape{pos{x, y}, corners(3)}` (issue #192)
+    Structure {
+        name: String,
+        members: Vec<MemberDecl>,
+    },
+}
+
+/// The type of a variable or a member, from the suffix of its name
+fn name_type(name: &str) -> ExpressionType {
+    if name.ends_with('%') {
+        ExpressionType::Integer
+    } else if name.ends_with('$') {
+        ExpressionType::String
+    } else {
+        ExpressionType::Real
+    }
 }
 
 /// Data value types for DATA statement
@@ -541,19 +559,8 @@ impl Expression {
             Expression::Integer(_) => ExpressionType::Integer,
             Expression::Real(_) => ExpressionType::Real,
             Expression::String(_) => ExpressionType::String,
-            Expression::Variable(name)
-            | Expression::Member {
-                member: name,
-                structure: _,
-            } => {
-                if name.ends_with('%') {
-                    ExpressionType::Integer
-                } else if name.ends_with('$') {
-                    ExpressionType::String
-                } else {
-                    ExpressionType::Real
-                }
-            }
+            Expression::Variable(name) => name_type(name),
+            Expression::Member(path) => name_type(path.member()),
             Expression::ArrayAccess { name, .. } => {
                 if name.ends_with('%') {
                     ExpressionType::Integer
@@ -1909,7 +1916,11 @@ fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<I
                 }
             }
             Token::Identifier(name) => InputItem::Variable(name.clone()),
-            Token::Member(..) => structures::input_member(&tokens[pos..], line_number)?,
+            Token::Member(..) => {
+                let (path, last) = structures::parse_member_path(tokens, pos, line_number)?;
+                pos = last;
+                InputItem::Member(path)
+            }
             Token::Separator('\'') => InputItem::NewLine,
             _ => break,
         };
@@ -2033,7 +2044,7 @@ fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
 fn parse_input_file_target(part: &[Token], line_number: Option<u16>) -> Result<InputItem> {
     let is_target = match part {
         [Token::Identifier(_) | Token::Member(..)] => true,
-        [Token::Identifier(_), Token::Separator('('), ..] => {
+        [Token::Identifier(_) | Token::Member(..), Token::Separator('('), ..] => {
             find_closing_bracket(part, 1) == Some(part.len() - 1)
         }
         _ => false,
@@ -2736,7 +2747,7 @@ fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 /// Parse one READ target: a variable, or an array element with the index
 /// form of INPUT. Another form gives a syntax error.
 fn parse_read_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
-    if let Some(member) = structures::member_target(tokens) {
+    if let Some(member) = structures::member_target(tokens, line_number)? {
         return Ok(member);
     }
     match tokens {
@@ -2780,8 +2791,14 @@ fn parse_swap_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 /// more. Another form gives a syntax error.
 fn parse_swap_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
     let is_variable = matches!(tokens, [Token::Identifier(_) | Token::Member(..)]);
-    let is_element = matches!(tokens, [Token::Identifier(_), Token::Separator('('), ..])
-        && tokens.len() > 3
+    let is_element = matches!(
+        tokens,
+        [
+            Token::Identifier(_) | Token::Member(..),
+            Token::Separator('('),
+            ..
+        ]
+    ) && tokens.len() > 3
         && find_closing_bracket(tokens, 1) == Some(tokens.len() - 1);
     if is_variable || is_element {
         parse_read_target(tokens, line_number)
@@ -3710,11 +3727,9 @@ fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> 
     let token = &tokens[*pos];
 
     match token {
-        // A structure member, such as point.x (issue #191)
-        Token::Member(structure, member) => {
-            *pos += 1;
-            structures::member_expression(structure, member, tokens.get(*pos))
-        }
+        // A structure member, such as point.x (issue #191) or s.a(1)
+        // (issue #192)
+        Token::Member(..) => structures::member_expression(tokens, pos),
         // Literals
         Token::Integer(val) | Token::HexInteger(val) => {
             *pos += 1;

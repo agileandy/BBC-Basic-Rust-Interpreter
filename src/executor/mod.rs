@@ -20,7 +20,9 @@ use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::library::LibraryStore;
 use crate::memory::MemoryManager;
-use crate::parser::{DataValue, DimItem, Expression, Indirection, InputItem, Statement, TraceMode};
+use crate::parser::{
+    DataValue, DimItem, Expression, Indirection, InputItem, MemberPath, Statement, TraceMode,
+};
 use crate::program::{Position, TYPED_LINE};
 use crate::variables::{
     is_resident_integer, resident_default, StructureId, Variable, VariableStore,
@@ -58,11 +60,12 @@ fn real_to_integer(value: f64) -> Result<i32> {
 }
 
 /// Where the value of a SWAP target is: a variable, the index values of an
-/// array element, or the structure of a member (issue #191)
+/// array element, or the path and the index values of a member (issues
+/// #191 and #192)
 enum SwapPlace<'a> {
     Variable,
     Element(Vec<usize>),
-    Member(&'a str),
+    Member(&'a MemberPath, Vec<usize>),
 }
 
 /// The name of a SWAP target, which gives its type, and its place
@@ -796,11 +799,9 @@ impl Executor {
                 target,
                 source,
             } => self.execute_matrix_statement(*statement, target, source),
-            Statement::MemberAssignment {
-                structure,
-                member,
-                expression,
-            } => self.execute_member_assignment(structure, member, expression),
+            Statement::MemberAssignment { target, expression } => {
+                self.execute_member_assignment(target, expression)
+            }
             Statement::MemoryAssignment {
                 width,
                 address,
@@ -1238,7 +1239,7 @@ impl Executor {
             Expression::Integer(_) => self.format_integer_item(expr),
             Expression::Real(_) => self.format_real_item(expr),
             Expression::String(_) => Ok((self.eval_string(expr)?, false)),
-            Expression::Member { structure, member } => self.format_member(structure, member),
+            Expression::Member(path) => self.format_member(path),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
                     self.format_integer_item(expr)
@@ -1781,7 +1782,7 @@ impl Executor {
                 }
                 InputItem::Variable(var) => var,
                 InputItem::ArrayElement { name, .. } => name,
-                InputItem::Member { member, .. } => member,
+                InputItem::Member(path) => path.member(),
             };
             self.check_member_target(item)?;
             if values.is_empty() {
@@ -1812,9 +1813,7 @@ impl Executor {
             InputItem::ArrayElement { name, indices } => {
                 self.store_input_value(name, Some(indices), value)
             }
-            InputItem::Member { structure, member } => {
-                self.variables.set_member(structure, member, value)
-            }
+            InputItem::Member(path) => self.store_member(path, value),
             // A prompt text and a new line store no value
             InputItem::Prompt { .. } | InputItem::NewLine => Ok(()),
         }
@@ -1870,7 +1869,7 @@ impl Executor {
                 }
                 InputItem::Variable(var) => var,
                 InputItem::ArrayElement { name, .. } => name,
-                InputItem::Member { member, .. } => member,
+                InputItem::Member(path) => path.member(),
             };
             self.check_member_target(item)?;
             if !var.ends_with('$') {
@@ -1945,16 +1944,7 @@ impl Executor {
                     continue;
                 }
             };
-            // Evaluate dimension expressions
-            let mut dim_sizes = Vec::new();
-            for dim_expr in dimensions {
-                let size = self.eval_integer(dim_expr)?;
-                if size < 0 {
-                    return Err(BBCBasicError::SubscriptOutOfRange);
-                }
-                // DIM A(N) gives the elements 0 to N, so N + 1 elements
-                dim_sizes.push(size as usize + 1);
-            }
+            let dim_sizes = self.eval_dimensions(dimensions)?;
 
             // Determine array type from variable name suffix
             use crate::variables::VarType;
@@ -1971,6 +1961,21 @@ impl Executor {
                 .dim_array(name.clone(), dim_sizes, var_type)?;
         }
         Ok(())
+    }
+
+    /// The element counts of the dimensions of a DIM, an array or an array
+    /// member. DIM A(N) gives the elements 0 to N, so N + 1 elements. A
+    /// negative size gives Subscript out of range.
+    fn eval_dimensions(&mut self, dimensions: &[Expression]) -> Result<Vec<usize>> {
+        let mut dim_sizes = Vec::with_capacity(dimensions.len());
+        for dim_expr in dimensions {
+            let size = self.eval_integer(dim_expr)?;
+            if size < 0 {
+                return Err(BBCBasicError::SubscriptOutOfRange);
+            }
+            dim_sizes.push(size as usize + 1);
+        }
+        Ok(dim_sizes)
     }
 
     /// Execute `DIM name size`: reserve `size + 1` bytes above TOP and put
@@ -2068,7 +2073,7 @@ impl Executor {
             let var_name = match target {
                 InputItem::Variable(name) => name,
                 InputItem::ArrayElement { name, .. } => name,
-                InputItem::Member { member, .. } => member,
+                InputItem::Member(path) => path.member(),
                 InputItem::Prompt { .. } | InputItem::NewLine => {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Expected variable name in READ".to_string(),
@@ -2129,7 +2134,10 @@ impl Executor {
     fn swap_location<'a>(&mut self, target: &'a InputItem) -> Result<SwapLocation<'a>> {
         match target {
             InputItem::Variable(name) => Ok((name, SwapPlace::Variable)),
-            InputItem::Member { structure, member } => Ok((member, SwapPlace::Member(structure))),
+            InputItem::Member(path) => {
+                let indices = self.member_indices(path)?;
+                Ok((path.member(), SwapPlace::Member(path, indices)))
+            }
             InputItem::ArrayElement { name, indices } => {
                 let mut index_values = Vec::with_capacity(indices.len());
                 for index_expr in indices {
@@ -2154,7 +2162,11 @@ impl Executor {
     fn swap_value(&self, (name, place): &SwapLocation) -> Result<Variable> {
         match place {
             SwapPlace::Element(indices) => return self.variables.get_array_element(name, indices),
-            SwapPlace::Member(structure) => return self.member_value(structure, name),
+            SwapPlace::Member(path, indices) => {
+                return self
+                    .variables
+                    .get_member(&path.structure, &path.members, indices)
+            }
             SwapPlace::Variable => {}
         }
         let value = if name.ends_with('$') {
@@ -2176,7 +2188,10 @@ impl Executor {
     fn store_swap_value(&mut self, (name, place): &SwapLocation, value: Variable) -> Result<()> {
         match place {
             SwapPlace::Element(indices) => self.variables.set_array_element(name, indices, value),
-            SwapPlace::Member(structure) => self.variables.set_member(structure, name, value),
+            SwapPlace::Member(path, indices) => {
+                self.variables
+                    .set_member(&path.structure, &path.members, indices, value)
+            }
             SwapPlace::Variable => self.store_input_value(name, None, value),
         }
     }
@@ -2535,7 +2550,7 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => real_to_integer(*val),
-            Expression::Member { structure, member } => self.member_integer(structure, member),
+            Expression::Member(path) => self.member_integer(path),
             Expression::Variable(name) if self.is_new_list_call(name) => self.new_collection(name),
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 real_to_integer(self.eval_list_function(name, indices)?)
@@ -2755,7 +2770,7 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
-            Expression::Member { structure, member } => self.member_real(structure, member),
+            Expression::Member(path) => self.member_real(path),
             Expression::Variable(name) if self.is_new_list_call(name) => {
                 self.new_collection(name).map(f64::from)
             }
@@ -2939,9 +2954,8 @@ impl Executor {
                         && !name.ends_with('$')
                         && self.variables.get_real_var(name).is_some())
             }
-            Expression::ArrayAccess { name, .. } | Expression::Member { member: name, .. } => {
-                !name.ends_with('%') && !name.ends_with('$')
-            }
+            Expression::ArrayAccess { name, .. } => !name.ends_with('%') && !name.ends_with('$'),
+            Expression::Member(path) => !path.member().ends_with(['%', '$']),
             Expression::BinaryOp { op, left, right } => match op {
                 // In BBC BASIC, `/` always gives a real value
                 BinaryOperator::Divide => true,
@@ -3013,7 +3027,7 @@ impl Executor {
             Expression::Variable(name)
             | Expression::ArrayAccess { name, .. }
             | Expression::FunctionCall { name, .. } => name.ends_with('$') || name == "STR$~",
-            Expression::Member { member, .. } => member.ends_with('$'),
+            Expression::Member(path) => path.member().ends_with('$'),
             Expression::BinaryOp {
                 op: BinaryOperator::Add | BinaryOperator::StringConcat,
                 left,
@@ -3029,7 +3043,7 @@ impl Executor {
     fn eval_string_level(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::String(val) => Ok(val.clone()),
-            Expression::Member { structure, member } => self.member_string(structure, member),
+            Expression::Member(path) => self.member_string(path),
             // TIME$ is the date and time in UTC. TIME$ is from the BBC Master, not the Model B.
             Expression::Variable(name) if name == "TIME$" => {
                 let seconds = std::time::SystemTime::now()
@@ -5082,7 +5096,7 @@ impl Executor {
             let var_name = match target {
                 InputItem::Variable(var) => var,
                 InputItem::ArrayElement { name, .. } => name,
-                InputItem::Member { member, .. } => member,
+                InputItem::Member(path) => path.member(),
                 // The parser gives no prompt text and no ' in INPUT#
                 InputItem::Prompt { .. } | InputItem::NewLine => continue,
             };

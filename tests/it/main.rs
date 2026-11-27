@@ -179,3 +179,4 @@ mod issue_166_print_format_variable;
 mod issue_189_matrix_product;
 mod issue_194_structure_parameters;
 mod issue_196_print_stray_token;
+mod issue_192_structure_array_members;

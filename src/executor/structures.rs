@@ -1,13 +1,13 @@
-//! The run of structures (issue #191). The form is the form of BBC BASIC for
-//! Windows: see `src/parser/structures.rs` for the manual page.
+//! The run of structures (issues #191 and #192). The form is the form of BBC
+//! BASIC for Windows: see `src/parser/structures.rs` for the manual page.
 //!
 //! The suffix of a member name gives its type, as for a variable: `%` is an
 //! integer, `$` is a string, and no suffix is a real.
 
 use super::{format_number, format_real, real_to_integer, Executor};
 use crate::error::{BBCBasicError, Result};
-use crate::parser::{Expression, InputItem};
-use crate::variables::{StructureId, Variable};
+use crate::parser::{Expression, InputItem, MemberDecl, MemberPath};
+use crate::variables::{MemberValue, Members, StructureId, Variable};
 use std::collections::HashMap;
 
 /// The value of one argument of a PROC or FN call
@@ -22,8 +22,15 @@ pub enum Argument {
 
 impl Executor {
     /// Execute `DIM name{members}`. A DIM of a LOCAL structure makes a
-    /// structure that the routine of the LOCAL removes at its end.
-    pub(super) fn execute_dim_structure(&mut self, name: &str, members: &[String]) -> Result<()> {
+    /// structure that the routine of the LOCAL removes at its end. All the
+    /// array sizes are evaluated before the structure exists, so an error
+    /// declares no structure (issue #192).
+    pub(super) fn execute_dim_structure(
+        &mut self,
+        name: &str,
+        members: &[MemberDecl],
+    ) -> Result<()> {
+        let members = self.make_members(members)?;
         let local = self.variables.is_local_structure_without_dim(name);
         let id = self.variables.dim_structure(name, members)?;
         if local {
@@ -93,17 +100,59 @@ impl Executor {
         }
     }
 
+    /// The members of a DIM, with each value at 0 or an empty string
+    fn make_members(&mut self, members: &[MemberDecl]) -> Result<Members> {
+        let mut values = Members::with_capacity(members.len());
+        for member in members {
+            let value = match member {
+                MemberDecl::Scalar(name) => MemberValue::scalar(name),
+                MemberDecl::Array { name, dimensions } => {
+                    let sizes = self.eval_dimensions(dimensions)?;
+                    MemberValue::array(name, sizes)
+                }
+                MemberDecl::Structure { members, .. } => {
+                    MemberValue::Structure(self.make_members(members)?)
+                }
+            };
+            values.push((member.name().to_string(), value));
+        }
+        Ok(values)
+    }
+
+    /// The index values of a member path. A negative index gives Subscript
+    /// out of range, as for an array.
+    pub(super) fn member_indices(&mut self, path: &MemberPath) -> Result<Vec<usize>> {
+        let mut values = Vec::with_capacity(path.indices.len());
+        for index in &path.indices {
+            let value = self.eval_integer(index)?;
+            if value < 0 {
+                return Err(BBCBasicError::SubscriptOutOfRange);
+            }
+            values.push(value as usize);
+        }
+        Ok(values)
+    }
+
+    /// Store a value in a member, or in an element of an array member
+    pub(super) fn store_member(&mut self, path: &MemberPath, value: Variable) -> Result<()> {
+        let indices = self.member_indices(path)?;
+        self.variables
+            .set_member(&path.structure, &path.members, &indices, value)
+    }
+
     /// Execute `structure.member = expression`. The value gets the type of
     /// the member before the store.
     pub(super) fn execute_member_assignment(
         &mut self,
-        structure: &str,
-        member: &str,
+        target: &MemberPath,
         expression: &Expression,
     ) -> Result<()> {
         // Find the member first, so that an error in it comes before an
-        // error in the expression
-        self.variables.get_member(structure, member)?;
+        // error in the expression. The indices are evaluated one time.
+        let indices = self.member_indices(target)?;
+        let (structure, path) = (&target.structure, &target.members);
+        self.variables.get_member(structure, path, &indices)?;
+        let member = target.member();
         let value = if member.ends_with('%') {
             Variable::Integer(self.eval_integer(expression)?)
         } else if member.ends_with('$') {
@@ -111,17 +160,19 @@ impl Executor {
         } else {
             Variable::Real(self.eval_real(expression)?)
         };
-        self.variables.set_member(structure, member, value)
+        self.variables.set_member(structure, path, &indices, value)
     }
 
-    /// The value of a member
-    pub(super) fn member_value(&self, structure: &str, member: &str) -> Result<Variable> {
-        self.variables.get_member(structure, member).cloned()
+    /// The value of a member, or of an element of an array member
+    pub(super) fn member_value(&mut self, path: &MemberPath) -> Result<Variable> {
+        let indices = self.member_indices(path)?;
+        self.variables
+            .get_member(&path.structure, &path.members, &indices)
     }
 
     /// The value of a member as an integer. A string gives Type mismatch.
-    pub(super) fn member_integer(&self, structure: &str, member: &str) -> Result<i32> {
-        match self.member_value(structure, member)? {
+    pub(super) fn member_integer(&mut self, path: &MemberPath) -> Result<i32> {
+        match self.member_value(path)? {
             Variable::Integer(value) => Ok(value),
             Variable::Real(value) => real_to_integer(value),
             _ => Err(BBCBasicError::TypeMismatch),
@@ -129,8 +180,8 @@ impl Executor {
     }
 
     /// The value of a member as a real. A string gives Type mismatch.
-    pub(super) fn member_real(&self, structure: &str, member: &str) -> Result<f64> {
-        match self.member_value(structure, member)? {
+    pub(super) fn member_real(&mut self, path: &MemberPath) -> Result<f64> {
+        match self.member_value(path)? {
             Variable::Integer(value) => Ok(f64::from(value)),
             Variable::Real(value) => Ok(value),
             _ => Err(BBCBasicError::TypeMismatch),
@@ -139,8 +190,8 @@ impl Executor {
 
     /// The value of a member as a string. A number gives Type mismatch, as
     /// a numeric variable does in a string context (issue 146).
-    pub(super) fn member_string(&self, structure: &str, member: &str) -> Result<String> {
-        match self.member_value(structure, member)? {
+    pub(super) fn member_string(&mut self, path: &MemberPath) -> Result<String> {
+        match self.member_value(path)? {
             Variable::String(value) => Ok(value),
             _ => Err(BBCBasicError::TypeMismatch),
         }
@@ -148,8 +199,8 @@ impl Executor {
 
     /// The PRINT text of a member
     /// and a flag that is true for a number, as `format_expression` gives
-    pub(super) fn format_member(&self, structure: &str, member: &str) -> Result<(String, bool)> {
-        Ok(match self.member_value(structure, member)? {
+    pub(super) fn format_member(&mut self, path: &MemberPath) -> Result<(String, bool)> {
+        Ok(match self.member_value(path)? {
             Variable::Integer(value) => (value.to_string(), true),
             Variable::Real(value) => (format_real(value, self.exact_reals), true),
             Variable::String(value) => (value, false),
@@ -160,28 +211,53 @@ impl Executor {
     /// Check that a member target of INPUT, READ or INPUT# exists, before
     /// the statement takes a reply, a DATA value or a record. Another target
     /// needs no check here.
-    pub(super) fn check_member_target(&self, target: &InputItem) -> Result<()> {
-        if let InputItem::Member { structure, member } = target {
-            self.variables.get_member(structure, member)?;
+    pub(super) fn check_member_target(&mut self, target: &InputItem) -> Result<()> {
+        if let InputItem::Member(path) = target {
+            self.member_value(path)?;
         }
         Ok(())
     }
 
-    /// The LVAR lines of the structures: one line for each member, such as
-    /// `point.x = 1.5`, in name order and in member order
+    /// The LVAR lines of the structures, in name order and in member order.
+    /// A scalar member is one line, such as `point.x = 1.5`. An array member
+    /// shows its top indices, such as `s.a(3)`. A sub-structure is a line
+    /// such as `s.p{}`, and its members follow it with 2 more spaces of
+    /// indent (issue #192).
     pub(super) fn structure_listing(&self) -> Vec<String> {
         let mut lines = Vec::new();
         for (name, members) in self.variables.structures() {
-            for (member, value) in members {
-                let value = match value {
-                    Variable::Integer(value) => value.to_string(),
-                    Variable::Real(value) => format_number(*value),
-                    Variable::String(value) => format!("\"{value}\""),
-                    _ => continue,
-                };
-                lines.push(format!("{name}.{member} = {value}"));
-            }
+            list_members(name, members, "", &mut lines);
         }
         lines
+    }
+}
+
+/// Add the LVAR lines of these members to `lines`. `prefix` is the path of
+/// the structure, such as `s.p`, and `indent` is the space at the left.
+fn list_members(prefix: &str, members: &Members, indent: &str, lines: &mut Vec<String>) {
+    for (member, value) in members {
+        let path = format!("{prefix}.{member}");
+        let line = match value {
+            MemberValue::Structure(inner) => {
+                lines.push(format!("{indent}{path}{{}}"));
+                list_members(&path, inner, &format!("{indent}  "), lines);
+                continue;
+            }
+            MemberValue::Variable(Variable::Integer(value)) => format!("{path} = {value}"),
+            MemberValue::Variable(Variable::Real(value)) => {
+                format!("{path} = {}", format_number(*value))
+            }
+            MemberValue::Variable(Variable::String(value)) => format!("{path} = \"{value}\""),
+            MemberValue::Variable(array) => {
+                let top_indices: Vec<String> = array
+                    .dimensions()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|size| (size - 1).to_string())
+                    .collect();
+                format!("{path}({})", top_indices.join(","))
+            }
+        };
+        lines.push(format!("{indent}{line}"));
     }
 }
