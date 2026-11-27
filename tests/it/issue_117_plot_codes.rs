@@ -47,16 +47,18 @@ fn test_plot_64_moves_relative_and_sets_no_pixel() {
 fn test_plot_133_draws_no_triangle() {
     // Before the change, 2 PLOT 133 codes filled the triangle
     // (400, 400), (600, 400), (600, 600). The point (580, 420) is inside it.
+    // Since issue 182, PLOT 133 is the flood fill of FILL, so the empty
+    // canvas fills: (100, 100), outside the triangle, also has colour 1.
     let (result, output) = run(&[
         "10 MOVE 400, 400",
         "20 PLOT 133, 600, 600",
         "30 MOVE 600, 400",
         "40 PLOT 133, 600, 600",
-        "50 PRINT POINT(580, 420)",
+        "50 PRINT POINT(580, 420); POINT(100, 100)",
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "11\n");
 }
 
 #[test]

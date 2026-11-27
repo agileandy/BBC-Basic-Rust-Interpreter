@@ -96,6 +96,21 @@ struct Point {
     y: i32,
 }
 
+/// The colour of a drawing call. The low 2 bits of a PLOT code select it.
+/// The BBC BASIC for Windows manual gives PLOT 1: "in the current graphics
+/// foreground colour", PLOT 2: "in the logical inverse colour" and PLOT 3:
+/// "in the current graphics background colour"
+/// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin3.html).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColourSource {
+    /// The graphics foreground colour with the foreground action
+    Foreground,
+    /// The logical inverse: the colour count minus 1, EOR the old colour
+    Inverse,
+    /// The graphics background colour with the background action
+    Background,
+}
+
 /// Graphics canvas for drawing operations
 #[derive(Debug, Clone)]
 pub struct GraphicsSystem {
@@ -115,8 +130,11 @@ pub struct GraphicsSystem {
     foreground_color: u8,
     /// Current graphics background colour number (CLG and FILL use it)
     background_color: u8,
-    /// Graphics color mode (0 = set, 1 = OR, 2 = AND, 3 = XOR, 4 = invert)
-    color_mode: u8,
+    /// The GCOL action of the foreground colour (0 = set, 1 = OR, 2 = AND,
+    /// 3 = XOR, 4 = invert)
+    foreground_action: u8,
+    /// The GCOL action of the background colour, with the same values
+    background_action: u8,
     /// The number of colours of the screen mode (2, 4, 8 or 16)
     colours: u8,
 }
@@ -139,17 +157,23 @@ impl GraphicsSystem {
             // The defaults of mode 0: 2 colours, foreground 1, background 0
             foreground_color: 1,
             background_color: 0,
-            color_mode: 0, // Set mode
+            foreground_action: 0, // Set mode
+            background_action: 0,
             colours: 2,
         }
     }
 
-    /// Clear the graphics canvas to the graphics background colour (CLG)
+    /// Clear the graphics canvas (CLG). The BBC BASIC for Windows manual
+    /// gives the rule: CLG "clears the graphics viewport and sets it to the
+    /// currently selected graphics background colour using the current
+    /// background plotting action (set by GCOL)"
+    /// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html).
     pub fn clear(&mut self) {
-        let background = self.background_color;
-        for row in &mut self.canvas {
-            row.fill(background);
+        let mut canvas = std::mem::take(&mut self.canvas);
+        for pixel in canvas.iter_mut().flatten() {
+            *pixel = self.apply_action(*pixel, ColourSource::Background);
         }
+        self.canvas = canvas;
     }
 
     /// Reset the graphics for a new screen mode (MODE): set the default
@@ -158,7 +182,8 @@ impl GraphicsSystem {
         self.colours = mode.colours;
         self.foreground_color = mode.colours - 1;
         self.background_color = 0;
-        self.color_mode = 0;
+        self.foreground_action = 0;
+        self.background_action = 0;
         self.clear();
         self.current_pos = Point { x: 0, y: 0 };
         self.previous_pos = Point { x: 0, y: 0 };
@@ -167,14 +192,19 @@ impl GraphicsSystem {
 
     /// GCOL action, colour. A colour below 128 sets the graphics foreground,
     /// and a colour from 128 sets the graphics background (colour - 128).
-    /// Each is reduced to the colour count of the screen mode.
+    /// Each is reduced to the colour count of the screen mode. The action
+    /// goes with the colour: a BBC Micro keeps one action for the foreground
+    /// and one for the background, and CLG uses "the current background
+    /// plotting action (set by GCOL)" (BBC BASIC for Windows manual,
+    /// https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html).
     pub fn set_color(&mut self, mode: u8, color: u8) {
-        self.color_mode = mode;
         let reduced = (color & 0x7F) & (self.colours - 1);
         if color < 128 {
             self.foreground_color = reduced;
+            self.foreground_action = mode;
         } else {
             self.background_color = reduced;
+            self.background_action = mode;
         }
     }
 
@@ -202,18 +232,23 @@ impl GraphicsSystem {
         }
     }
 
-    /// Set a pixel at the given coordinates
-    fn set_pixel(&mut self, x: i32, y: i32) {
+    /// Set a pixel at the given coordinates in the colour of `source`
+    fn set_pixel(&mut self, x: i32, y: i32, source: ColourSource) {
         if let Some((cx, cy)) = self.to_canvas_coords(x, y) {
-            self.canvas[cy][cx] = self.apply_action(self.canvas[cy][cx]);
+            self.canvas[cy][cx] = self.apply_action(self.canvas[cy][cx], source);
         }
     }
 
-    /// The new colour of a pixel of colour `old`, with the GCOL action and
-    /// the foreground colour. The result is a colour of the screen mode.
-    fn apply_action(&self, old: u8) -> u8 {
-        let colour = self.foreground_color;
-        let new = match self.color_mode {
+    /// The new colour of a pixel of colour `old`, with the colour and the
+    /// GCOL action of `source`. The result is a colour of the screen mode.
+    fn apply_action(&self, old: u8, source: ColourSource) -> u8 {
+        let (action, colour) = match source {
+            ColourSource::Foreground => (self.foreground_action, self.foreground_color),
+            ColourSource::Background => (self.background_action, self.background_color),
+            // The logical inverse is the invert action, with no colour
+            ColourSource::Inverse => (4, 0),
+        };
+        let new = match action {
             1 => old | colour,             // OR
             2 => old & colour,             // AND
             3 => old ^ colour,             // EOR
@@ -237,12 +272,12 @@ impl GraphicsSystem {
 
     /// Set a pixel if it is on the canvas. The coordinates are i64, thus a
     /// drawing function can give a point that is not an i32.
-    fn set_visible_pixel(&mut self, x: i64, y: i64) {
+    fn set_visible_pixel(&mut self, x: i64, y: i64, source: ColourSource) {
         let (min_x, max_x) = self.visible_x();
         let (min_y, max_y) = self.visible_y();
         if (min_x..=max_x).contains(&x) && (min_y..=max_y).contains(&y) {
             if let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) {
-                self.set_pixel(x, y);
+                self.set_pixel(x, y, source);
             }
         }
     }
@@ -296,7 +331,13 @@ impl GraphicsSystem {
 
     /// Draw a line from current position to target (DRAW or PLOT 5)
     pub fn draw_line_to(&mut self, x: i32, y: i32) {
-        self.draw_line(self.current_pos.x, self.current_pos.y, x, y);
+        self.draw_line(
+            self.current_pos.x,
+            self.current_pos.y,
+            x,
+            y,
+            ColourSource::Foreground,
+        );
         self.set_last_point(x, y);
     }
 
@@ -311,7 +352,7 @@ impl GraphicsSystem {
     /// 1 pixel along the major axis. At step i, the algorithm gives the minor
     /// offset (2 * minor * i + major - 1) / (2 * major). Thus only the steps
     /// on the canvas are visited, and a long line is fast.
-    fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+    fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, source: ColourSource) {
         let (x0, y0) = (i64::from(x0), i64::from(y0));
         let (x1, y1) = (i64::from(x1), i64::from(y1));
         let (dx, dy) = ((x1 - x0).abs(), (y1 - y0).abs());
@@ -338,9 +379,9 @@ impl GraphicsSystem {
                 ((2 * minor * i + major - 1) / (2 * major)) as i64
             };
             if x_major {
-                self.set_visible_pixel(x0 + sx * i, y0 + sy * offset);
+                self.set_visible_pixel(x0 + sx * i, y0 + sy * offset, source);
             } else {
-                self.set_visible_pixel(x0 + sx * offset, y0 + sy * i);
+                self.set_visible_pixel(x0 + sx * offset, y0 + sy * i, source);
             }
         }
     }
@@ -349,14 +390,19 @@ impl GraphicsSystem {
     pub fn plot(&mut self, mode: u8, x: i32, y: i32) {
         // Each group of 8 modes has the same rule for bit 2: set is absolute
         // and clear is relative to the last point. The low 2 bits select the
-        // action: 0 moves, 1 draws in the foreground colour, 2 and 3 draw in
-        // the inverse and background colours. Those 2 colours are not
-        // modelled, so the line, triangle, circle and ellipse groups only move for 2
-        // and 3. The point group (64-71) sets the point for 2 and 3 also.
+        // colour: 0 moves, 1 draws in the foreground colour, 2 in the logical
+        // inverse colour and 3 in the background colour (BBC BASIC for
+        // Windows manual, https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin3.html).
+        //
+        // The manual gives these codes from 128 to 143:
+        // - 128-135: "Flood-fill to non-background". 129 and 133 fill in the
+        //   foreground colour, as FILL does. 130, 131, 134 and 135 (the
+        //   inverse and the background colour) are not supported.
+        // - 136-143: "Flood-fill to foreground". These are not supported.
         //
         // These codes from 128 to 191 are not supported. They draw nothing,
         // give no error and move the last point:
-        // - 128-143: flood fill
+        // - 130, 131, 134, 135 and 136-143: flood fill (see above)
         // - 160-167: arc, 168-175: segment, 176-183: sector
         // - 184-191: move or copy a rectangle
         let absolute = (mode & 0x04) != 0;
@@ -369,19 +415,34 @@ impl GraphicsSystem {
                 self.current_pos.y.saturating_add(y),
             )
         };
-        let draws = (mode & 0x03) == 1;
+        let source = match mode & 0x03 {
+            1 => ColourSource::Foreground,
+            2 => ColourSource::Inverse,
+            3 => ColourSource::Background,
+            // 0 only moves
+            _ => {
+                self.set_last_point(target_x, target_y);
+                return;
+            }
+        };
 
         match mode & 0xF8 {
             // 0-7: Move or draw a line
-            0x00 if draws => {
-                self.draw_line(self.current_pos.x, self.current_pos.y, target_x, target_y);
+            0x00 => {
+                self.draw_line(
+                    self.current_pos.x,
+                    self.current_pos.y,
+                    target_x,
+                    target_y,
+                    source,
+                );
             }
             // 64-71: Plot point. Low bits 0 (64, 68) only move
-            0x40 if (mode & 0x03) != 0 => {
-                self.set_pixel(target_x, target_y);
+            0x40 => {
+                self.set_pixel(target_x, target_y, source);
             }
             // 80-87: Filled triangle with the 2 last points and the target
-            0x50 if draws => {
+            0x50 => {
                 self.fill_triangle(
                     self.previous_pos.x,
                     self.previous_pos.y,
@@ -389,20 +450,25 @@ impl GraphicsSystem {
                     self.current_pos.y,
                     target_x,
                     target_y,
+                    source,
                 );
+            }
+            // 129 and 133: Flood fill in the foreground colour (FILL)
+            0x80 if source == ColourSource::Foreground => {
+                self.flood_fill(target_x, target_y);
             }
             // 144-151: Circle outline. 152-159: Filled circle. The centre is
             // the last point and the target is a point on the circle
-            0x90 | 0x98 if draws => {
+            0x90 | 0x98 => {
                 let centre = self.current_pos;
                 let dx = (i64::from(target_x) - i64::from(centre.x)) as f64;
                 let dy = (i64::from(target_y) - i64::from(centre.y)) as f64;
                 // The radius can be larger than an i32
                 let radius = (dx * dx + dy * dy).sqrt().round() as i64;
                 if mode & 0xF8 == 0x90 {
-                    self.circle_outline(centre.x, centre.y, radius);
+                    self.circle_outline(centre.x, centre.y, radius, source);
                 } else {
-                    self.fill_circle(centre.x, centre.y, radius);
+                    self.fill_circle(centre.x, centre.y, radius, source);
                 }
             }
             // 192-199: Ellipse outline. 200-207: Filled ellipse. The BBC
@@ -412,14 +478,14 @@ impl GraphicsSystem {
             // specified X,Y position lies anywhere on a horizontal tangent to
             // the ellipse (i.e. the vertical radius)."
             // (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin3.html)
-            0xC0 | 0xC8 if draws => {
+            0xC0 | 0xC8 => {
                 let centre = self.previous_pos;
                 let rx = (i64::from(self.current_pos.x) - i64::from(centre.x)).abs();
                 let ry = (i64::from(target_y) - i64::from(centre.y)).abs();
                 if mode & 0xF8 == 0xC0 {
-                    self.ellipse_outline(centre.x, centre.y, rx, ry);
+                    self.ellipse_outline(centre.x, centre.y, rx, ry, source);
                 } else {
-                    self.fill_ellipse(centre.x, centre.y, rx, ry);
+                    self.fill_ellipse(centre.x, centre.y, rx, ry, source);
                 }
             }
             // Default: just move cursor
@@ -449,7 +515,7 @@ impl GraphicsSystem {
     /// the columns on the canvas are visited, so a large radius is fast. The
     /// half width is an exact integer square root, thus a radius larger than
     /// an i32 does not overflow or round down.
-    fn fill_circle(&mut self, center_x: i32, center_y: i32, radius: i64) {
+    fn fill_circle(&mut self, center_x: i32, center_y: i32, radius: i64, source: ColourSource) {
         let (cx, cy, r) = (i64::from(center_x), i64::from(center_y), radius);
         let min_x = -i64::from(self.origin.x);
         let max_x = self.width as i64 - 1 - i64::from(self.origin.x);
@@ -460,7 +526,7 @@ impl GraphicsSystem {
             let half =
                 (i128::from(r) * i128::from(r) - i128::from(dy) * i128::from(dy)).isqrt() as i64;
             for x in (cx - half).max(min_x)..=(cx + half).min(max_x) {
-                self.set_pixel(x as i32, y as i32);
+                self.set_pixel(x as i32, y as i32, source);
             }
         }
     }
@@ -469,7 +535,7 @@ impl GraphicsSystem {
     /// algorithm. At octant row y, the algorithm gives the largest x with
     /// x * (x - 1) <= r * (r - 1) + 1 - y * y, and it stops when x < y. Only
     /// the rows that can put a point on the canvas are visited, each 1 time.
-    fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i64) {
+    fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i64, source: ColourSource) {
         if radius <= 0 {
             return;
         }
@@ -500,14 +566,14 @@ impl GraphicsSystem {
                 }
 
                 // Draw 8 octants
-                self.set_visible_pixel(cx + x, cy + y);
-                self.set_visible_pixel(cx + y, cy + x);
-                self.set_visible_pixel(cx - y, cy + x);
-                self.set_visible_pixel(cx - x, cy + y);
-                self.set_visible_pixel(cx - x, cy - y);
-                self.set_visible_pixel(cx - y, cy - x);
-                self.set_visible_pixel(cx + y, cy - x);
-                self.set_visible_pixel(cx + x, cy - y);
+                self.set_visible_pixel(cx + x, cy + y, source);
+                self.set_visible_pixel(cx + y, cy + x, source);
+                self.set_visible_pixel(cx - y, cy + x, source);
+                self.set_visible_pixel(cx - x, cy + y, source);
+                self.set_visible_pixel(cx - x, cy - y, source);
+                self.set_visible_pixel(cx - y, cy - x, source);
+                self.set_visible_pixel(cx + y, cy - x, source);
+                self.set_visible_pixel(cx + x, cy - y, source);
             }
             next_row = next_row.max(last + 1);
         }
@@ -534,7 +600,14 @@ impl GraphicsSystem {
 
     /// Fill an ellipse with a horizontal line for each row. Only the rows and
     /// the columns on the canvas are visited, so a large radius is fast.
-    fn fill_ellipse(&mut self, center_x: i32, center_y: i32, rx: i64, ry: i64) {
+    fn fill_ellipse(
+        &mut self,
+        center_x: i32,
+        center_y: i32,
+        rx: i64,
+        ry: i64,
+        source: ColourSource,
+    ) {
         if rx <= 0 || ry <= 0 {
             return;
         }
@@ -547,7 +620,7 @@ impl GraphicsSystem {
             let dy = (y - cy) as f64 / ry as f64;
             let half = (rx as f64 * (1.0 - dy * dy).sqrt()) as i64;
             for x in (cx - half).max(min_x)..=(cx + half).min(max_x) {
-                self.set_pixel(x as i32, y as i32);
+                self.set_pixel(x as i32, y as i32, source);
             }
         }
     }
@@ -556,14 +629,21 @@ impl GraphicsSystem {
     /// are i128, so a large radius does not overflow. The algorithm visits
     /// each step from the top to the side. If the radii are too large for
     /// that, only the rows and the columns on the canvas are visited.
-    fn ellipse_outline(&mut self, center_x: i32, center_y: i32, rx: i64, ry: i64) {
+    fn ellipse_outline(
+        &mut self,
+        center_x: i32,
+        center_y: i32,
+        rx: i64,
+        ry: i64,
+        source: ColourSource,
+    ) {
         if rx <= 0 || ry <= 0 {
             return;
         }
 
         let (cx, cy) = (i64::from(center_x), i64::from(center_y));
         if rx + ry > ELLIPSE_STEP_LIMIT {
-            self.large_ellipse_outline(cx, cy, rx, ry);
+            self.large_ellipse_outline(cx, cy, rx, ry, source);
             return;
         }
         let (rx, ry) = (i128::from(rx), i128::from(ry));
@@ -580,7 +660,7 @@ impl GraphicsSystem {
         let mut py = two_rx_sq * y;
 
         // Plot initial points
-        self.plot_ellipse_points(cx, cy, x, y);
+        self.plot_ellipse_points(cx, cy, x, y, source);
 
         // Region 1
         let mut p = ry_sq - (rx_sq * ry) + (rx_sq / 4);
@@ -595,7 +675,7 @@ impl GraphicsSystem {
                 py -= two_rx_sq;
                 p += ry_sq + px - py;
             }
-            self.plot_ellipse_points(cx, cy, x, y);
+            self.plot_ellipse_points(cx, cy, x, y, source);
         }
 
         // Region 2
@@ -611,24 +691,24 @@ impl GraphicsSystem {
                 px += two_ry_sq;
                 p += rx_sq - py + px;
             }
-            self.plot_ellipse_points(cx, cy, x, y);
+            self.plot_ellipse_points(cx, cy, x, y, source);
         }
     }
 
     /// Helper to plot 4 quadrants of ellipse. A point that is not on the
     /// canvas is not set.
-    fn plot_ellipse_points(&mut self, cx: i64, cy: i64, x: i128, y: i128) {
+    fn plot_ellipse_points(&mut self, cx: i64, cy: i64, x: i128, y: i128, source: ColourSource) {
         let (x, y) = (x as i64, y as i64);
-        self.set_visible_pixel(cx + x, cy + y);
-        self.set_visible_pixel(cx - x, cy + y);
-        self.set_visible_pixel(cx + x, cy - y);
-        self.set_visible_pixel(cx - x, cy - y);
+        self.set_visible_pixel(cx + x, cy + y, source);
+        self.set_visible_pixel(cx - x, cy + y, source);
+        self.set_visible_pixel(cx + x, cy - y, source);
+        self.set_visible_pixel(cx - x, cy - y, source);
     }
 
     /// Draw the outline of an ellipse with radii above ELLIPSE_STEP_LIMIT.
     /// Visit only the rows and the columns on the canvas, and set the 2 edge
     /// points of each. Each point is set 1 time.
-    fn large_ellipse_outline(&mut self, cx: i64, cy: i64, rx: i64, ry: i64) {
+    fn large_ellipse_outline(&mut self, cx: i64, cy: i64, rx: i64, ry: i64, source: ColourSource) {
         let (min_x, max_x) = self.visible_x();
         let (min_y, max_y) = self.visible_y();
         // The half width of the ellipse at the offset from the centre
@@ -649,7 +729,7 @@ impl GraphicsSystem {
             points.insert((x, cy + y));
         }
         for (x, y) in points {
-            self.set_visible_pixel(x, y);
+            self.set_visible_pixel(x, y, source);
         }
     }
 
@@ -657,6 +737,7 @@ impl GraphicsSystem {
     /// Only the rows and the columns on the canvas are visited, so a large
     /// rectangle is fast.
     pub fn draw_rectangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, filled: bool) {
+        let source = ColourSource::Foreground;
         let min_x = i64::from(x1.min(x2));
         let max_x = i64::from(x1.max(x2));
         let min_y = i64::from(y1.min(y2));
@@ -670,18 +751,18 @@ impl GraphicsSystem {
             // Fill the rectangle
             for y in rows {
                 for x in columns.clone() {
-                    self.set_visible_pixel(x, y);
+                    self.set_visible_pixel(x, y, source);
                 }
             }
         } else {
             // Draw outline
             for x in columns {
-                self.set_visible_pixel(x, min_y);
-                self.set_visible_pixel(x, max_y);
+                self.set_visible_pixel(x, min_y, source);
+                self.set_visible_pixel(x, max_y, source);
             }
             for y in rows {
-                self.set_visible_pixel(min_x, y);
-                self.set_visible_pixel(max_x, y);
+                self.set_visible_pixel(min_x, y, source);
+                self.set_visible_pixel(max_x, y, source);
             }
         }
 
@@ -714,12 +795,12 @@ impl GraphicsSystem {
     ) {
         if filled {
             // Filled triangle using scanline algorithm
-            self.fill_triangle(x1, y1, x2, y2, x3, y3);
+            self.fill_triangle(x1, y1, x2, y2, x3, y3, ColourSource::Foreground);
         } else {
             // Outline triangle - draw three lines
-            self.draw_line(x1, y1, x2, y2);
-            self.draw_line(x2, y2, x3, y3);
-            self.draw_line(x3, y3, x1, y1);
+            self.draw_line(x1, y1, x2, y2, ColourSource::Foreground);
+            self.draw_line(x2, y2, x3, y3, ColourSource::Foreground);
+            self.draw_line(x3, y3, x1, y1, ColourSource::Foreground);
         }
 
         // Update current position to last vertex
@@ -729,7 +810,17 @@ impl GraphicsSystem {
     /// Fill a triangle using scanline algorithm. Only the rows and the
     /// columns on the canvas are visited, and the products are i128, so
     /// large coordinates are fast and do not overflow.
-    fn fill_triangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32) {
+    #[allow(clippy::too_many_arguments)]
+    fn fill_triangle(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        x3: i32,
+        y3: i32,
+        source: ColourSource,
+    ) {
         // Sort vertices by y-coordinate
         let mut verts = [(x1, y1), (x2, y2), (x3, y3)].map(|(x, y)| (i64::from(x), i64::from(y)));
         verts.sort_by_key(|v| v.1);
@@ -781,7 +872,7 @@ impl GraphicsSystem {
 
             // Draw horizontal line
             for x in x_left.max(min_x)..=x_right.min(max_x) {
-                self.set_visible_pixel(x, y);
+                self.set_visible_pixel(x, y, source);
             }
         }
     }
@@ -793,13 +884,14 @@ impl GraphicsSystem {
     /// to PLOT 133,x,y" (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin5.html).
     pub fn flood_fill(&mut self, start_x: i32, start_y: i32) {
         let target_color = self.background_color;
+        let source = ColourSource::Foreground;
         if self.point(start_x, start_y) != Some(target_color) {
             return; // Off the canvas, or not the background colour
         }
 
         // Each filled pixel gets the same new colour. If that colour is the
         // background colour, no pixel changes, and the fill does not end.
-        if self.apply_action(target_color) == target_color {
+        if self.apply_action(target_color, source) == target_color {
             return;
         }
 
@@ -811,7 +903,7 @@ impl GraphicsSystem {
             // Check if pixel is valid and matches target color
             if let Some(color) = self.point(x, y) {
                 if color == target_color {
-                    self.set_pixel(x, y);
+                    self.set_pixel(x, y, source);
 
                     // Add adjacent pixels to stack. A pixel past the i32
                     // limits is not a pixel, so it is not added.
@@ -946,7 +1038,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut gfx = GraphicsSystem::with_dimensions(100, 100);
-        gfx.set_pixel(50, 50);
+        gfx.set_pixel(50, 50, ColourSource::Foreground);
         assert!(gfx.get_pixel(50, 50).unwrap());
         gfx.clear();
         assert!(!gfx.get_pixel(50, 50).unwrap());
