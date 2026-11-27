@@ -3423,14 +3423,9 @@ impl Executor {
                     // try after an error runs the argument again, and a
                     // recursive function then doubles its calls at each
                     // level (issue 151).
+                    // A real value gives the PRINT text (issue 181).
                     argument if self.is_real_expr(argument) => {
-                        let real_val = self.eval_real(argument)?;
-                        // Check if it's actually an integer value
-                        if real_val.fract() == 0.0 {
-                            Ok((real_val as i32).to_string())
-                        } else {
-                            Ok(format_number(real_val))
-                        }
+                        Ok(format_number(self.eval_real(argument)?))
                     }
                     argument => Ok(self.eval_integer(argument)?.to_string()),
                 }
