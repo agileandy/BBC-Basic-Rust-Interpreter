@@ -2389,6 +2389,14 @@ fn parse_comma_separated_expressions(
         .collect()
 }
 
+/// The error for an empty part in a list of values (issue #163).
+fn missing_value_at_a_comma(line_number: Option<u16>) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message: "Missing value at a comma".to_string(),
+        line: line_number,
+    }
+}
+
 /// Parse DIM statement
 fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut items = Vec::new();
@@ -2435,46 +2443,40 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             items.push(DimItem::Block { name, size });
             if pos < tokens.len() {
                 pos += 1; // the comma before the next item
+                if pos >= tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
+                    return Err(missing_value_at_a_comma(line_number));
+                }
                 continue;
             }
             break;
         }
         pos += 1;
 
-        // Parse dimension expressions
-        let mut dimensions = Vec::new();
-        loop {
-            // Find the extent of this dimension (until comma or closing paren)
-            let start = pos;
-            let mut depth = 0;
-            while pos < tokens.len() {
-                match &tokens[pos] {
-                    Token::Separator('(') => depth += 1,
-                    Token::Separator(')') if depth == 0 => break,
-                    Token::Separator(')') => depth -= 1,
-                    Token::Separator(',') if depth == 0 => break,
-                    _ => {}
-                }
-                pos += 1;
-            }
-
-            if pos > start {
-                let dim_expr = parse_expression(&tokens[start..pos])?;
-                dimensions.push(dim_expr);
-            }
-
-            if pos >= tokens.len() {
-                break;
-            }
-
+        // The sizes run to the closing bracket of this array
+        let start = pos;
+        let mut depth = 0;
+        while pos < tokens.len() {
             match &tokens[pos] {
-                Token::Separator(',') => pos += 1, // next dimension
-                Token::Separator(')') => {
-                    pos += 1; // end of this array
-                    break;
-                }
-                _ => break,
+                Token::Separator('(') => depth += 1,
+                Token::Separator(')') if depth == 0 => break,
+                Token::Separator(')') => depth -= 1,
+                _ => {}
             }
+            pos += 1;
+        }
+
+        // An empty size gives a syntax error (issue #163)
+        let mut dimensions = Vec::new();
+        if pos > start {
+            for part in split_at_commas(&tokens[start..pos]) {
+                if part.is_empty() {
+                    return Err(missing_value_at_a_comma(line_number));
+                }
+                dimensions.push(parse_expression(part)?);
+            }
+        }
+        if pos < tokens.len() {
+            pos += 1; // end of this array
         }
 
         items.push(DimItem::Array { name, dimensions });
@@ -2482,6 +2484,9 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         // Check for comma (multiple arrays in one DIM)
         if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
             pos += 1;
+            if pos >= tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
+                return Err(missing_value_at_a_comma(line_number));
+            }
         } else {
             break;
         }
