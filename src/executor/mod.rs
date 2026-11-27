@@ -3084,6 +3084,11 @@ impl Executor {
         }
     }
 
+    /// The number of entries on the return stack (GOSUBs and PROC calls)
+    pub fn return_depth(&self) -> usize {
+        self.return_stack.len()
+    }
+
     /// Push the position of a PROC call onto the return stack, with the
     /// loop depths of the caller
     pub fn push_proc_return(&mut self, position: Position) {

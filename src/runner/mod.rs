@@ -210,6 +210,10 @@ struct Cursor<'a> {
     /// The number of local scopes at the start of this run. A scope above
     /// it is a PROC that this run called, so ENDPROC can close it.
     proc_floor: usize,
+    /// The number of return stack entries at the start of this run. An
+    /// entry above it is a GOSUB or PROC that this run opened, so RETURN
+    /// can use it.
+    return_floor: usize,
 }
 
 impl Cursor<'_> {
@@ -708,6 +712,8 @@ fn run_lines(
         lines,
         current: start,
         proc_floor: local_depth,
+        // The main run can return through each open GOSUB (CONT in a GOSUB)
+        return_floor: 0,
     };
     let mut previous_line = None;
 
@@ -825,6 +831,8 @@ fn run_function_body(
         current: Some(def_position),
         // The scope of the function is open: ENDPROC cannot close it
         proc_floor: executor.local_depth(),
+        // The GOSUBs of the caller are not open in the function body
+        return_floor: executor.return_depth(),
     };
     cursor.next();
 
@@ -1114,6 +1122,11 @@ fn step(
             Ok(Flow::Jumped)
         }
         Statement::Return { .. } => {
+            // With no GOSUB open in this run, the newest entry is of a
+            // caller: change nothing
+            if executor.return_depth() <= program.return_floor {
+                return Err(BBCBasicError::NoGosub.into());
+            }
             let return_position = executor
                 .pop_gosub_return()
                 .map_err(|_| BBCBasicError::NoGosub)?;
