@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **1696 tests** covering all major components
+- **2243 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -196,21 +196,21 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### Implemented Features
 
-- **Control Flow**: IF...THEN...ELSE, CASE...OF...WHEN...OTHERWISE...ENDCASE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
+- **Control Flow**: IF...THEN...ELSE (THEN is optional), CASE...OF...WHEN...OTHERWISE...ENDCASE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
 - **Variables**: Integer (%), Real, String ($), Arrays (multi-dimensional)
 - **Functions**: DEF FN with parameters, user-defined procedures (DEF PROC...ENDPROC)
-- **Built-in Functions**: SIN, COS, TAN, ASN, ACS, ATN, LOG, LN, EXP, SQR, ABS, SGN, INT, PI, DEG, RAD, RND
+- **Built-in Functions**: SIN, COS, TAN, ASN, ACS, ATN, LOG, LN, EXP, SQR, ABS, SGN, INT, PI, DEG, RAD, RND, EVAL. A function of one value works with no brackets (`LEN A$`, `SIN X`)
 - **String Functions**: LEFT$, RIGHT$, MID$, CHR$, ASC, STR$, VAL, LEN, INSTR
-- **Graphics**: MOVE, DRAW, PLOT (lines, points, triangles, circles and ellipses), CIRCLE, ELLIPSE, RECTANGLE, FILL, CLG, GCOL, COLOUR
+- **Graphics**: MOVE, DRAW, PLOT (lines, points, triangles, circles and ellipses), CIRCLE, ELLIPSE, RECTANGLE (each with FILL), FILL, CLG, GCOL with a colour for each pixel, COLOUR
 - **Graphics Origin**: ORIGIN x,y command for coordinate transformation
 - **Pixel Reading**: POINT(x,y) function returns pixel state
-- **File I/O**: OPENIN, OPENOUT, OPENUP, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
+- **File I/O**: OPENIN, OPENOUT, OPENUP, PRINT#, INPUT#, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
 - **Error Handling**: ON ERROR GOTO, ON ERROR with statements, ON ERROR OFF, ERR, ERL, REPORT, ERROR statement
-- **Other**: DATA, READ, RESTORE, DIM, LOCAL, END, STOP, QUIT, CLS, LIST, NEW, OLD, SAVE, LOAD, CHAIN
+- **Other**: DATA, READ, RESTORE, DIM, LOCAL, SWAP, END, STOP, QUIT, CLS, LIST, NEW, OLD, SAVE, LOAD, CHAIN
 
 ### 📊 Test Results
 
-- **1696 total tests** - All passing (463 library + 3 binary + 1230 program tests in one test program, `tests/it`)
+- **2243 total tests** - All passing (511 library + 5 binary + 1727 program tests in one test program, `tests/it`, with a corpus of 31 programs in `tests/corpus`)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
@@ -218,10 +218,10 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
 - **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. `PRINT` does not put a number in a field of 10 characters (issue #91).
-- **Functions**: a built-in function needs brackets: `LEN(A$)` works, and `LEN A$` gives an error (issue #143).
-- **Screen**: `MODE` changes the graphics state, but the terminal shows no colours. The interpreter starts in mode 0, not mode 7.
+- **Limits**: a call or an expression that nests too deep gives "No room": 1200 levels of evaluation (a simple recursive function to a depth of about 280), and 10000 entries for GOSUB, PROC and each loop type.
+- **Screen**: the command prompt shows no graphics and no colours. The terminal IDE (`--ide`) is in work: its frame exists, and its panes are not complete. The interpreter starts in mode 0, not mode 7. `POINT` gives the colour number, and -1 off the screen.
 - **Keyboard**: `GET` and `GET$` use the raw terminal mode. That mode is tested through a pseudo-terminal only.
-- **Files**: `PRINT#` writes text, not the binary records of a BBC Micro.
+- **Files**: `PRINT#` writes text, not the binary records of a BBC Micro. Each value is one line of the file, and `INPUT#` reads one line for each variable. A string that holds a line feed or a carriage return gives `Bad record` (`ERR` 155). A read past the end of the file gives `EOF` (`ERR` 223).
 - **Immediate mode**: a loop typed on more than one line with no line numbers does not work. A typed line is one unit.
 
 ### Non-Standard Extensions
@@ -235,6 +235,10 @@ The following functions are **NOT** part of the original BBC BASIC specification
 - `LISTDIR$(path$)` - The names in a directory, in name order, with `CHR$(10)` between them. A sub-directory name ends with `/`
 - `MKDIR path$` - Make one directory
 - `RMDIR path$` - Remove one empty directory
+- `NEWLIST`, `LISTADD l, v`, `LISTSET l, i, v`, `LISTINSERT l, i, v`, `LISTREMOVE l, i`, `LISTCLEAR l`, `LISTLEN(l)`, `LISTGET(l, i)`, `LISTGET$(l, i)`, `LISTISSTR(l, i)` - Lists that grow. A program holds a list by a handle in a numeric variable. The index starts at 0
+- `NEWMAP`, `MAPPUT m, key$, v`, `MAPGET(m, key$)`, `MAPGET$(m, key$)`, `MAPHAS(m, key$)`, `MAPLEN(m)`, `MAPKEY$(m, n)`, `MAPISSTR(m, key$)`, `MAPREMOVE m, key$`, `MAPCLEAR m` - Maps from a text key to a value, with the keys in the order of the puts
+- `FOR EACH v IN collection ... NEXT` - One pass for each element of a list or each key of a map. `NEXT EACH` also ends the loop
+- `JSONTOLIST(json$)`, `JSONTOMAP(json$)`, `TOJSON$(handle)`, `LISTKIND$(l, i)`, `MAPKIND$(m, key$)`, `LISTADDCOL l, h`, `MAPPUTCOL m, key$, h` - Convert between JSON text and lists and maps. A nested collection that a program puts by hand needs `LISTADDCOL` or `MAPPUTCOL`
 - `UPPER$(s$)`, `LOWER$(s$)` - Change the case of a string
 - `REPORT$` - The text of the last error, with no bracket
 - `JSONGET$(json$, path$)`, `JSONGET(json$, path$)` - Read a string or a number at a path of a JSON text
@@ -245,7 +249,7 @@ The following functions are **NOT** part of the original BBC BASIC specification
 
 A JSON path has keys with dots (`user.name`), array indices from 0 in square brackets (`items[2]`), and `["my key"]` for a key with a space or a dot. An empty path is the root.
 
-Errors of the extensions: "Bad JSON" is `ERR` 150, "Bad directory" is `ERR` 151 and "Bad path" is `ERR` 152. `ON ERROR` catches each one.
+Errors of the extensions: "Bad JSON" is `ERR` 150, "Bad directory" 151, "Bad path" 152, "Bad collection" 153, "No such key" 154, "Bad record" 155 and "FOR EACH without matching NEXT" 156. `ON ERROR` catches each one.
 
 
 These are documented in `src/extensions/mod.rs`.
