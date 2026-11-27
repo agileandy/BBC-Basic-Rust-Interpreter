@@ -2539,14 +2539,25 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
 
         items.push(DimItem::Array { name, dimensions });
 
-        // Check for comma (multiple arrays in one DIM)
-        if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
-            pos += 1;
-            if pos >= tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
-                return Err(missing_value_at_a_comma(line_number));
+        // Only a comma or the end of the statement can follow an array
+        // (issue #177)
+        match tokens.get(pos) {
+            None => break,
+            Some(Token::Separator(',')) => {
+                pos += 1;
+                if pos >= tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
+                    return Err(missing_value_at_a_comma(line_number));
+                }
             }
-        } else {
-            break;
+            Some(token) => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: format!(
+                        "Unexpected {} after DIM item",
+                        tokens_text(std::slice::from_ref(token))
+                    ),
+                    line: line_number,
+                })
+            }
         }
     }
 
