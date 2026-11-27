@@ -23,6 +23,7 @@
 
 use crate::error::BBCBasicError;
 use crate::tokenizer::{tokenize, TokenizedLine};
+use std::path::{Path, PathBuf};
 
 /// One line of a library file
 #[derive(Debug, Clone)]
@@ -51,9 +52,66 @@ pub struct Library {
 #[derive(Debug, Clone, Default)]
 pub struct LibraryStore {
     libraries: Vec<Library>,
+    /// The directory of the program file, the first search place (issue
+    /// #186). None: the program has no file.
+    program_directory: Option<PathBuf>,
+    /// The last search places. None: the directories of `BBCBASIC_LIB`.
+    library_directories: Option<Vec<PathBuf>>,
 }
 
+/// The environment variable with the library directories, with `:`
+/// between the entries (issue #186)
+pub const LIBRARY_PATH_VARIABLE: &str = "BBCBASIC_LIB";
+
 impl LibraryStore {
+    /// Use the directory of the program file as the first search place.
+    /// The run loop gives the file of the program for each run.
+    pub fn set_program_file(&mut self, file: Option<&str>) {
+        self.program_directory =
+            file.and_then(|file| Path::new(file).parent().map(Path::to_path_buf));
+    }
+
+    /// Use these directories as the last search places, in place of the
+    /// directories of `BBCBASIC_LIB`. A test uses this, so that it does not
+    /// change the environment of the other tests.
+    pub fn set_library_directories(&mut self, directories: Vec<PathBuf>) {
+        self.library_directories = Some(directories);
+    }
+
+    /// The path of the library file with the supplied name. The extension
+    /// `.bbas` is added when the name has none. A name with a directory part
+    /// is used as it is. For a name with no directory part, the search
+    /// places are, in this order: the directory of the program file, the
+    /// working directory, then each library directory. With no file in a
+    /// search place, the path is the name with the extension.
+    ///
+    /// BBC BASIC for Windows has no search: a program adds `@dir$` or
+    /// `@lib$` to the name (bbcwin5.html#install). This interpreter has no
+    /// `@dir$` and no `@lib$`, so the search does their work.
+    pub fn library_path(&self, name: &str) -> String {
+        let path = crate::commands::resolve_program_path(name);
+        let has_directory = Path::new(&path)
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty());
+        if has_directory {
+            return path;
+        }
+        let library_directories = match &self.library_directories {
+            Some(directories) => directories.clone(),
+            None => std::env::var(LIBRARY_PATH_VARIABLE)
+                .map(|value| library_directories_from(&value))
+                .unwrap_or_default(),
+        };
+        let working_directory = PathBuf::new();
+        self.program_directory
+            .iter()
+            .chain(std::iter::once(&working_directory))
+            .chain(library_directories.iter())
+            .map(|directory| directory.join(&path))
+            .find(|candidate| candidate.is_file())
+            .map_or(path, |found| found.to_string_lossy().into_owned())
+    }
+
     /// True if a library with this supplied name is installed. As in the
     /// manual, the comparison is case-sensitive and uses the text of the name.
     pub fn is_installed(&self, name: &str) -> bool {
@@ -86,15 +144,24 @@ pub fn fault_at(place: u16, path: &str, error: &BBCBasicError) -> BBCBasicError 
     BBCBasicError::BadLibrary(format!("line {} of \"{}\": {}", place, path, message))
 }
 
+/// The directories of the value of `BBCBASIC_LIB`, with `:` between the
+/// entries. An empty entry is not a directory.
+pub fn library_directories_from(value: &str) -> Vec<PathBuf> {
+    value
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// Read and tokenize each line of the library file with the supplied name.
-/// The name rule is that of LOAD: the extension `.bbas` is added when the
-/// name has none, and the name is relative to the working directory.
+/// The file is at the path that `LibraryStore::library_path` gives.
 ///
 /// A file that is not there gives File not found. A line that does not
 /// tokenize gives Bad library with its place in the file. ON ERROR can catch
 /// both, and no part of a bad file is used.
-pub fn read_library(name: &str) -> Result<Library, BBCBasicError> {
-    let path = crate::commands::resolve_program_path(name);
+pub fn read_library(name: &str, store: &LibraryStore) -> Result<Library, BBCBasicError> {
+    let path = store.library_path(name);
     let content = std::fs::read_to_string(&path).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => BBCBasicError::FileNotFound(path.clone()),
         _ => BBCBasicError::DiskError(format!("{}: {}", path, error)),

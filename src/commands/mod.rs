@@ -268,7 +268,7 @@ pub(crate) fn resolve_program_path(filename: &str) -> String {
 /// Save current program to a file (.bbas added if no extension)
 fn save_program(
     executor: &mut Executor,
-    program: &ProgramStore,
+    program: &mut ProgramStore,
     filename: &str,
 ) -> Result<(), String> {
     if program.is_empty() {
@@ -290,6 +290,8 @@ fn save_program(
             .map_err(|e| format!("Failed to write line {}: {}", line_number, e))?;
     }
 
+    // INSTALL searches the directory of this file first (issue #186)
+    program.set_file(Some(path.clone()));
     say!(executor, "Saved to {}", path);
     Ok(())
 }
@@ -312,6 +314,8 @@ fn load_program(
 
     // Replace the program and clear the variables, as NEW does. A% to Z% stay.
     *program = loaded;
+    // INSTALL searches the directory of this file first (issue #186)
+    program.set_file(Some(path.clone()));
     executor.clear_variables();
     // The handler line belongs to the old program
     executor.clear_error_handler();

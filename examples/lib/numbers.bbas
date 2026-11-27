@@ -1,0 +1,22 @@
+REM A number library for INSTALL "numbers" (issue #186)
+REM The lines have no line numbers. Each routine is a function.
+
+REM FNmin(A, B): the smaller of A and B
+DEF FNmin(A, B)
+IF B < A THEN A = B
+=A
+
+REM FNmax(A, B): the larger of A and B
+DEF FNmax(A, B)
+IF B > A THEN A = B
+=A
+
+REM FNclamp(X, L, H): X, but not less than L and not more than H
+DEF FNclamp(X, L, H) = FNmin(FNmax(X, L), H)
+
+REM FNround(X, N%): X rounded to N% decimal places. A half goes away
+REM from zero, so FNround(2.5, 0) is 3 and FNround(-2.5, 0) is -3.
+DEF FNround(X, N%)
+LOCAL F
+F = 10 ^ N%
+=SGN(X) * INT(ABS(X) * F + 0.5) / F

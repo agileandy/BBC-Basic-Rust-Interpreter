@@ -1,0 +1,42 @@
+REM A string library for INSTALL "strings" (issue #186)
+REM The lines have no line numbers. Each routine is a function.
+
+REM FNtrim$(S$): S$ with no spaces at its start and at its end
+DEF FNtrim$(S$)
+WHILE LEFT$(S$, 1) = " "
+S$ = MID$(S$, 2)
+ENDWHILE
+WHILE RIGHT$(S$, 1) = " "
+S$ = LEFT$(S$, LEN(S$) - 1)
+ENDWHILE
+=S$
+
+REM FNpadleft$(S$, N%): S$ with spaces before it, to a length of N%.
+REM A string of N% or more characters does not change.
+DEF FNpadleft$(S$, N%)
+IF LEN(S$) < N% THEN S$ = STRING$(N% - LEN(S$), " ") + S$
+=S$
+
+REM FNpadright$(S$, N%): S$ with spaces after it, to a length of N%.
+REM A string of N% or more characters does not change.
+DEF FNpadright$(S$, N%)
+IF LEN(S$) < N% THEN S$ = S$ + STRING$(N% - LEN(S$), " ")
+=S$
+
+REM FNrepeat$(S$, N%): N% copies of S$, one after the other
+DEF FNrepeat$(S$, N%) = STRING$(N%, S$)
+
+REM FNsplit(S$, D$): the handle of a new list of the parts of S$ between
+REM each D$. Two D$ with nothing between them give an empty part. An empty
+REM D$ gives a list with only S$ in it.
+DEF FNsplit(S$, D$)
+LOCAL L%, P%
+L% = NEWLIST
+IF D$ <> "" THEN P% = INSTR(S$, D$)
+WHILE P% > 0
+LISTADD L%, LEFT$(S$, P% - 1)
+S$ = MID$(S$, P% + LEN(D$))
+P% = INSTR(S$, D$)
+ENDWHILE
+LISTADD L%, S$
+=L%

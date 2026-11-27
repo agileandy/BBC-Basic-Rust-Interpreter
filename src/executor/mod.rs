@@ -524,7 +524,14 @@ struct LocalFrame {
     saved_structures: HashMap<String, Option<Option<StructureId>>>,
     /// The LOCAL structures that a DIM made for this frame. The exit removes them.
     local_structures: Vec<StructureId>,
+    /// The DATA pointers that LOCAL DATA saved in this routine. The exit
+    /// of the routine restores the first (issue #186).
+    saved_data: Vec<DataPointer>,
 }
+
+/// A DATA pointer: the line set of the DATA (0 for the program, n for
+/// library n) and the index of the next item in the DATA of that set
+type DataPointer = (usize, usize);
 
 impl LocalFrame {
     fn new() -> Self {
@@ -533,6 +540,7 @@ impl LocalFrame {
             saved_arrays: HashMap::new(),
             saved_structures: HashMap::new(),
             local_structures: Vec::new(),
+            saved_data: Vec::new(),
         }
     }
 }
@@ -692,8 +700,16 @@ pub struct Executor {
     data_values: Vec<DataValue>,
     // DATA line numbers: tracks which line each DATA value came from (parallel to data_values)
     data_line_numbers: Vec<Option<u16>>,
-    // DATA pointer: current index in data_values
+    // DATA pointer: current index in the DATA of the set `data_set`
     data_pointer: usize,
+    // The line set of the DATA pointer: 0 for the program (data_values),
+    // n for library n (issue #186)
+    data_set: usize,
+    // The DATA of each library of INSTALL, by line set: the line key and the
+    // value of each item, in file order (issue #186)
+    library_data: HashMap<usize, Vec<(u32, DataValue)>>,
+    // The DATA pointers that LOCAL DATA saved outside a routine
+    saved_data: Vec<DataPointer>,
     // Current line number being executed (for DATA tracking)
     current_line: Option<u16>,
     // Random number generator for RND function (wrapped in RefCell for interior mutability)
@@ -776,6 +792,9 @@ impl Executor {
             data_values: Vec::new(),
             data_line_numbers: Vec::new(),
             data_pointer: 0,
+            data_set: 0,
+            library_data: HashMap::new(),
+            saved_data: Vec::new(),
             current_line: None,
             rng: RefCell::new(rand::thread_rng()),
             procedures: HashMap::new(),
@@ -896,6 +915,13 @@ impl Executor {
             Statement::Read { variables } => self.execute_read(variables),
             Statement::Swap { first, second } => self.execute_swap(first, second),
             Statement::Restore { line_number } => self.execute_restore(*line_number),
+            Statement::LocalData => self.execute_local_data(),
+            Statement::RestoreData => self.execute_restore_data(),
+            // The run loop executes RESTORE +n, because it knows the line
+            Statement::RestoreRelative { .. } => Err(BBCBasicError::SyntaxError {
+                message: "RESTORE +n needs the run loop".to_string(),
+                line: None,
+            }),
             Statement::Repeat => {
                 // REPEAT is handled as control flow in main.rs
                 Ok(())
@@ -2178,6 +2204,79 @@ impl Executor {
         self.data_values.clear();
         self.data_line_numbers.clear();
         self.data_pointer = 0;
+        self.data_set = 0;
+        self.library_data.clear();
+        self.saved_data.clear();
+    }
+
+    /// Use the DATA of the library with line set `set`: the line key and
+    /// the value of each item (issue #186). If the DATA is the same as
+    /// before, the DATA pointer stays.
+    pub fn use_library_data(&mut self, set: usize, items: Vec<(u32, DataValue)>) {
+        if self.library_data.get(&set) == Some(&items) {
+            return;
+        }
+        if self.data_set == set {
+            self.data_pointer = 0;
+        }
+        self.library_data.insert(set, items);
+    }
+
+    /// The next DATA item of the set of the DATA pointer. The end of the
+    /// DATA of the set gives Out of DATA: a READ in the program does not
+    /// read the DATA of a library.
+    fn next_data_value(&mut self) -> Result<DataValue> {
+        let value = if self.data_set == 0 {
+            self.data_values.get(self.data_pointer).cloned()
+        } else {
+            self.library_data
+                .get(&self.data_set)
+                .and_then(|items| items.get(self.data_pointer))
+                .map(|(_, value)| value.clone())
+        };
+        let value = value.ok_or(BBCBasicError::OutOfData)?;
+        self.data_pointer += 1;
+        Ok(value)
+    }
+
+    /// RESTORE +n (issue #186): move the DATA pointer to the first item at
+    /// or after the line key `target` of line set `set`. With no target, or
+    /// no DATA at or after it in the set, the next READ gives Out of DATA.
+    pub fn restore_data_to(&mut self, set: usize, target: Option<u32>) {
+        let keys: Vec<u32> = if set == 0 {
+            let numbers = self.data_line_numbers.iter();
+            numbers.map(|line| line.map_or(0, u32::from)).collect()
+        } else {
+            let items = self.library_data.get(&set).map_or(&[][..], Vec::as_slice);
+            items.iter().map(|(key, _)| *key).collect()
+        };
+        self.data_set = set;
+        self.data_pointer = target
+            .and_then(|target| keys.iter().position(|&key| key >= target))
+            .unwrap_or(keys.len());
+    }
+
+    /// LOCAL DATA: save the DATA pointer. In a routine, the exit of the
+    /// routine restores it. Outside a routine, RESTORE DATA restores it.
+    /// Loops do not restore it, as the manual says they do (issue #186).
+    fn execute_local_data(&mut self) -> Result<()> {
+        let pointer = (self.data_set, self.data_pointer);
+        match self.local_stack.last_mut() {
+            Some(frame) => frame.saved_data.push(pointer),
+            None => self.saved_data.push(pointer),
+        }
+        Ok(())
+    }
+
+    /// RESTORE DATA: restore the last DATA pointer that LOCAL DATA saved.
+    /// With no saved pointer, the error is Not LOCAL.
+    fn execute_restore_data(&mut self) -> Result<()> {
+        let saved = match self.local_stack.last_mut() {
+            Some(frame) if !frame.saved_data.is_empty() => frame.saved_data.pop(),
+            _ => self.saved_data.pop(),
+        };
+        (self.data_set, self.data_pointer) = saved.ok_or(BBCBasicError::NotLocal)?;
+        Ok(())
     }
 
     /// Use the DATA values of the stored program (before a typed line). If
@@ -2190,6 +2289,7 @@ impl Executor {
         self.data_values = values;
         self.data_line_numbers = line_numbers;
         self.data_pointer = 0;
+        self.data_set = 0;
     }
 
     /// Execute READ statement - reads data into variables and array elements.
@@ -2209,14 +2309,7 @@ impl Executor {
                 }
             };
             let member_indices = self.check_member_target(target)?;
-            // Check if we've run out of data
-            if self.data_pointer >= self.data_values.len() {
-                return Err(BBCBasicError::OutOfData);
-            }
-
-            // Get next data value
-            let data_value = &self.data_values[self.data_pointer];
-            self.data_pointer += 1;
+            let data_value = &self.next_data_value()?;
 
             // Convert the value to the type of the target
             let value = if var_name.ends_with('%') {
@@ -2325,6 +2418,8 @@ impl Executor {
 
     /// Execute RESTORE statement - resets data pointer
     fn execute_restore(&mut self, line_number: Option<u16>) -> Result<()> {
+        // RESTORE and RESTORE n go to the DATA of the program (issue #186)
+        self.data_set = 0;
         if let Some(target_line) = line_number {
             // Find the first DATA value at or after the target line
             for (i, data_line) in self.data_line_numbers.iter().enumerate() {
@@ -2363,6 +2458,8 @@ impl Executor {
         self.clear_control_stacks();
         self.local_stack.clear();
         self.data_pointer = 0;
+        self.data_set = 0;
+        self.saved_data.clear();
     }
 
     /// The LVAR text: one line for each scalar variable, then one line for
@@ -4622,6 +4719,11 @@ impl Executor {
         }
         self.restore_structures(frame.saved_structures, frame.local_structures);
 
+        // The DATA pointer of the first LOCAL DATA of the routine (issue #186)
+        if let Some(&pointer) = frame.saved_data.first() {
+            (self.data_set, self.data_pointer) = pointer;
+        }
+
         Ok(())
     }
 
@@ -4718,6 +4820,7 @@ impl Executor {
     /// single-line function of the old program must not stay.
     pub fn clear_libraries_and_routines(&mut self) {
         self.libraries.clear();
+        self.library_data.clear();
         self.clear_procedures();
         self.clear_functions();
     }

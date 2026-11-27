@@ -24,6 +24,8 @@ build/
 
 # Scratch programs (keep example programs in examples/)
 *.bbas
+# The example libraries of INSTALL (issue #186)
+!examples/lib/*.bbas
 
 # Debug / profiling
 *.flamegraph

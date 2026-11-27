@@ -327,6 +327,13 @@ pub enum Statement {
     Swap { first: InputItem, second: InputItem },
     /// RESTORE statement - resets data pointer (optionally to specific line)
     Restore { line_number: Option<u16> },
+    /// `RESTORE +n`: the DATA of the line n lines after the RESTORE line,
+    /// in its own line set (issue #186, bbcwin7.html#restore)
+    RestoreRelative { offset: Expression },
+    /// `RESTORE DATA`: the DATA pointer that LOCAL DATA saved (issue #186)
+    RestoreData,
+    /// `LOCAL DATA`: save the DATA pointer (issue #186, bbcwin5.html#localdata)
+    LocalData,
     /// REPEAT statement - starts a REPEAT...UNTIL loop
     Repeat,
     /// UNTIL statement - ends a REPEAT...UNTIL loop
@@ -2880,6 +2887,15 @@ fn parse_swap_target(tokens: &[Token], line_number: Option<u16>) -> Result<Input
 /// Parse RESTORE statement
 /// Supports: RESTORE [line_number]
 fn parse_restore_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    match tokens {
+        [Token::Keyword(0xDC)] => return Ok(Statement::RestoreData),
+        [Token::Operator('+'), offset @ ..] if !offset.is_empty() => {
+            return Ok(Statement::RestoreRelative {
+                offset: parse_expression(offset)?,
+            })
+        }
+        _ => {}
+    }
     if tokens.is_empty() {
         // RESTORE with no line number - reset to beginning
         Ok(Statement::Restore { line_number: None })
@@ -3215,6 +3231,9 @@ fn parse_proc_call(tokens: &[Token], line_number: Option<u16>) -> Result<Stateme
 
 /// Parse LOCAL statement: LOCAL var1, var2, var3
 fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if let [Token::Keyword(0xDC)] = tokens {
+        return Ok(Statement::LocalData);
+    }
     let mut variables = Vec::new();
     let mut pos = 0;
 
