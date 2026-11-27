@@ -49,6 +49,8 @@ pub mod error {
         DivisionByZero,
         StringTooLong,
         TooBig,
+        // ON GOTO or ON GOSUB index out of range, with no ELSE
+        OnRange,
 
         // Variable and array errors
         NoSuchVariable(String),
@@ -89,6 +91,7 @@ pub mod error {
                 BBCBasicError::DivisionByZero => write!(f, "Division by zero"),
                 BBCBasicError::StringTooLong => write!(f, "String too long"),
                 BBCBasicError::TooBig => write!(f, "Too big"),
+                BBCBasicError::OnRange => write!(f, "ON range"),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
                 BBCBasicError::ArrayNotDimensioned(name) => {
                     write!(f, "Array not dimensioned: {}", name)
