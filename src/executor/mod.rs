@@ -849,6 +849,12 @@ impl Executor {
             {
                 self.call_function(name, args, Self::format_function_result)
             }
+            // The type of an EVAL result is known only after the parse of its
+            // text. Parse the text one time and format the result by its type.
+            Expression::FunctionCall { name, args } if name == "EVAL" => {
+                let parsed = self.parse_eval_text(args)?;
+                self.format_expression(&parsed)
+            }
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
             // function, also for a string function such as FNx$.
@@ -2118,7 +2124,7 @@ impl Executor {
                 }
                 match name.as_str() {
                     "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP"
-                    | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "VAL" => true,
+                    | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "VAL" | "EVAL" => true,
                     // RND with no bracket gives an integer
                     "RND" => !args.is_empty(),
                     "ABS" => args.first().is_some_and(|arg| self.is_real_expr(arg)),
@@ -2129,6 +2135,11 @@ impl Executor {
     }
 
     /// Tell if an expression gives a string value.
+    ///
+    /// EVAL is "not a string" here, because its text is a run-time value. A
+    /// target or PRINT gives the type of an EVAL call. In an operation, the
+    /// other operand gives the type: `EVAL(A$) + "x"` is a string, but
+    /// `EVAL(A$) + EVAL(B$)` is a number (a known limit, issue 147).
     fn is_string_expr(&self, expr: &Expression) -> bool {
         self.is_string_expr_guarded(expr, &mut Vec::new())
     }
@@ -2321,6 +2332,20 @@ impl Executor {
     }
 
     /// Evaluate a function call returning an integer
+    /// Tokenize and parse the text argument of EVAL as one expression. The
+    /// text is parsed each time, with no cache (issue 147).
+    fn parse_eval_text(&mut self, args: &[Expression]) -> Result<Expression> {
+        let [text] = args else {
+            return Err(BBCBasicError::SyntaxError {
+                message: "EVAL requires 1 argument".to_string(),
+                line: None,
+            });
+        };
+        let text = self.eval_string(text)?;
+        let tokens = crate::tokenizer::tokenize_expression(&text)?;
+        crate::parser::parse_expression(&tokens)
+    }
+
     fn eval_function_int(&mut self, name: &str, args: &[Expression]) -> Result<i32> {
         // Check if this is a user-defined function first
         if self.functions.contains_key(name) {
@@ -2329,6 +2354,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
+            "EVAL" => {
+                let parsed = self.parse_eval_text(args)?;
+                if self.is_string_expr(&parsed) {
+                    return Err(BBCBasicError::TypeMismatch);
+                }
+                self.eval_integer(&parsed)
+            }
             "ABS" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -2604,6 +2636,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
+            "EVAL" => {
+                let parsed = self.parse_eval_text(args)?;
+                if self.is_string_expr(&parsed) {
+                    return Err(BBCBasicError::TypeMismatch);
+                }
+                self.eval_real(&parsed)
+            }
             "SIN" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -2830,6 +2869,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
+            "EVAL" => {
+                let parsed = self.parse_eval_text(args)?;
+                if !self.is_string_expr(&parsed) {
+                    return Err(BBCBasicError::TypeMismatch);
+                }
+                self.eval_string(&parsed)
+            }
             // GET$ waits for one key and gives it. At the end of input it gives "".
             "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
             // INKEY$(n) waits for a maximum of n centiseconds for a key and

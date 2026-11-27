@@ -95,6 +95,18 @@ fn ends_with_value(tokens: &[Token]) -> bool {
 
 /// Tokenize a BBC BASIC source line
 pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
+    tokenize_text(source_line, true)
+}
+
+/// Tokenize the text of one expression, such as the argument of EVAL.
+/// Leading digits are a number, not a line number (issue 147).
+pub fn tokenize_expression(text: &str) -> Result<Vec<Token>> {
+    tokenize_text(text, false).map(|line| line.tokens)
+}
+
+/// Tokenize a text. If `line_numbers` is false, leading digits are not a
+/// line number.
+fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine> {
     let mut tokens = Vec::new();
     let mut line_number = None;
     let (keyword_map, extended_map) = create_keyword_maps();
@@ -108,7 +120,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
     let mut chars = line.chars().peekable();
 
     // Check for line number at the start (only if followed by whitespace and a keyword/identifier)
-    if let Some(&ch) = chars.peek() {
+    if let Some(&ch) = chars.peek().filter(|_| line_numbers) {
         if ch.is_ascii_digit() {
             // Peek ahead to check if this looks like a line number
             let mut temp_chars = chars.clone();
