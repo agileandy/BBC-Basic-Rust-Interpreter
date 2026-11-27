@@ -6,6 +6,10 @@
 use crate::error::{BBCBasicError, Result};
 use std::collections::HashMap;
 
+/// The maximum length of a string, the limit of BBC BASIC for Windows.
+/// A longer string gives String too long (issue #102).
+pub const MAX_STRING_LENGTH: usize = 65535;
+
 /// Variable types supported by BBC BASIC
 #[derive(Debug, Clone, PartialEq)]
 pub enum VarType {
@@ -21,7 +25,7 @@ pub enum Variable {
     Integer(i32),
     /// IEEE 754 double precision real (A, B, etc.)
     Real(f64),
-    /// String up to 255 characters (A$, B$, etc.)
+    /// String up to `MAX_STRING_LENGTH` characters (A$, B$, etc.)
     String(String),
     /// Multi-dimensional integer array
     IntegerArray {
@@ -178,7 +182,7 @@ impl VariableStore {
 
     /// Set a string variable
     pub fn set_string_var(&mut self, name: String, value: String) -> Result<()> {
-        if value.len() > 255 {
+        if value.len() > MAX_STRING_LENGTH {
             return Err(BBCBasicError::StringTooLong);
         }
         self.variables.insert(name, Variable::String(value));
@@ -298,6 +302,11 @@ impl VariableStore {
     /// Check if a variable exists
     pub fn has_variable(&self, name: &str) -> bool {
         self.variables.contains_key(name)
+    }
+
+    /// Check if an array of this name exists, with or without dimensions
+    pub fn has_array(&self, name: &str) -> bool {
+        self.arrays.contains_key(name)
     }
 
     /// Put back a saved scalar variable as it was
@@ -441,7 +450,7 @@ mod tests {
     #[test]
     fn test_string_too_long() {
         let mut store = VariableStore::new();
-        let long_string = "a".repeat(256);
+        let long_string = "a".repeat(MAX_STRING_LENGTH + 1);
 
         let result = store.set_string_var("A$".to_string(), long_string);
         assert!(matches!(result, Err(BBCBasicError::StringTooLong)));
@@ -495,8 +504,8 @@ mod tests {
     #[test]
     fn prop_string_variable_storage_roundtrip() {
         fn property(value: String) -> TestResult {
-            // Only test strings that are within BBC BASIC limits (255 characters)
-            if value.len() > 255 {
+            // Only test strings that are within the string limit
+            if value.len() > MAX_STRING_LENGTH {
                 return TestResult::discard();
             }
 

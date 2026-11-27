@@ -61,10 +61,10 @@ fn test_string_with_zero_count_is_empty() {
 }
 
 #[test]
-fn test_string_longer_than_255_characters_gives_string_too_long() {
+fn test_string_longer_than_65535_characters_gives_string_too_long() {
     let (result, output) = run_with_limit(&[
         "10 ON ERROR GOTO 100",
-        "20 PRINT STRING$(128, \"AB\")",
+        "20 PRINT STRING$(32768, \"AB\")",
         "30 END",
         "100 PRINT ERR",
     ]);

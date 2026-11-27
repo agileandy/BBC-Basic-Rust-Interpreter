@@ -1022,6 +1022,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::BadProgram => 254,
         BBCBasicError::IllegalFunction => 31,
         BBCBasicError::BadMode => 25,
+        // Not a BBC BASIC error: BBC BASIC does not use 150 (issue #102)
+        BBCBasicError::BadJson(_) => 150,
         _ => 255,
     }
 }

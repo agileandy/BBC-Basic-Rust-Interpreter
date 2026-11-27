@@ -551,6 +551,11 @@ impl Executor {
                 let position = self.eval_integer(position)?;
                 self.set_ptr(handle, position)
             }
+            Statement::SaveJson { file, json } => {
+                let file = self.eval_string(file)?;
+                let json = self.eval_string(json)?;
+                Ok(crate::json::save_file(&file, &json)?)
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -1613,6 +1618,10 @@ impl Executor {
                     }
                 }
             }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONVALID") => {
+                let text = self.eval_json_argument(name, indices)?;
+                Ok(if crate::json::is_valid(&text) { -1 } else { 0 })
+            }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
                 // Evaluate all indices to integers
@@ -1794,6 +1803,9 @@ impl Executor {
                     }
                 }
             }
+            Expression::ArrayAccess { name, .. } if self.is_json_call(name, "JSONVALID") => {
+                self.eval_integer(expr).map(f64::from)
+            }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
                 // Evaluate all indices to integers
@@ -1956,6 +1968,14 @@ impl Executor {
                 .get_string_var(name)
                 .map(|s| s.to_string())
                 .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone())),
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "LOADJSON$") => {
+                let file = self.eval_json_argument(name, indices)?;
+                let text = crate::json::load_file(&file)?;
+                if text.len() > crate::variables::MAX_STRING_LENGTH {
+                    return Err(BBCBasicError::StringTooLong);
+                }
+                Ok(text)
+            }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
                 // Evaluate all indices to integers
@@ -2628,6 +2648,24 @@ impl Executor {
         }
     }
 
+    /// Tell if `name(...)` is a call of the JSON function `function`. The
+    /// parser gives `name(...)` as an array access. An array of the same
+    /// name in the program has priority, so that old programs do not change.
+    fn is_json_call(&self, name: &str, function: &str) -> bool {
+        name == function && !self.variables.has_array(name)
+    }
+
+    /// Evaluate the one text argument of a JSON function.
+    fn eval_json_argument(&mut self, name: &str, args: &[Expression]) -> Result<String> {
+        match args {
+            [arg] => self.eval_string(arg),
+            _ => Err(BBCBasicError::SyntaxError {
+                message: format!("{} requires 1 argument", name),
+                line: None,
+            }),
+        }
+    }
+
     /// Evaluate a non-standard extension string function
     ///
     /// These functions are NOT part of the original BBC BASIC specification
@@ -2676,10 +2714,10 @@ impl Executor {
 
                 // STRING$(n, string) repeats the full string n times. A count
                 // below 0 or an empty string gives an empty string. A result
-                // longer than the 255 characters of BBC BASIC gives an error
-                // before the string is made.
+                // longer than the string limit gives an error before the
+                // string is made.
                 let count = i64::from(count.max(0));
-                if count * s.chars().count() as i64 > 255 {
+                if count * s.chars().count() as i64 > crate::variables::MAX_STRING_LENGTH as i64 {
                     return Err(BBCBasicError::StringTooLong);
                 }
                 Ok(s.repeat(count as usize))
