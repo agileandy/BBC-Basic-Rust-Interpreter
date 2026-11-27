@@ -5,7 +5,7 @@
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
-use crate::parser::{DataValue, Expression, Statement};
+use crate::parser::{DataValue, Expression, InputItem, Statement};
 use crate::program::Position;
 use crate::variables::{Variable, VariableStore};
 use rand::Rng;
@@ -353,8 +353,8 @@ impl Executor {
                 step,
             } => self.execute_for(variable, start, end, step.as_ref()),
             Statement::Next { variables } => self.execute_next(variables),
-            Statement::Input { variables } => self.execute_input(variables),
-            Statement::InputLine { variables } => self.execute_input_line(variables),
+            Statement::Input { items } => self.execute_input(items),
+            Statement::InputLine { items } => self.execute_input_line(items),
             Statement::Dim { arrays } => self.execute_dim(arrays),
             Statement::If {
                 condition,
@@ -772,11 +772,34 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute INPUT statement
-    fn execute_input(&mut self, variables: &[String]) -> Result<()> {
-        for var in variables {
-            let reply = self.next_input_reply();
-            let reply = reply.trim();
+    /// Execute INPUT statement. A prompt text shows as it is. A variable that
+    /// reads a new reply line shows `?`, but not directly after a prompt text
+    /// with no comma or semicolon. One reply line can give values to more than
+    /// one variable, with a comma between the values. Extra values are ignored.
+    fn execute_input(&mut self, items: &[InputItem]) -> Result<()> {
+        // The values that remain from the last reply line
+        let mut values: VecDeque<String> = VecDeque::new();
+        let mut question_mark = true;
+
+        for item in items {
+            let var = match item {
+                InputItem::Prompt {
+                    text,
+                    question_mark: shows,
+                } => {
+                    self.print_output(text);
+                    question_mark = *shows;
+                    continue;
+                }
+                InputItem::Variable(var) => var,
+            };
+            if values.is_empty() {
+                let reply = self.read_input_reply(question_mark);
+                values = reply.split(',').map(str::to_string).collect();
+            }
+            question_mark = true;
+            let value = values.pop_front().unwrap_or_default();
+            let reply = value.trim();
 
             // A reply that is not a number gives 0, as on a BBC Micro
             if var.ends_with('%') {
@@ -795,12 +818,27 @@ impl Executor {
 
     /// Execute INPUT LINE statement. Each string variable gets one full reply.
     /// Only the line end is removed. A numeric variable gives a type mismatch.
-    fn execute_input_line(&mut self, variables: &[String]) -> Result<()> {
-        for var in variables {
+    /// The prompt texts and `?` follow the rules of INPUT.
+    fn execute_input_line(&mut self, items: &[InputItem]) -> Result<()> {
+        let mut question_mark = true;
+
+        for item in items {
+            let var = match item {
+                InputItem::Prompt {
+                    text,
+                    question_mark: shows,
+                } => {
+                    self.print_output(text);
+                    question_mark = *shows;
+                    continue;
+                }
+                InputItem::Variable(var) => var,
+            };
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
             }
-            let reply = self.next_input_reply();
+            let reply = self.read_input_reply(question_mark);
+            question_mark = true;
             let reply = reply
                 .strip_suffix('\n')
                 .map(|r| r.strip_suffix('\r').unwrap_or(r))
@@ -809,6 +847,14 @@ impl Executor {
                 .set_string_var(var.clone(), reply.to_string())?;
         }
         Ok(())
+    }
+
+    /// Show `?` if `question_mark` is true, then read the next reply line
+    fn read_input_reply(&mut self, question_mark: bool) -> String {
+        if question_mark {
+            self.print_output("?");
+        }
+        self.next_input_reply()
     }
 
     /// Take the next INPUT reply from the queue. If the queue is empty, read stdin.
@@ -825,7 +871,6 @@ impl Executor {
         {
             use std::io;
 
-            print!("? ");
             let _ = io::stdout().flush();
 
             let mut input = String::new();
@@ -3529,7 +3574,10 @@ mod tests {
         // RED: Test INPUT A%, B$, C
         let mut executor = Executor::new();
         let stmt = Statement::Input {
-            variables: vec!["A%".to_string(), "B$".to_string(), "C".to_string()],
+            items: ["A%", "B$", "C"]
+                .iter()
+                .map(|name| InputItem::Variable(name.to_string()))
+                .collect(),
         };
 
         // In test mode, INPUT initializes variables to default values

@@ -28,7 +28,7 @@ fn test_input_line_keeps_commas_and_spaces() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "[  Hello, World,  \"quoted\" , end  ]\n");
+    assert_eq!(output, "?[  Hello, World,  \"quoted\" , end  ]\n");
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn test_input_line_removes_only_the_line_end() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "[ a, b ]\n");
+    assert_eq!(output, "?[ a, b ]\n");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_input_line_empty_reply_gives_empty_string() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "[]\n");
+    assert_eq!(output, "?[]\n");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_input_line_reads_one_line_for_each_variable() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "one, two\nthree\n");
+    assert_eq!(output, "??one, two\nthree\n");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_plain_input_still_trims_the_reply() {
         run_with_replies(&["10 INPUT A$", "20 PRINT \"[\";A$;\"]\""], &["  Hello  "]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "[Hello]\n");
+    assert_eq!(output, "?[Hello]\n");
 }
 
 #[test]
