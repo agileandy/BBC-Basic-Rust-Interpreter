@@ -134,6 +134,12 @@ fn main() {
             continue;
         }
 
+        // RENUMBER [start[, step]]
+        if let Some(arguments) = renumber_arguments(input) {
+            renumber_program(&mut program, arguments);
+            continue;
+        }
+
         // *CAT command (catalog files)
         if let Some(directory) = cat_directory(input) {
             if let Err(e) = catalog_files(directory) {
@@ -321,6 +327,45 @@ fn delete_command(input: &str) -> Option<Result<(u16, u16), String>> {
     })
 }
 
+/// Match `RENUMBER`, `RENUMBER start` or `RENUMBER start, step` (any case).
+/// Return the start and the step (default 10 and 10), or an error for bad arguments.
+fn renumber_arguments(input: &str) -> Option<Result<(u16, u16), String>> {
+    if !input.get(..8)?.eq_ignore_ascii_case("renumber") {
+        return None;
+    }
+    let rest = &input[8..];
+    if !rest.is_empty() && !rest.starts_with(|c: char| c.is_whitespace() || c.is_ascii_digit()) {
+        return None;
+    }
+    let parts: Vec<&str> = rest.split(',').map(str::trim).collect();
+    if parts.len() > 2 || (parts.len() == 2 && parts.contains(&"")) {
+        return Some(Err("Syntax error".to_string()));
+    }
+    let mut numbers = [10, 10];
+    for (number, part) in numbers.iter_mut().zip(&parts) {
+        if !part.is_empty() {
+            match part.parse() {
+                Ok(value) => *number = value,
+                Err(_) => return Some(Err("Syntax error".to_string())),
+            }
+        }
+    }
+    Some(Ok((numbers[0], numbers[1])))
+}
+
+/// Renumber the program. Print `Failed at <line>` for each line with a jump
+/// to a line that does not exist.
+fn renumber_program(program: &mut ProgramStore, arguments: Result<(u16, u16), String>) {
+    match arguments.and_then(|(start, step)| program.renumber(start, step)) {
+        Ok(failed) => {
+            for line in failed {
+                println!("Failed at {}", line);
+            }
+        }
+        Err(e) => println!("Error: {}", e),
+    }
+}
+
 /// Match `*CAT` or `*CAT <directory>` (any case). Return the directory, or "" for none.
 fn cat_directory(input: &str) -> Option<&str> {
     let input = input.trim();
@@ -422,6 +467,7 @@ fn print_help() {
     println!("  RUN                      - Run the stored program");
     println!("  NEW                      - Clear the program");
     println!("  DELETE 20, 40            - Delete lines 20 to 40");
+    println!("  RENUMBER [start[,step]]  - Renumber the lines (default 10,10)");
     println!("  SAVE \"filename\"          - Save program to filename.bbas");
     println!("  LOAD \"filename\"          - Load program from filename.bbas");
     println!("  CHAIN \"filename\"         - Load and run program");

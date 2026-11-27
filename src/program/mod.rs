@@ -2,6 +2,8 @@
 //!
 //! Manages BBC BASIC program lines in tokenized format with automatic sorting.
 
+mod renumber;
+
 use crate::tokenizer::{Token, TokenizedLine};
 use std::collections::BTreeMap;
 
