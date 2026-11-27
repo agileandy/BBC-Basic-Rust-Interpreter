@@ -88,10 +88,7 @@ corpus!(file_write_read);
 corpus!(file_input_array);
 corpus!(graphics_points);
 corpus!(tab_columns);
-corpus!(
-    #[ignore = "defect F1: @% is not a variable, so a program cannot set the number format"]
-    at_percent_format
-);
+corpus!(at_percent_format);
 corpus!(nested_for_step);
 corpus!(gosub_table);
 corpus!(if_else_multi);

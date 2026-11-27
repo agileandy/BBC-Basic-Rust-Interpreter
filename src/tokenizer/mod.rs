@@ -193,10 +193,11 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 // Check if what follows looks like a statement (keyword or identifier, not
                 // operator). A `=expr` line ends a multi-line function. A
                 // `?addr=v` or `!addr=v` line writes to memory. A `'` line
-                // is a comment (issue 159).
+                // is a comment (issue 159). A `@%=v` line sets the print
+                // format (issue 166).
                 let next_is_statement = temp_chars
                     .peek()
-                    .map(|c| c.is_alphabetic() || matches!(c, '_' | '=' | '?' | '!' | '\''))
+                    .map(|c| c.is_alphabetic() || matches!(c, '_' | '=' | '?' | '!' | '\'' | '@'))
                     .unwrap_or(false);
 
                 if next_is_statement {
@@ -368,6 +369,18 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
             let value = u32::from_str_radix(&hex, 16).map_err(|_| BBCBasicError::TooBig)?;
             tokens.push(Token::HexInteger(value as i32));
             continue;
+        }
+
+        // @% is the print format variable (issue 166). No other name starts with @.
+        if ch == '@' {
+            let mut lookahead = chars.clone();
+            lookahead.next();
+            if lookahead.peek() == Some(&'%') {
+                chars.next(); // consume the '@'
+                chars.next(); // consume the '%'
+                tokens.push(Token::Identifier("@%".to_string()));
+                continue;
+            }
         }
 
         // Keywords and identifiers
