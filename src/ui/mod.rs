@@ -148,7 +148,7 @@ impl App {
             quit: false,
             editor: editor::EditorPane::new(&document),
             run: run::RunPane::default(),
-            files: files::FilesPane::default(),
+            files: files::FilesPane::new(document.file_name()),
             context: Context {
                 document,
                 program: ProgramStore::new(),
@@ -211,6 +211,9 @@ impl App {
         if mode == Mode::Edit {
             self.editor.resume(&self.context);
         }
+        if mode == Mode::Files {
+            self.files.focus(&mut self.context);
+        }
         self.mode = mode;
     }
 
@@ -244,9 +247,11 @@ impl App {
             }
             KeyCode::Tab => self.set_mode(self.mode.next()),
             _ if is_quit => self.ask_to_quit(),
-            _ if ['r', 's', 'o'].iter().any(|&c| is_ctrl(key, c)) => {
+            _ if is_ctrl(key, 'r') => {
                 self.context.message = NOT_AVAILABLE.to_string();
             }
+            _ if is_ctrl(key, 's') => self.save(),
+            _ if is_ctrl(key, 'o') => self.set_mode(Mode::Files),
             _ => {
                 let ctx = &mut self.context;
                 let _ = match self.mode {
@@ -254,7 +259,37 @@ impl App {
                     Mode::Run => self.run.key(key, ctx),
                     Mode::Files => self.files.key(key, ctx),
                 };
+                self.files_request();
             }
+        }
+    }
+
+    /// Ctrl-S: save under the name of today, or ask for a name in the files
+    /// mode, and then go back to this mode.
+    fn save(&mut self) {
+        match self.context.document.file_name() {
+            Some(name) => {
+                let path = std::path::PathBuf::from(name);
+                files::save_document(&path, &mut self.context);
+            }
+            None => {
+                let back_to = self.mode;
+                self.set_mode(Mode::Files);
+                self.files.start_save_as(&self.context, Some(back_to));
+            }
+        }
+    }
+
+    /// Do what the files pane asks after a key: show an opened program in
+    /// the editor, or go back to the mode of before a save.
+    fn files_request(&mut self) {
+        match self.files.take_request() {
+            Some(files::Request::Opened) => {
+                self.editor = editor::EditorPane::new(&self.context.document);
+                self.set_mode(Mode::Edit);
+            }
+            Some(files::Request::Show(mode)) => self.set_mode(mode),
+            None => {}
         }
     }
 

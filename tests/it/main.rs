@@ -161,3 +161,4 @@ mod issue_181_str_of_large_number;
 mod issue_179_rem_text_as_typed;
 mod issue_170_ide_edit_mode;
 mod issue_182_plot_colour_actions;
+mod issue_172_ide_files_mode;

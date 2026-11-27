@@ -102,8 +102,9 @@ fn each_mode_shows_its_placeholder_pane() {
     assert!(screen_text(&draw(&app, 80, 24)).contains("Ln 1 Col 1"));
     app.key(press(KeyCode::Tab));
     assert!(screen_text(&draw(&app, 80, 24)).contains("RUN mode"));
+    // Issue #172 gives the files mode the file list.
     app.key(press(KeyCode::Tab));
-    assert!(screen_text(&draw(&app, 80, 24)).contains("FILES mode"));
+    assert!(screen_text(&draw(&app, 80, 24)).contains("Enter open"));
 }
 
 #[test]
@@ -220,15 +221,14 @@ fn changed_mark_shows_in_the_status_line() {
 }
 
 #[test]
-fn ctrl_r_ctrl_s_and_ctrl_o_are_not_available_yet() {
-    for letter in ['r', 's', 'o'] {
-        let mut app = App::new(None);
-        app.key(ctrl(letter));
-        assert_eq!(app.message(), "not available yet");
-        assert!(!app.should_quit());
-        let status = row_text(&draw(&app, 80, 24), 23);
-        assert!(status.contains("not available yet"), "{status:?}");
-    }
+fn ctrl_r_is_not_available_yet() {
+    // Issue #172 gives Ctrl-S and Ctrl-O their action.
+    let mut app = App::new(None);
+    app.key(ctrl('r'));
+    assert_eq!(app.message(), "not available yet");
+    assert!(!app.should_quit());
+    let status = row_text(&draw(&app, 80, 24), 23);
+    assert!(status.contains("not available yet"), "{status:?}");
 }
 
 /// Run the binary with the arguments and the input on a pipe. Give the exit
