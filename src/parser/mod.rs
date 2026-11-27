@@ -282,6 +282,10 @@ pub enum Statement {
     /// READ statement - reads data into variables and array elements. A
     /// target is never an `InputItem::Prompt`.
     Read { variables: Vec<InputItem> },
+    /// SWAP statement - exchange the values of 2 variables or array
+    /// elements (BBC BASIC V, issue #162). A target is never an
+    /// `InputItem::Prompt`.
+    Swap { first: InputItem, second: InputItem },
     /// RESTORE statement - resets data pointer (optionally to specific line)
     Restore { line_number: Option<u16> },
     /// REPEAT statement - starts a REPEAT...UNTIL loop
@@ -1074,6 +1078,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x9D => parse_ellipse_statement(&tokens[1..], line.line_number),
             // QUIT statement
             0x98 => Ok(Statement::Quit),
+            // SWAP statement
+            0x94 => parse_swap_statement(&tokens[1..], line.line_number),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown extended statement: {}", tokens_text(&tokens[..1])),
                 line: line.line_number,
@@ -2629,6 +2635,40 @@ fn parse_read_target(tokens: &[Token], line_number: Option<u16>) -> Result<Input
             message: "Expected variable name in READ".to_string(),
             line: line_number,
         }),
+    }
+}
+
+/// Parse SWAP statement (issue #162)
+/// Supports: SWAP A, B and SWAP A(I), A(J). The 2 targets have the form of
+/// a READ target. A whole array, `A()`, gives a syntax error.
+fn parse_swap_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let parts = split_at_commas(tokens);
+    let [first, second] = parts.as_slice() else {
+        return Err(BBCBasicError::SyntaxError {
+            message: "SWAP requires 2 variables".to_string(),
+            line: line_number,
+        });
+    };
+    Ok(Statement::Swap {
+        first: parse_swap_target(first, line_number)?,
+        second: parse_swap_target(second, line_number)?,
+    })
+}
+
+/// Parse one SWAP target: a variable, or an array element with one index or
+/// more. Another form gives a syntax error.
+fn parse_swap_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
+    let is_variable = matches!(tokens, [Token::Identifier(_)]);
+    let is_element = matches!(tokens, [Token::Identifier(_), Token::Separator('('), ..])
+        && tokens.len() > 3
+        && find_closing_bracket(tokens, 1) == Some(tokens.len() - 1);
+    if is_variable || is_element {
+        parse_read_target(tokens, line_number)
+    } else {
+        Err(BBCBasicError::SyntaxError {
+            message: "Expected variable name in SWAP".to_string(),
+            line: line_number,
+        })
     }
 }
 

@@ -58,6 +58,23 @@ fn is_negative_integer_constant(expr: &Expression) -> bool {
     }
 }
 
+/// The name of a SWAP target and, for an array element, its index values
+type SwapLocation<'a> = (&'a str, Option<Vec<usize>>);
+
+/// Convert a value to the type of the variable `name`. A number and a
+/// string give "Type mismatch". A real that does not fit in an integer gives
+/// "Too big".
+fn convert_to_type_of(name: &str, value: Variable) -> Result<Variable> {
+    match (name.ends_with('$'), name.ends_with('%'), value) {
+        (true, _, Variable::String(text)) => Ok(Variable::String(text)),
+        (false, true, Variable::Integer(number)) => Ok(Variable::Integer(number)),
+        (false, true, Variable::Real(number)) => real_to_integer(number).map(Variable::Integer),
+        (false, false, Variable::Integer(number)) => Ok(Variable::Real(f64::from(number))),
+        (false, false, Variable::Real(number)) => Ok(Variable::Real(number)),
+        _ => Err(BBCBasicError::TypeMismatch),
+    }
+}
+
 /// The error of a list function with the wrong count of arguments (issue #139).
 fn list_arguments_error(name: &str, count: usize) -> BBCBasicError {
     BBCBasicError::SyntaxError {
@@ -578,6 +595,7 @@ impl Executor {
             } => self.execute_if(condition, then_part, else_part.as_ref()),
             Statement::Data { values } => self.execute_data(values),
             Statement::Read { variables } => self.execute_read(variables),
+            Statement::Swap { first, second } => self.execute_swap(first, second),
             Statement::Restore { line_number } => self.execute_restore(*line_number),
             Statement::Repeat => {
                 // REPEAT is handled as control flow in main.rs
@@ -1635,6 +1653,72 @@ impl Executor {
             self.store_input_value(var_name, indices, value)?;
         }
         Ok(())
+    }
+
+    /// Execute SWAP (issue #162). The indices of the 2 targets are evaluated
+    /// one time, before the exchange. The 2 values are read and converted
+    /// before a target changes, so an error changes no target.
+    fn execute_swap(&mut self, first: &InputItem, second: &InputItem) -> Result<()> {
+        let first = self.swap_location(first)?;
+        let second = self.swap_location(second)?;
+        let first_value = self.swap_value(&first)?;
+        let second_value = self.swap_value(&second)?;
+        let new_first = convert_to_type_of(first.0, second_value)?;
+        let new_second = convert_to_type_of(second.0, first_value)?;
+        self.store_swap_value(&first, new_first)?;
+        self.store_swap_value(&second, new_second)
+    }
+
+    /// The name of a SWAP target and, for an array element, its index values
+    fn swap_location<'a>(&mut self, target: &'a InputItem) -> Result<SwapLocation<'a>> {
+        match target {
+            InputItem::Variable(name) => Ok((name, None)),
+            InputItem::ArrayElement { name, indices } => {
+                let mut index_values = Vec::with_capacity(indices.len());
+                for index_expr in indices {
+                    let idx = self.eval_integer(index_expr)?;
+                    if idx < 0 {
+                        return Err(BBCBasicError::SubscriptOutOfRange);
+                    }
+                    index_values.push(idx as usize);
+                }
+                Ok((name, Some(index_values)))
+            }
+            // The parser gives no prompt text in SWAP
+            InputItem::Prompt { .. } => Err(BBCBasicError::SyntaxError {
+                message: "Expected variable name in SWAP".to_string(),
+                line: None,
+            }),
+        }
+    }
+
+    /// The value of a SWAP target. A variable that does not exist gives
+    /// "No such variable".
+    fn swap_value(&self, (name, indices): &SwapLocation) -> Result<Variable> {
+        if let Some(indices) = indices {
+            return self.variables.get_array_element(name, indices);
+        }
+        let value = if name.ends_with('$') {
+            self.variables
+                .get_string_var(name)
+                .map(|value| Variable::String(value.to_string()))
+        } else if name.ends_with('%') {
+            self.variables.get_integer_var(name).map(Variable::Integer)
+        } else {
+            self.variables
+                .get_real_var(name)
+                .map(Variable::Real)
+                .or_else(|| self.variables.get_integer_var(name).map(Variable::Integer))
+        };
+        value.ok_or_else(|| BBCBasicError::NoSuchVariable(name.to_string()))
+    }
+
+    /// Store a converted value in a SWAP target
+    fn store_swap_value(&mut self, (name, indices): &SwapLocation, value: Variable) -> Result<()> {
+        match indices {
+            Some(indices) => self.variables.set_array_element(name, indices, value),
+            None => self.store_input_value(name, None, value),
+        }
     }
 
     /// Execute RESTORE statement - resets data pointer
