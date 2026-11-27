@@ -503,6 +503,14 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         return Ok(Statement::Empty);
     }
 
+    // END, STOP, CLS and CLEAR take no argument
+    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8), unexpected, ..] = tokens.as_slice() {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("Unexpected {:?} after statement", unexpected),
+            line: line.line_number,
+        });
+    }
+
     // Check first token to determine statement type
     match &tokens[0] {
         // PRINT statement

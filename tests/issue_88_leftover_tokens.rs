@@ -163,3 +163,33 @@ fn test_memory_forms_still_run() {
 fn test_memory_write_with_two_numbers() {
     check_error(&["10 A% = &3000", "20 ?A% = 1 2", "30 PRINT \"RAN\""], "20");
 }
+
+#[test]
+fn test_end_with_text_after_it() {
+    check_error(&["10 PRINT \"RAN\"", "20 END 1"], "20");
+}
+
+#[test]
+fn test_stop_with_text_after_it() {
+    check_error(&["10 PRINT \"RAN\"", "20 STOP 1"], "20");
+}
+
+#[test]
+fn test_cls_with_text_after_it() {
+    check_error(&["10 CLS 1", "20 PRINT \"RAN\""], "10");
+}
+
+#[test]
+fn test_clear_with_text_after_it() {
+    check_error(&["10 CLEAR 1", "20 PRINT \"RAN\""], "10");
+}
+
+#[test]
+fn test_statements_with_no_argument_still_run() {
+    let (result, output) = run(&[
+        "10 CLS : CLEAR : PRINT \"A\"",
+        "20 IF 1 THEN END ELSE PRINT \"B\"",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "A\n");
+}
