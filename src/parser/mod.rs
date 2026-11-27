@@ -3183,25 +3183,41 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
 }
 
 /// Parse IF statement
-/// Supports: IF condition THEN statement [ELSE statement]
+/// Supports: IF condition [THEN] statement [ELSE statement]
 fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    // Find THEN keyword to split condition from then-part
-    let then_pos = tokens
-        .iter()
-        .position(|t| matches!(t, Token::Keyword(0x8C)))
-        .ok_or(BBCBasicError::SyntaxError {
-            message: "Expected THEN after IF condition".to_string(),
-            line: line_number,
-        })?;
+    let expected_then = || BBCBasicError::SyntaxError {
+        message: "Expected THEN after IF condition".to_string(),
+        line: line_number,
+    };
+    if tokens.is_empty() {
+        return Err(expected_then());
+    }
 
-    // Parse condition (everything before THEN)
-    let condition_tokens = &tokens[..then_pos];
-    let condition = parse_expression(condition_tokens)?;
+    // The condition is one expression: it ends at the first token that
+    // cannot continue it (issue 160). THEN after it is optional. With no
+    // THEN, a statement or ELSE must follow, and a line number cannot.
+    let mut condition_end = 0;
+    let condition = parse_expr_precedence(tokens, &mut condition_end, 0)?;
+    let has_then = matches!(tokens.get(condition_end), Some(Token::Keyword(0x8C)));
+    if !has_then
+        && matches!(
+            tokens.get(condition_end),
+            None | Some(
+                Token::Separator(':')
+                    | Token::Integer(_)
+                    | Token::HexInteger(_)
+                    | Token::LineNumber(_)
+            )
+        )
+    {
+        return Err(expected_then());
+    }
+    let branch_start = condition_end + usize::from(has_then);
 
     // Find ELSE keyword (if present). A REM or DATA statement uses the rest
     // of the line, so an ELSE after it is part of it. A statement starts
     // after a colon or after the THEN of an inner IF.
-    let after_then = &tokens[then_pos + 1..];
+    let after_then = &tokens[branch_start..];
     let mut else_pos = None;
     for (index, token) in after_then.iter().enumerate() {
         let statement_start = index == 0
@@ -3220,14 +3236,14 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 
     let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
         // ELSE found: split then_part and else_part
-        let absolute_else_pos = then_pos + 1 + else_idx;
+        let absolute_else_pos = branch_start + else_idx;
         (
-            &tokens[then_pos + 1..absolute_else_pos],
+            &tokens[branch_start..absolute_else_pos],
             Some(&tokens[absolute_else_pos + 1..]),
         )
     } else {
         // No ELSE: only then_part
-        (&tokens[then_pos + 1..], None)
+        (after_then, None)
     };
 
     // Nothing after THEN: a block IF. Its THEN block is on the next lines.
@@ -3235,8 +3251,11 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         return Ok(Statement::IfBlock { condition });
     }
 
-    // Parse THEN part: all the statements up to ELSE or the end of the line
-    let then_part = if then_tokens.is_empty() {
+    // Parse THEN part: all the statements up to ELSE or the end of the line.
+    // With no THEN, ELSE can follow the condition directly.
+    let then_part = if then_tokens.is_empty() && !has_then {
+        Vec::new()
+    } else if then_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected statement after THEN".to_string(),
             line: line_number,
