@@ -69,6 +69,8 @@ pub mod error {
         // System errors
         IllegalFunction,
         BadCall,
+        // MODE with a number that is not 0 to 7
+        BadMode,
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -103,6 +105,7 @@ pub mod error {
                 BBCBasicError::ChannelNotOpen(handle) => write!(f, "Channel {} not open", handle),
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
+                BBCBasicError::BadMode => write!(f, "Bad MODE"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }

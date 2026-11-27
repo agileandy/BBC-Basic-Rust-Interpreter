@@ -986,6 +986,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::SyntaxError { .. } => 220,
         BBCBasicError::BadProgram => 254,
         BBCBasicError::IllegalFunction => 31,
+        BBCBasicError::BadMode => 25,
         _ => 255,
     }
 }
