@@ -82,6 +82,11 @@ fn main() {
             continue;
         }
 
+        if input.eq_ignore_ascii_case("lvar") {
+            list_variables(&executor);
+            continue;
+        }
+
         if input.eq_ignore_ascii_case("new") {
             program.clear();
             println!("Program cleared");
@@ -214,6 +219,13 @@ fn list_program(program: &ProgramStore) {
             Ok(text) => println!("{}", text),
             Err(e) => println!("Error listing line {}: {:?}", line_number, e),
         }
+    }
+}
+
+/// Print each variable and array with its value or its size (LVAR)
+fn list_variables(executor: &Executor) {
+    for line in executor.variable_listing() {
+        println!("{}", line);
     }
 }
 
@@ -543,6 +555,8 @@ fn print_help() {
     println!("  LIST                     - List the program");
     println!("  RUN                      - Run the stored program");
     println!("  NEW                      - Clear the program");
+    println!("  LVAR                     - List the variables and arrays");
+    println!("  CLEAR                    - Remove all variables and arrays");
     println!("  DELETE 20, 40            - Delete lines 20 to 40");
     println!("  RENUMBER [start[,step]]  - Renumber the lines (default 10,10)");
     println!("  AUTO [start[,step]]      - Number each typed line (empty line ends)");
