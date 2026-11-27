@@ -2006,7 +2006,8 @@ impl Executor {
                 match op {
                     UnaryOperator::Minus => val.checked_neg().ok_or(BBCBasicError::TooBig),
                     UnaryOperator::Plus => Ok(val),
-                    UnaryOperator::Not => Ok(if val == 0 { -1 } else { 0 }),
+                    // NOT gives the bit complement of the 32-bit value (issue #158).
+                    UnaryOperator::Not => Ok(!val),
                     UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
                 }
             }
@@ -2126,12 +2127,17 @@ impl Executor {
                 if let UnaryOperator::Indirect(width) = op {
                     return self.read_memory(*width, operand).map(f64::from);
                 }
+                // NOT converts its operand to an integer, as AND does (issue #158).
+                if let UnaryOperator::Not = op {
+                    return self.eval_integer(expr).map(f64::from);
+                }
                 let val = self.eval_real(operand)?;
                 match op {
                     UnaryOperator::Minus => Ok(-val),
                     UnaryOperator::Plus => Ok(val),
-                    UnaryOperator::Not => Ok(if val == 0.0 { -1.0 } else { 0.0 }),
-                    UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
+                    UnaryOperator::Not | UnaryOperator::Indirect(_) => {
+                        unreachable!("NOT and memory read returned above")
+                    }
                 }
             }
             // A string function in a numeric context, such as A = LEFT$("a", 1)

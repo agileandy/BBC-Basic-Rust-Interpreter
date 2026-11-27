@@ -108,10 +108,7 @@ corpus!(
     #[ignore = "defect F4: an apostrophe in PRINT starts a REM, not a new line"]
     print_separators
 );
-corpus!(
-    #[ignore = "defect F2: NOT is logical, so NOT 4 gives 0 and not -5"]
-    bit_masks_not
-);
+corpus!(bit_masks_not);
 corpus!(
     #[ignore = "defect F5: IF with no THEN gives a syntax error"]
     if_without_then
