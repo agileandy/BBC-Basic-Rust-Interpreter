@@ -107,16 +107,150 @@ fn test_for_each_of_an_empty_list_with_one_next_for_a_skipped_loop_and_the_for_e
 }
 
 #[test]
-fn test_next_each_closes_a_for_each_in_a_for_of_a_variable_named_each() {
+fn test_next_each_steps_a_for_of_a_variable_named_each_before_a_for_each() {
+    // K3: a FOR loop of the variable EACH has the exact name, so NEXT EACH
+    // steps it, also when a FOR EACH loop that a GOTO left is newer.
+    let (result, output) = run(&[
+        "10 L = NEWLIST : LISTADD L, 1",
+        "20 FOR EACH = 1 TO 2",
+        "30 FOR EACH N IN L",
+        "40 IF N = 1 THEN GOTO 60",
+        "50 NEXT",
+        "60 PRINT \"E\";EACH",
+        "70 NEXT EACH",
+        "80 PRINT \"AFTER\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "E1\nE2\nAFTER\n");
+}
+
+#[test]
+fn test_a_for_each_in_a_for_of_a_variable_named_each_ends_with_its_own_name() {
     let (result, output) = run(&[
         "10 L = NEWLIST : LISTADD L, \"A\"",
         "20 FOR EACH = 1 TO 2",
-        "30 FOR EACH S$ IN L : PRINT EACH; S$ : NEXT EACH",
+        "30 FOR EACH S$ IN L : PRINT EACH; S$ : NEXT S$",
         "40 NEXT EACH",
     ]);
 
     assert_eq!(result, Ok(()));
     assert_eq!(output, "1A\n2A\n");
+}
+
+#[test]
+fn test_for_each_gives_a_numeric_variable_a_collection_boolean_or_null_as_listget_does() {
+    // K1: a nested collection gives its handle, true gives -1, false and
+    // null give 0.
+    let (result, output) = run(&[
+        "10 L = NEWLIST : M = NEWLIST : LISTADDCOL L, M : LISTADD M, 5",
+        "20 FOR EACH H IN L : PRINT LISTGET(H,0) : NEXT",
+        "30 J% = JSONTOLIST(\"[true,false,null]\")",
+        "40 FOR EACH B IN J% : PRINT B : NEXT",
+        "50 FOR EACH B% IN J% : PRINT B% : NEXT",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "5\n-1\n0\n0\n-1\n0\n0\n");
+}
+
+#[test]
+fn test_for_each_gives_type_mismatch_for_a_collection_element_in_a_string_variable() {
+    let (result, _) = run(&[
+        "10 L = NEWLIST : M = NEWLIST : LISTADDCOL L, M",
+        "20 FOR EACH S$ IN L : NEXT",
+    ]);
+
+    assert_eq!(result, Err("Type mismatch at line 20".to_string()));
+}
+
+#[test]
+fn test_for_each_of_an_empty_list_finds_a_next_in_a_single_line_if() {
+    // K2: a NEXT in an IF branch closes the loop.
+    let (result, output) = run(&[
+        "10 L = NEWLIST",
+        "20 FOR EACH N IN L",
+        "30 IF N > 0 THEN PRINT N : NEXT",
+        "50 PRINT \"AFTER\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "AFTER\n");
+}
+
+#[test]
+fn test_for_each_of_an_empty_list_counts_a_for_and_a_next_in_an_if_branch() {
+    // K2 rule: the scan counts each FOR and each NEXT, also in an IF
+    // branch. So a loop in a branch does not close the FOR EACH loop.
+    let (result, output) = run(&[
+        "10 L = NEWLIST : A = 1",
+        "20 FOR EACH N IN L",
+        "30 IF A THEN FOR I = 1 TO 2 : PRINT \"I\"; I : NEXT",
+        "40 PRINT \"BODY\"",
+        "50 NEXT",
+        "60 PRINT \"AFTER\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "AFTER\n");
+}
+
+#[test]
+fn test_a_trapped_type_mismatch_at_next_closes_the_loop_as_for_a_for_loop() {
+    // K4: as in BBC BASIC, a trapped error clears the FOR stack, so a NEXT
+    // in the handler gives No FOR. It does not read the same element again.
+    let (result, output) = run(&[
+        "10 L = NEWLIST : LISTADD L, 1 : LISTADD L, \"A\" : LISTADD L, 3",
+        "20 ON ERROR GOTO 60",
+        "30 FOR EACH N IN L",
+        "40 PRINT N",
+        "50 NEXT",
+        "60 PRINT REPORT$; \" \"; ERL : ON ERROR OFF",
+        "70 NEXT",
+    ]);
+
+    assert_eq!(result, Err("No FOR at line 70".to_string()));
+    assert_eq!(output, "1\nType mismatch 50\n");
+}
+
+#[test]
+fn test_a_missing_next_is_a_trappable_error_and_removes_the_loop() {
+    // K5: ERR 155 is an extension error. BBC BASIC does not use it.
+    let (result, output) = run(&[
+        "10 GOTO 40",
+        "20 PRINT REPORT$; \" \"; ERR; \" \"; ERL : ON ERROR OFF",
+        "30 NEXT",
+        "40 ON ERROR GOTO 20",
+        "50 L = NEWLIST",
+        "60 FOR EACH N IN L",
+        "70 PRINT \"BODY\"",
+    ]);
+
+    assert_eq!(result, Err("No FOR at line 30".to_string()));
+    assert_eq!(output, "FOR EACH without matching NEXT 155 60\n");
+}
+
+#[test]
+fn test_the_scan_for_next_stops_at_a_def_line() {
+    // K6: a NEXT in a DEF PROC or DEF FN body is not the end of the loop.
+    for def in ["50 DEF PROCX", "50 DEF FNX"] {
+        let (result, output) = run(&[
+            "10 E = NEWLIST",
+            "20 FOR EACH N IN E",
+            "30 PRINT \"B\"",
+            "40 END",
+            def,
+            "60 NEXT",
+            "70 ENDPROC",
+        ]);
+
+        assert_eq!(
+            result,
+            Err("FOR EACH without matching NEXT at line 20".to_string()),
+            "{def}"
+        );
+        assert_eq!(output, "", "{def}");
+    }
 }
 
 #[test]

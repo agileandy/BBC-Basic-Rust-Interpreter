@@ -1128,8 +1128,9 @@ impl Executor {
 
     /// Give the FOR EACH variable the element at `index` of a list, or the
     /// key at `index` of a map. If `index` is not below the count at this
-    /// time, change nothing and return false. A variable of the wrong type
-    /// gives Type mismatch: a map needs a string variable.
+    /// time, change nothing and return false. A numeric variable reads an
+    /// element as LISTGET does, and a string variable as LISTGET$ does: the
+    /// wrong type gives Type mismatch. A map needs a string variable.
     fn set_each_variable(&mut self, variable: &str, handle: i32, index: usize) -> Result<bool> {
         let is_map = self.collections.length(handle).is_err();
         let count = self.collection_count(handle)?;
@@ -1141,22 +1142,21 @@ impl Executor {
             return Ok(false);
         }
         let index = i32::try_from(index).map_err(|_| BBCBasicError::TooBig)?;
-        let element = if is_map {
-            Element::Text(self.collections.map_key(handle, index)?)
+        if is_string {
+            let text = if is_map {
+                self.collections.map_key(handle, index)?
+            } else {
+                self.collections.get_text(handle, index)?
+            };
+            self.variables.set_string_var(variable.to_string(), text)?;
         } else {
-            self.collections.get(handle, index)?.clone()
-        };
-        match element {
-            Element::Text(text) if is_string => {
-                self.variables.set_string_var(variable.to_string(), text)?
+            let value = self.collections.get_number(handle, index)?;
+            if variable.ends_with('%') {
+                self.variables
+                    .set_integer_var(variable.to_string(), real_to_integer(value)?);
+            } else {
+                self.variables.set_real_var(variable.to_string(), value);
             }
-            Element::Number(value) if variable.ends_with('%') => self
-                .variables
-                .set_integer_var(variable.to_string(), real_to_integer(value)?),
-            Element::Number(value) if !is_string => {
-                self.variables.set_real_var(variable.to_string(), value)
-            }
-            _ => return Err(BBCBasicError::TypeMismatch),
         }
         Ok(true)
     }
@@ -1164,11 +1164,15 @@ impl Executor {
     /// Step a FOR EACH loop to the element at `index`. NEXT reads the count
     /// at this time, so the loop sees the elements that its body adds.
     fn next_each(&mut self, loop_index: usize, handle: i32, index: usize) -> Result<()> {
+        // Store the index first: after a trapped error, the next NEXT goes
+        // to the element after this one. As for a FOR loop, an error does
+        // not close the inner loops.
+        self.for_loops[loop_index].kind = ForKind::Each { handle, index };
+        let variable = self.for_loops[loop_index].variable.clone();
+        let has_element = self.set_each_variable(&variable, handle, index)?;
         // A NEXT for an outer loop closes the loops inside it
         self.for_loops.truncate(loop_index + 1);
-        let variable = self.for_loops[loop_index].variable.clone();
-        if self.set_each_variable(&variable, handle, index)? {
-            self.for_loops[loop_index].kind = ForKind::Each { handle, index };
+        if has_element {
             self.next_loop_line = Some(self.for_loops[loop_index].position);
         } else {
             self.for_loops.remove(loop_index);
@@ -1189,6 +1193,11 @@ impl Executor {
                 .map_or(true, |count| *index >= count),
             _ => false,
         }
+    }
+
+    /// Remove the newest FOR loop: a FOR EACH loop with no matching NEXT.
+    pub fn drop_newest_for_loop(&mut self) {
+        self.for_loops.pop();
     }
 
     /// Execute NEXT statement
@@ -1217,14 +1226,21 @@ impl Executor {
     /// Step the FOR loop of one variable. Set the position to jump back to
     /// if the loop continues, or clear it if the loop ends.
     fn next_loop(&mut self, var_name: String) -> Result<()> {
-        // Find the matching FOR loop. `NEXT EACH` also matches a FOR EACH
-        // loop (issue #141), and a FOR loop of a variable named EACH.
+        // Find the matching FOR loop. A loop of the variable EACH keeps the
+        // old meaning of `NEXT EACH`. With no such loop, `NEXT EACH` matches
+        // the newest FOR EACH loop (issue #141).
         let loop_index = self
             .for_loops
             .iter()
-            .rposition(|entry| {
-                entry.variable == var_name
-                    || (var_name == "EACH" && matches!(entry.kind, ForKind::Each { .. }))
+            .rposition(|entry| entry.variable == var_name)
+            .or_else(|| {
+                (var_name == "EACH")
+                    .then(|| {
+                        self.for_loops
+                            .iter()
+                            .rposition(|entry| matches!(entry.kind, ForKind::Each { .. }))
+                    })
+                    .flatten()
             })
             .ok_or(if self.for_loops.is_empty() {
                 BBCBasicError::NoFor
@@ -4822,6 +4838,39 @@ mod tests {
             ForKind::Count {
                 end: 10.0,
                 step: 1.0
+            }
+        );
+    }
+
+    #[test]
+    fn test_a_failed_for_each_next_keeps_the_inner_loops_and_stores_the_index() {
+        // Issue #141 K4: as for a FOR loop, an error at NEXT does not close
+        // the inner loops. The new index is stored, so the next NEXT goes on.
+        let mut executor = Executor::new();
+        for source in [
+            "10 L = NEWLIST : LISTADD L, 1 : LISTADD L, \"A\"",
+            "20 FOR EACH N IN L",
+            "30 FOR I = 1 TO 2",
+        ] {
+            let tokens = crate::tokenizer::tokenize(source).unwrap();
+            for statement in crate::parser::parse_line(&tokens).unwrap() {
+                executor.execute_statement(&statement).unwrap();
+            }
+        }
+        let next = Statement::Next {
+            variables: vec!["N".to_string()],
+        };
+
+        assert_eq!(
+            executor.execute_statement(&next),
+            Err(BBCBasicError::TypeMismatch)
+        );
+        assert_eq!(executor.for_loops.len(), 2);
+        assert_eq!(
+            executor.for_loops[0].kind,
+            ForKind::Each {
+                handle: 1,
+                index: 1
             }
         );
     }

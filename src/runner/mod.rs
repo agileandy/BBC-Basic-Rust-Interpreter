@@ -1194,7 +1194,7 @@ fn step(
             // Record this position for NEXT to loop back to
             executor.set_for_loop_line(position);
             if executor.for_each_is_empty() {
-                skip_empty_for_each(executor, program, line_number)?;
+                skip_empty_for_each(executor, program)?;
             }
             Ok(Flow::Next)
         }
@@ -1274,20 +1274,25 @@ fn step(
 /// and FOR EACH loops: `NEXT I, J` closes 2. Then run the part of that NEXT
 /// that closes the FOR EACH loop and the loops outside it. The loop is on
 /// the FOR stack, so this NEXT ends it as it ends a loop with elements.
-fn skip_empty_for_each(
-    executor: &mut Executor,
-    program: &mut Cursor,
-    line_number: u32,
-) -> Result<(), StepError> {
+///
+/// The scan counts each FOR and each NEXT, also in the branches of an IF,
+/// because it cannot know which branch runs. So the first NEXT that can
+/// close the loop stops the scan, and the scan does not skip the code of a
+/// later loop. A DEF line, or the end of the program, stops the scan with
+/// the error FOR EACH without matching NEXT, and removes the loop.
+fn skip_empty_for_each(executor: &mut Executor, program: &mut Cursor) -> Result<(), StepError> {
+    let lines = program.lines;
     let mut depth = 1;
     loop {
         let Some(current) = program.next() else {
-            return Err(format!("FOR EACH without matching NEXT{}", at_line(line_number)).into());
+            executor.drop_newest_for_loop();
+            return Err(BBCBasicError::MissingNext.into());
         };
-        match program.lines.item(current) {
-            // An IF uses the rest of its line. A FOR or NEXT in its
-            // branches does not count.
-            Some(Item::If { .. }) => program.skip_rest_of_line(),
+        match lines.item(current) {
+            Some(Item::Statement(Statement::DefProc { .. } | Statement::DefFn { .. })) => {
+                executor.drop_newest_for_loop();
+                return Err(BBCBasicError::MissingNext.into());
+            }
             Some(Item::Statement(Statement::For { .. } | Statement::ForEach { .. })) => depth += 1,
             Some(Item::Statement(Statement::Next { variables })) => {
                 let closes = variables.len().max(1);
@@ -1363,6 +1368,9 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::BadCollection => 153,
         // No such key is an extension error. BBC BASIC does not use ERR 154 (issue #140).
         BBCBasicError::NoSuchKey(_) => 154,
+        // FOR EACH without matching NEXT is an extension error (issue #141).
+        // BBC BASIC does not use ERR 155.
+        BBCBasicError::MissingNext => 155,
         _ => 255,
     }
 }
