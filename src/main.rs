@@ -340,20 +340,29 @@ fn load_program(
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file {}: {}", path, e))?;
 
-    // Clear the program and the variables, as NEW does. A% to Z% stay.
-    program.clear();
+    // Read all lines into a new store. A bad line keeps the old program.
+    let loaded =
+        parse_program(&content).map_err(|e| format!("{} (program in memory unchanged)", e))?;
+
+    // Replace the program and clear the variables, as NEW does. A% to Z% stay.
+    *program = loaded;
     executor.clear_variables();
     // The handler line belongs to the old program
     executor.clear_error_handler();
 
-    // Parse and add each line
+    println!("Loaded from {}", path);
+    Ok(())
+}
+
+/// Tokenize each line of the file text into a new program store
+fn parse_program(content: &str) -> Result<ProgramStore, String> {
+    let mut program = ProgramStore::new();
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue; // Skip empty lines
         }
 
-        // Tokenize and store
         let tokenized =
             tokenize(line).map_err(|e| format!("Parse error at line {}: {}", line_num + 1, e))?;
 
@@ -372,9 +381,7 @@ fn load_program(
             ));
         }
     }
-
-    println!("Loaded from {}", path);
-    Ok(())
+    Ok(program)
 }
 
 /// Match `DELETE start, end` (any case). Return the range, or a syntax error.
