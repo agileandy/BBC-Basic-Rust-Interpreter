@@ -2558,6 +2558,15 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
 
             *pos += 1;
 
+            // NOT is a unary operator with the priority of unary minus.
+            if keyword == "NOT" {
+                let operand = parse_primary(tokens, pos)?;
+                return Ok(Expression::UnaryOp {
+                    op: UnaryOperator::Not,
+                    operand: Box::new(operand),
+                });
+            }
+
             // BGET#, EOF#, PTR# and EXT#: the channel after '#' is the one argument.
             if matches!(keyword.as_str(), "BGET" | "EOF" | "PTR" | "EXT")
                 && matches!(tokens.get(*pos), Some(Token::Operator('#')))
@@ -2626,8 +2635,9 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                     name: keyword,
                     args,
                 })
-            } else if is_user_function {
-                // A user-defined function with no parameters
+            } else if is_user_function || matches!(keyword.as_str(), "TRUE" | "FALSE") {
+                // A user-defined function with no parameters, or a constant
+                // keyword that the executor evaluates as a function
                 Ok(Expression::FunctionCall {
                     name: keyword,
                     args: Vec::new(),
@@ -2746,6 +2756,57 @@ mod tests {
                 left: Box::new(Expression::Integer(2)),
                 op: BinaryOperator::Add,
                 right: Box::new(Expression::Integer(3)),
+            }
+        );
+    }
+
+    /// The expression for TRUE or FALSE: a function call with no arguments.
+    fn constant(name: &str) -> Expression {
+        Expression::FunctionCall {
+            name: name.to_string(),
+            args: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_parse_true_and_false_without_bracket() {
+        let true_expr = parse_expression(&[Token::Keyword(0xB9)]).unwrap();
+        let false_expr = parse_expression(&[Token::Keyword(0xA3)]).unwrap();
+
+        assert_eq!(true_expr, constant("TRUE"));
+        assert_eq!(false_expr, constant("FALSE"));
+    }
+
+    #[test]
+    fn test_parse_true_and_integer() {
+        // TRUE AND 5
+        let tokens = [
+            Token::Keyword(0xB9),
+            Token::Keyword(0x80),
+            Token::Integer(5),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(constant("TRUE")),
+                op: BinaryOperator::And,
+                right: Box::new(Expression::Integer(5)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_not_false() {
+        let tokens = [Token::Keyword(0xAC), Token::Keyword(0xA3)];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::UnaryOp {
+                op: UnaryOperator::Not,
+                operand: Box::new(constant("FALSE")),
             }
         );
     }
