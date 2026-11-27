@@ -381,6 +381,10 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // The shift operators << and >> list as typed
                 (Token::Operator('<'), Token::Operator('<')) => false,
                 (Token::Operator('>'), Token::Operator('>')) => false,
+                // The comparison operators <=, >= and <> list as typed
+                (Token::Operator('<'), Token::Operator('=')) => false,
+                (Token::Operator('>'), Token::Operator('=')) => false,
+                (Token::Operator('<'), Token::Operator('>')) => false,
                 // Need space between most tokens
                 _ => true,
             };
@@ -1108,5 +1112,28 @@ mod tests {
             tokenize("10 PRINT A.B"),
             Err(BBCBasicError::SyntaxError { message, .. }) if message == "Unknown character '.'"
         ));
+    }
+
+    #[test]
+    fn test_detokenize_shows_comparison_operators_as_typed() {
+        for (source, listed) in [
+            ("10 IF A% <= B% THEN PRINT 1", "10 IF A% <= B% THEN PRINT 1"),
+            ("10 IF A% >= B% THEN PRINT 1", "10 IF A% >= B% THEN PRINT 1"),
+            ("10 IF A% <> B% THEN PRINT 1", "10 IF A% <> B% THEN PRINT 1"),
+        ] {
+            let line = tokenize(source).unwrap();
+            assert_eq!(detokenize(&line).unwrap(), listed);
+        }
+    }
+
+    #[test]
+    fn test_detokenized_operators_tokenize_to_the_same_tokens() {
+        for op in ["<=", ">=", "<>", "<<", ">>", "<", ">", "="] {
+            let source = format!("10 PRINT A% {op} B%");
+            let line = tokenize(&source).unwrap();
+            let listed = detokenize(&line).unwrap();
+            assert!(listed.contains(&format!(" {op} ")), "{listed}");
+            assert_eq!(tokenize(&listed).unwrap(), line, "{listed}");
+        }
     }
 }
