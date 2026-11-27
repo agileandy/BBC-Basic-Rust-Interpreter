@@ -68,11 +68,12 @@ fn test_power_with_negative_exponent_gives_truncated_value() {
 #[test]
 fn test_power_in_range_is_exact() {
     // A power is a real value (issue #175). PRINT shows 9 significant digits,
-    // as BBC BASIC does, and an integer variable keeps the exact value.
+    // as BBC BASIC does, and an integer variable keeps the exact value. @% = &A0A
+    // shows all 10 digits of the integer (issue 197).
     let (result, output) = run(&[
         "10 PRINT 2 ^ 30",
         "20 PRINT 2 ^ 0",
-        "30 A% = 2 ^ 30 : PRINT A%",
+        "30 A% = 2 ^ 30 : @% = &A0A : PRINT A%",
     ]);
 
     assert_eq!(result, Ok(()));
@@ -138,6 +139,7 @@ fn test_right_shift_by_40_gives_sign_fill() {
 #[test]
 fn test_largest_and_smallest_integers_work_with_no_overflow() {
     let (result, output) = run(&[
+        "5 @% = &A0A",
         "10 A% = 2147483646 + 1",
         "20 B% = -2147483647 - 1",
         "30 C% = 1073741823 * 2 + 1",
@@ -168,6 +170,7 @@ fn test_abs_of_smallest_integer_is_caught_by_on_error() {
 #[test]
 fn test_for_loop_to_largest_integer_ends_after_last_value() {
     let (result, output) = run_with_limit(&[
+        "5 @% = &A0A",
         "10 FOR I% = 2147483646 TO 2147483647",
         "20 PRINT I%",
         "30 NEXT I%",
@@ -181,6 +184,7 @@ fn test_for_loop_to_largest_integer_ends_after_last_value() {
 #[test]
 fn test_for_loop_down_to_smallest_integer_ends_after_last_value() {
     let (result, output) = run_with_limit(&[
+        "5 @% = &A0A",
         "10 FOR I% = -2147483647 TO -2147483647 - 1 STEP -1",
         "20 PRINT I%",
         "30 NEXT I%",
@@ -194,6 +198,7 @@ fn test_for_loop_down_to_smallest_integer_ends_after_last_value() {
 #[test]
 fn test_for_loop_with_step_past_largest_integer_ends() {
     let (result, output) = run_with_limit(&[
+        "5 @% = &A0A",
         "10 FOR I% = 2147483640 TO 2147483647 STEP 5",
         "20 PRINT I%",
         "30 NEXT I%",

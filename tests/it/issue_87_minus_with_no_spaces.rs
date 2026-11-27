@@ -107,7 +107,11 @@ fn test_print_negative_number_after_comma() {
 
 #[test]
 fn test_smallest_integer() {
-    check(&["10 A% = -2147483648", "20 PRINT A%"], "-2147483648\n");
+    // @% = &A0A prints 10 digits, so the output shows the exact value (issue 197)
+    check(
+        &["5 @% = &A0A", "10 A% = -2147483648", "20 PRINT A%"],
+        "-2147483648\n",
+    );
 }
 
 #[test]
