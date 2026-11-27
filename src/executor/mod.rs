@@ -249,6 +249,8 @@ pub struct Executor {
     input_queue: VecDeque<String>,
     // Output buffer (for testing)
     output: String,
+    // Column of the print position: 0 after a newline, updated by print_output
+    column: usize,
 }
 
 impl Executor {
@@ -279,6 +281,7 @@ impl Executor {
             start_time: std::time::Instant::now(),
             input_queue: VecDeque::new(),
             output: String::new(),
+            column: 0,
         }
     }
 
@@ -486,18 +489,9 @@ impl Executor {
                     // Semicolon suppresses newline (do nothing)
                 }
                 PrintItem::Comma => {
-                    // Comma moves to next tab position (TAB(10) intervals)
-                    #[cfg(test)]
-                    {
-                        let current_len = self.output.len();
-                        let next_tab = ((current_len / 10) + 1) * 10;
-                        let spaces = next_tab - current_len;
-                        self.output.push_str(&" ".repeat(spaces));
-                    }
-                    #[cfg(not(test))]
-                    {
-                        print!("\t");
-                    }
+                    // Comma moves to the next print zone of 10 columns
+                    let next_zone = (self.column / 10 + 1) * 10;
+                    self.print_output(&" ".repeat(next_zone - self.column));
                 }
                 PrintItem::Tab(expr) => {
                     // TAB accepts both integer and real, truncating real to integer
@@ -507,18 +501,11 @@ impl Executor {
                         let real_val = self.eval_real(expr)?;
                         real_val.floor().max(0.0) as usize
                     };
-                    #[cfg(test)]
-                    {
-                        let current_len = self.output.len();
-                        if pos > current_len {
-                            self.output.push_str(&" ".repeat(pos - current_len));
-                        }
+                    // A column before the cursor starts a new line (BBC rule)
+                    if pos < self.column {
+                        self.print_output("\n");
                     }
-                    #[cfg(not(test))]
-                    {
-                        // Move to absolute position (simplified)
-                        print!("{}", " ".repeat(pos));
-                    }
+                    self.print_output(&" ".repeat(pos - self.column));
                 }
                 PrintItem::Spc(expr) => {
                     // SPC accepts both integer and real, truncating real to integer
@@ -571,6 +558,13 @@ impl Executor {
 
     /// Print output (to buffer in test mode, to stdout in production)
     fn print_output(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch == '\n' {
+                self.column = 0;
+            } else {
+                self.column += 1;
+            }
+        }
         self.output.push_str(text);
         #[cfg(not(test))]
         {
@@ -948,6 +942,8 @@ impl Executor {
         {
             print!("\x1b[2J\x1b[H");
         }
+        // The cursor is now at the start of the top line
+        self.column = 0;
         Ok(())
     }
 
