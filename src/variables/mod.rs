@@ -264,6 +264,16 @@ impl VariableStore {
         self.variables.contains_key(name)
     }
 
+    /// Put back a saved variable as it was, including array dimensions and values
+    pub fn restore_variable(&mut self, name: String, variable: Variable) {
+        self.variables.insert(name, variable);
+    }
+
+    /// Remove a variable
+    pub fn remove_variable(&mut self, name: &str) {
+        self.variables.remove(name);
+    }
+
     /// Clear all variables
     pub fn clear(&mut self) {
         self.variables.clear();

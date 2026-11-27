@@ -2068,18 +2068,23 @@ impl Executor {
                         Variable::String(v) => {
                             let _ = self.variables.set_string_var(name, v);
                         }
-                        Variable::IntegerArray { .. }
+                        array @ (Variable::IntegerArray { .. }
                         | Variable::RealArray { .. }
-                        | Variable::StringArray { .. } => {
-                            // For arrays, we need to restore them via dim_array
-                            // This is complex, so for now we'll just leave them
-                            // TODO: Proper array restoration
+                        | Variable::StringArray { .. }) => {
+                            self.variables.restore_variable(name, array);
                         }
                     }
                 }
                 None => {
-                    // Variable didn't exist before - ideally we'd remove it
-                    // For now, just leave it (BBC BASIC allows this)
+                    // Remove an array that the procedure made, so the name is free again.
+                    // A scalar that did not exist before is left as it is.
+                    if self
+                        .variables
+                        .get_variable(&name)
+                        .is_some_and(Variable::is_array)
+                    {
+                        self.variables.remove_variable(&name);
+                    }
                 }
             }
         }
