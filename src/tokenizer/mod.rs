@@ -26,6 +26,9 @@ pub enum Token {
     String(String),
     /// The text after DATA to the end of the line, as typed
     DataText(String),
+    /// The text after the REM keyword to the end of the line, as typed. An
+    /// apostrophe comment uses REM and a DataText, so the 2 forms list as typed.
+    RemText(String),
     /// Variable or procedure name
     Identifier(String),
     /// Operators (+, -, *, etc.)
@@ -388,6 +391,13 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                         tokens.push(Token::DataText(text));
                     }
                 }
+                // REM uses the rest of the line. Keep that text as typed (issue 179).
+                if token_byte == 0xF4 {
+                    let text: String = chars.by_ref().collect();
+                    if !text.is_empty() {
+                        tokens.push(Token::RemText(text));
+                    }
+                }
             } else if let Some(&(prefix, token_byte)) = extended_map.get(&word) {
                 tokens.push(Token::ExtendedKeyword(prefix, token_byte));
             } else if let Some((keyword, name)) = split_proc_or_fn(&word) {
@@ -505,7 +515,7 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Operator('>'), Token::Operator('=')) => false,
                 (Token::Operator('<'), Token::Operator('>')) => false,
                 // The DATA text holds its own spaces
-                (_, Token::DataText(_)) => false,
+                (_, Token::DataText(_) | Token::RemText(_)) => false,
                 // The hex forms ~X and STR$~(X) list as typed
                 (Token::Operator('~'), _) => false,
                 (Token::Keyword(0xC3), Token::Operator('~')) => false,
@@ -574,7 +584,7 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             Token::Identifier(name) => {
                 result.push_str(name);
             }
-            Token::DataText(text) => {
+            Token::DataText(text) | Token::RemText(text) => {
                 result.push_str(text);
             }
             Token::Operator(op) => {
