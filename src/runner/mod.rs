@@ -181,6 +181,43 @@ impl Cursor<'_> {
             current.index = line_length.saturating_sub(1).max(current.index);
         }
     }
+
+    /// Go to the statement after the ELSE or ENDIF line that matches the
+    /// block IF or the ELSE line on `line`. With `stop_at_else` false, only
+    /// the matching ENDIF line stops the scan. Returns None if no line
+    /// matches before the end of the program.
+    ///
+    /// A line that ends with a block IF opens a nested block. This includes
+    /// the ELSE line on `line` (an `ELSE IF ... THEN` line). Only an ELSE or
+    /// ENDIF at the start of a line counts.
+    fn skip_block(&mut self, line: u32, stop_at_else: bool) -> Option<()> {
+        let else_opens_block = !stop_at_else
+            && matches!(
+                self.lines.items.get(&line).and_then(|items| items.last()),
+                Some(Item::Statement(Statement::IfBlock { .. }))
+            );
+        let mut depth = if else_opens_block { 2 } else { 1 };
+        let after = (Bound::Excluded(line), Bound::Unbounded);
+        for &line in self.lines.line_numbers.range(after) {
+            let items = &self.lines.items[&line];
+            let stop = match items.first() {
+                Some(Item::Statement(Statement::EndIf)) => {
+                    depth -= 1;
+                    depth == 0
+                }
+                Some(Item::Statement(Statement::BlockElse)) => stop_at_else && depth == 1,
+                _ => false,
+            };
+            if stop {
+                self.goto(Position { line, index: 1 });
+                return Some(());
+            }
+            if let Some(Item::Statement(Statement::IfBlock { .. })) = items.last() {
+                depth += 1;
+            }
+        }
+        None
+    }
 }
 
 /// Why a function body run stopped the program instead of giving a BASIC error.
@@ -282,6 +319,7 @@ pub fn run_program_with_outcome(
         items: all_items,
         line_numbers,
     });
+    check_if_blocks(&lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     let start = lines.line_numbers.first().map(|line| Position {
@@ -319,6 +357,10 @@ pub fn run_typed_line(
             Item::Statement(Statement::DefFn {
                 expression: None, ..
             }) => return Err("DEF FN needs a line number".to_string()),
+            // The block is on the next lines, and a typed line has none
+            Item::Statement(Statement::IfBlock { .. }) => {
+                return Err("Block IF needs a line number".to_string());
+            }
             _ => {}
         }
     }
@@ -358,6 +400,9 @@ pub fn run_typed_line(
         items: all_items,
         line_numbers,
     });
+    // A stored line that does not parse is an Invalid item, and the check
+    // does not count it
+    check_if_blocks(&lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     executor.clear_control_stacks();
@@ -370,6 +415,31 @@ pub fn run_typed_line(
     executor.exit_local_scopes_to(local_depth);
     executor.clear_control_stacks();
     outcome
+}
+
+/// Make sure that each block IF has a matching ENDIF line, with the count
+/// rules of `Cursor::skip_block`. Without this check, a true block with no
+/// ENDIF runs to the end of the program with no error.
+///
+/// An ENDIF line with no open block is also an error, so that the user
+/// sees the mistake before the run. When the run gets to it, it does nothing.
+fn check_if_blocks(lines: &ProgramLines) -> Result<(), String> {
+    let mut open = Vec::new();
+    for line in &lines.line_numbers {
+        let items = &lines.items[line];
+        if let Some(Item::Statement(Statement::EndIf)) = items.first() {
+            if open.pop().is_none() {
+                return Err(format!("ENDIF without matching IF{}", at_line(*line)));
+            }
+        }
+        if let Some(Item::Statement(Statement::IfBlock { .. })) = items.last() {
+            open.push(*line);
+        }
+    }
+    match open.last() {
+        Some(line) => Err(format!("IF without matching ENDIF{}", at_line(*line))),
+        None => Ok(()),
+    }
 }
 
 /// Define the DEF PROC and DEF FN statements of a line before the run, so
@@ -606,6 +676,27 @@ fn step(
         }
         Item::Invalid(message) => return Err(StepError::Fatal(message.clone())),
     };
+
+    match statement {
+        Statement::IfBlock { condition } => {
+            if executor.eval_integer(condition)? != 0 {
+                return Ok(Flow::Next);
+            }
+            program
+                .skip_block(line_number, true)
+                .ok_or_else(|| format!("IF without matching ENDIF{}", at_line(line_number)))?;
+            return Ok(Flow::Jumped);
+        }
+        // The end of a THEN block: continue after the matching ENDIF
+        Statement::BlockElse => {
+            program
+                .skip_block(line_number, false)
+                .ok_or_else(|| format!("ELSE without matching ENDIF{}", at_line(line_number)))?;
+            return Ok(Flow::Jumped);
+        }
+        Statement::EndIf => return Ok(Flow::Next),
+        _ => {}
+    }
 
     executor.execute_statement(statement)?;
 

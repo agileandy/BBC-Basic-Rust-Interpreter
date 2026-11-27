@@ -135,6 +135,14 @@ pub enum Statement {
         then_part: Vec<Statement>,
         else_part: Option<Vec<Statement>>,
     },
+    /// `IF cond THEN` with nothing after THEN - starts a block IF (BBC
+    /// BASIC V). The lines up to the matching ELSE or ENDIF line are the
+    /// THEN block.
+    IfBlock { condition: Expression },
+    /// ELSE at the start of a line - starts the ELSE block of a block IF
+    BlockElse,
+    /// ENDIF at the start of a line - ends a block IF
+    EndIf,
     /// GOTO statement
     Goto { line_number: u16 },
     /// GOSUB statement
@@ -363,8 +371,21 @@ pub enum ExpressionType {
 /// A colon separates the statements. A REM, DATA or IF statement uses the
 /// rest of the line, so a colon after it is not a separator. A string is
 /// one token, so a colon in a string is never a separator.
+///
+/// An ELSE or ENDIF at the start of a line is a line of a block IF. The
+/// statements after it (after an optional colon) follow it.
 pub fn parse_line(line: &TokenizedLine) -> Result<Vec<Statement>> {
-    parse_statements(&line.tokens, line.line_number)
+    let (marker, rest) = match line.tokens.split_first() {
+        Some((Token::Keyword(0x8B), rest)) => (Statement::BlockElse, rest),
+        Some((Token::ExtendedKeyword(0xC8, 0xA5), rest)) => (Statement::EndIf, rest),
+        _ => return parse_statements(&line.tokens, line.line_number),
+    };
+    let rest = rest.strip_prefix(&[Token::Separator(':')]).unwrap_or(rest);
+    let mut statements = vec![marker];
+    if !rest.is_empty() {
+        statements.extend(parse_statements(rest, line.line_number)?);
+    }
+    Ok(statements)
 }
 
 /// Split tokens at each statement separator and parse each part.
@@ -475,6 +496,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // IF statement
         Token::Keyword(0xE7) => parse_if_statement(&tokens[1..], line.line_number),
 
+        // ELSE: parse_line reads it at the start of a line, and an IF reads
+        // it in its line
+        Token::Keyword(0x8B) => Err(BBCBasicError::SyntaxError {
+            message: "ELSE must be the first statement of a line".to_string(),
+            line: line.line_number,
+        }),
+
         // END statement
         Token::Keyword(0xE0) => Ok(Statement::End),
 
@@ -572,6 +600,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x95 => parse_while_statement(&tokens[1..], line.line_number),
             // ENDWHILE statement
             0xA4 => Ok(Statement::EndWhile),
+            // ENDIF that is not at the start of a line: it does nothing, and
+            // the block IF scan does not count it (BBC BASIC V)
+            0xA5 => Ok(Statement::EndIf),
             // CIRCLE statement
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             // FILL statement
@@ -2259,6 +2290,11 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         (&tokens[then_pos + 1..], None)
     };
 
+    // Nothing after THEN: a block IF. Its THEN block is on the next lines.
+    if then_tokens.is_empty() && else_tokens.is_none() {
+        return Ok(Statement::IfBlock { condition });
+    }
+
     // Parse THEN part: all the statements up to ELSE or the end of the line
     let then_part = if then_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
@@ -2292,11 +2328,22 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 /// Parse a THEN or an ELSE branch. A line number at the start of the branch
 /// is a short form of GOTO. The statements after it can never run. Only the
 /// end of the branch or a colon can follow the line number.
+///
+/// A block IF cannot be in a branch, because the branch ends with its line.
 fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
     let target = match tokens.first() {
         Some(Token::Integer(n)) => *n as u16,
         Some(Token::LineNumber(n)) => *n,
-        _ => return parse_statements(tokens, line_number),
+        _ => {
+            let statements = parse_statements(tokens, line_number)?;
+            if let Some(Statement::IfBlock { .. }) = statements.last() {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected statement after THEN".to_string(),
+                    line: line_number,
+                });
+            }
+            return Ok(statements);
+        }
     };
     match tokens.get(1) {
         None | Some(Token::Separator(':')) => Ok(vec![Statement::Goto {
@@ -3413,6 +3460,94 @@ mod tests {
                 else_part: None,
             }
         );
+    }
+
+    /// Parse all the statements of one line.
+    fn line_statements(source: &str) -> Result<Vec<Statement>> {
+        use crate::tokenizer::tokenize;
+        parse_line(&tokenize(source).unwrap())
+    }
+
+    fn print_integer(value: i32) -> Statement {
+        Statement::Print {
+            items: vec![PrintItem::Expression(Expression::Integer(value))],
+        }
+    }
+
+    #[test]
+    fn test_parse_if_with_nothing_after_then_is_block_if() {
+        assert_eq!(
+            line_statements("20 IF X THEN"),
+            Ok(vec![Statement::IfBlock {
+                condition: Expression::Variable("X".to_string()),
+            }])
+        );
+        assert_eq!(
+            line_statements("20 A=1 : IF X THEN"),
+            Ok(vec![
+                Statement::Assignment {
+                    target: "A".to_string(),
+                    expression: Expression::Integer(1),
+                },
+                Statement::IfBlock {
+                    condition: Expression::Variable("X".to_string()),
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_else_line_with_and_without_statements() {
+        assert_eq!(line_statements("30 ELSE"), Ok(vec![Statement::BlockElse]));
+        assert_eq!(
+            line_statements("30 ELSE PRINT 1"),
+            Ok(vec![Statement::BlockElse, print_integer(1)])
+        );
+        assert_eq!(
+            line_statements("30 ELSE : PRINT 1 : PRINT 2"),
+            Ok(vec![
+                Statement::BlockElse,
+                print_integer(1),
+                print_integer(2)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_endif_line_with_and_without_statements() {
+        assert_eq!(line_statements("40 ENDIF"), Ok(vec![Statement::EndIf]));
+        assert_eq!(
+            line_statements("40 ENDIF : PRINT 1"),
+            Ok(vec![Statement::EndIf, print_integer(1)])
+        );
+    }
+
+    #[test]
+    fn test_parse_else_not_at_line_start_is_error() {
+        assert!(line_statements("40 PRINT 1 : ELSE").is_err());
+    }
+
+    #[test]
+    fn test_parse_endif_not_at_line_start_is_endif_statement() {
+        assert_eq!(
+            line_statements("40 PRINT 1 : ENDIF"),
+            Ok(vec![print_integer(1), Statement::EndIf])
+        );
+        assert_eq!(
+            line_statements("40 IF X THEN ENDIF"),
+            Ok(vec![Statement::If {
+                condition: Expression::Variable("X".to_string()),
+                then_part: vec![Statement::EndIf],
+                else_part: None,
+            }])
+        );
+    }
+
+    #[test]
+    fn test_parse_block_if_inside_single_line_if_is_error() {
+        assert!(line_statements("20 IF A THEN IF B THEN").is_err());
+        assert!(line_statements("20 IF A THEN PRINT 1 ELSE IF B THEN").is_err());
+        assert!(line_statements("20 IF A THEN ELSE PRINT 1").is_err());
     }
 
     /// Parse one IF line and return its THEN part and its ELSE part.
