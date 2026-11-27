@@ -655,6 +655,7 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("STEREO", 0xA2),
     ("OVERLAY", 0xA3),
     ("ENDWHILE", 0xA4),
+    ("ENDIF", 0xA5),
 ];
 
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
@@ -836,6 +837,14 @@ mod tests {
                 Token::Operator('+')
             ]
         );
+    }
+
+    #[test]
+    fn test_tokenize_endif_line() {
+        let result = tokenize("40 ENDIF").unwrap();
+        assert_eq!(result.line_number, Some(40));
+        assert_eq!(result.tokens, vec![Token::ExtendedKeyword(0xC8, 0xA5)]);
+        assert_eq!(detokenize(&result).unwrap(), "40 ENDIF");
     }
 
     #[test]
