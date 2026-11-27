@@ -614,7 +614,9 @@ fn define_routines(executor: &mut Executor, line_number: u16, items: &[Item]) {
                 expression,
             }) => {
                 let body = match expression {
-                    Some(expression) => FunctionBody::Expression(expression.clone()),
+                    Some(expression) => {
+                        FunctionBody::Expression(expression.clone(), Some(position.line))
+                    }
                     None => FunctionBody::Lines(position),
                 };
                 executor.define_function(name.clone(), params.clone(), body);
@@ -750,9 +752,11 @@ fn run_lines(
             _ => line_number,
         };
 
-        // An error in a function body: use the line of the body statement
+        // An error in a function body: use the line of the body statement,
+        // or the DEF line of a single-line function
         let body = std::mem::take(&mut *failure.borrow_mut());
-        let error_line = body.line.unwrap_or(step_line);
+        let function_line = executor.take_function_error_line();
+        let error_line = body.line.or(function_line).unwrap_or(step_line);
 
         match (body.abort, error) {
             (Some(BodyAbort::Stop), _) => break,
@@ -852,6 +856,8 @@ fn run_function_body(
             Err(error) => Err(error),
         };
 
+        // The DEF line of a single-line function that failed in this body
+        let function_line = executor.take_function_error_line();
         return match result {
             Ok(()) => {
                 // The caller ignored the errors of earlier body runs (for
@@ -864,11 +870,13 @@ fn run_function_body(
             }
             Err(StepError::Runtime(e)) => {
                 // Keep the line of the deepest failed statement
-                failure.borrow_mut().line.get_or_insert(line_number);
+                let line = function_line.unwrap_or(line_number);
+                failure.borrow_mut().line.get_or_insert(line);
                 Err(e)
             }
             Err(StepError::RuntimeAt(e, error_line)) => {
-                failure.borrow_mut().line.get_or_insert(error_line);
+                let line = function_line.unwrap_or(error_line);
+                failure.borrow_mut().line.get_or_insert(line);
                 Err(e)
             }
             Err(StepError::Fatal(message)) => {

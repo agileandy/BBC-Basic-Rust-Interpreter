@@ -147,7 +147,7 @@ fn test_function_that_calls_itself_does_not_hang() {
         "30 DEF FNr(N) = FNr(1 / (N - 1))",
     ]);
 
-    assert_eq!(result, Err("Division by zero at line 10".to_string()));
+    assert_eq!(result, Err("Division by zero at line 30".to_string()));
     assert_eq!(output, "");
 }
 
@@ -160,7 +160,7 @@ fn test_two_functions_that_call_each_other_do_not_hang() {
         "40 DEF FNb(N) = FNa(1 / (N - 1))",
     ]);
 
-    assert_eq!(result, Err("Division by zero at line 10".to_string()));
+    assert_eq!(result, Err("Division by zero at line 40".to_string()));
     assert_eq!(output, "");
 }
 

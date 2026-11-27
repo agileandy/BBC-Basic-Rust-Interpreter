@@ -144,3 +144,4 @@ mod issue_156_program_corpus;
 mod issue_163_dim_empty_index;
 mod issue_158_not_bitwise;
 mod issue_164_power_of_negative_base;
+mod issue_165_single_line_function_error_line;
