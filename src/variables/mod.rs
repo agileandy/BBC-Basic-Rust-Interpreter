@@ -197,12 +197,18 @@ impl VariableStore {
     ///
     /// Each value in `dimensions` is the element count of that dimension,
     /// not the top index. `DIM A(N)` must pass N + 1.
+    ///
+    /// An array that has dimensions gives Bad DIM. An array that LOCAL
+    /// declared and that has no dimensions yet can be dimensioned.
     pub fn dim_array(
         &mut self,
         name: String,
         dimensions: Vec<usize>,
         var_type: VarType,
     ) -> Result<()> {
+        if let Some(Some(_)) = self.arrays.get(&name) {
+            return Err(BBCBasicError::BadDim);
+        }
         if dimensions.is_empty() {
             return Err(BBCBasicError::SyntaxError {
                 message: "Array must have at least one dimension".to_string(),
