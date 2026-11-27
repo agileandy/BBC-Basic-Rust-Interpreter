@@ -2312,6 +2312,14 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
                         (30, op, 2) // Consume 2 tokens
                     } else if *ch == '<' && matches!(tokens[*pos + 1], Token::Operator('>')) {
                         (30, BinaryOperator::NotEqual, 2)
+                    } else if tokens[*pos + 1] == Token::Operator(*ch) {
+                        // << and >> (BBC BASIC V) have the precedence of a comparison
+                        let op = if *ch == '<' {
+                            BinaryOperator::LeftShift
+                        } else {
+                            BinaryOperator::RightShift
+                        };
+                        (30, op, 2)
                     } else if let Some(p) = get_precedence(*ch) {
                         if let Some(binary_op) = char_to_binary_op(*ch) {
                             (p, binary_op, 1)
@@ -3440,5 +3448,64 @@ mod tests {
         let line = crate::tokenizer::tokenize("QUIT").unwrap();
         let stmt = parse_statement(&line).unwrap();
         assert_eq!(stmt, Statement::Quit);
+    }
+
+    /// Tokenize the text and parse it as one expression.
+    fn parse_text(text: &str) -> Result<Expression> {
+        let line = crate::tokenizer::tokenize(text).unwrap();
+        parse_expression(&line.tokens)
+    }
+
+    fn binary(left: Expression, op: BinaryOperator, right: Expression) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }
+    }
+
+    #[test]
+    fn test_parse_left_shift() {
+        assert_eq!(
+            parse_text("1 << 4").unwrap(),
+            binary(
+                Expression::Integer(1),
+                BinaryOperator::LeftShift,
+                Expression::Integer(4)
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_right_shift() {
+        assert_eq!(
+            parse_text("256 >> 4").unwrap(),
+            binary(
+                Expression::Integer(256),
+                BinaryOperator::RightShift,
+                Expression::Integer(4)
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_comparisons_keep_their_operators() {
+        let a = || Expression::Variable("A%".to_string());
+        let b = || Expression::Variable("B%".to_string());
+        let cases = [
+            ("A% < B%", BinaryOperator::LessThan),
+            ("A% <= B%", BinaryOperator::LessThanOrEqual),
+            ("A% <> B%", BinaryOperator::NotEqual),
+            ("A% > B%", BinaryOperator::GreaterThan),
+            ("A% >= B%", BinaryOperator::GreaterThanOrEqual),
+        ];
+        for (text, op) in cases {
+            assert_eq!(parse_text(text).unwrap(), binary(a(), op, b()), "{text}");
+        }
+    }
+
+    #[test]
+    fn test_parse_unsigned_right_shift_gives_error() {
+        assert!(parse_text("1 >>> 2").is_err());
     }
 }
