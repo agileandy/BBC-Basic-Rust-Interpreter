@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **795 tests** covering all major components
+- **1128 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -210,20 +210,19 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **795 total tests** - All passing (307 library + 29 graphics + 459 program and binary)
+- **1128 total tests** - All passing (385 library + 29 graphics + 714 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **Operators**: `OR` does not work, and `EOR` acts as `OR` (issue #80).
-- **Keywords**: a keyword matches in any letter case, so a lower-case variable name such as `count`, `time` or `to` gives an error.
-- **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic.
-- **Memory**: the `?`, `!` and `$` memory operators and the `@%` print format variable are not supported.
-- **Functions**: `RND`, `COUNT`, `POS` and `VPOS` with no bracket are not supported. `GET`, `GET$`, `INKEY` and `INKEY$` are not implemented.
+- **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. `PRINT` does not put a number in a field of 10 characters (issue #91).
+- **Errors**: `ON ERROR` does not catch some errors, such as a jump to a line that does not exist, and some `ERR` numbers are different from a BBC Micro (issue #94).
+- **Screen**: `MODE` changes the graphics state, but the terminal shows no colours. The interpreter starts in mode 0, not mode 7. `VDU`, `INKEY` and `INKEY$` are not implemented.
+- **Keyboard**: `GET` and `GET$` use the raw terminal mode. That mode is tested through a pseudo-terminal only.
+- **Files**: `PRINT#` writes text, not the binary records of a BBC Micro.
 - **Immediate mode**: a loop typed on more than one line with no line numbers does not work. A typed line is one unit.
-- **Errors**: an error message shows an internal name, such as `DivisionByZero`, not the BBC BASIC text.
 
 ### Non-Standard Extensions
 
