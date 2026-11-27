@@ -1,0 +1,169 @@
+//! Parse a whole-array statement (issue #187): `A() = B()`, `A() = 5`,
+//! `A() = 1, 2, 3`, `A() = B() * 2 + C()` and `A() += 1`.
+//!
+//! The reference is the manual of BBC BASIC for Windows, page bbcwin2.html,
+//! "Array arithmetic" and "Initialising arrays". An array expression is
+//! strictly from left to right. A scalar operand binds only the operators
+//! with a higher priority than the operator before it, as the function
+//! `expra` of BBC BASIC for SDL (src/bbeval.c) does. So `B() + 2 * 3` adds 6.
+
+use super::{parse_expr_precedence, tokens_text, BinaryOperator, Expression, Statement};
+use crate::error::{BBCBasicError, Result};
+use crate::tokenizer::Token;
+
+/// An operand of an array expression
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayOperand {
+    /// A whole array, such as `B()`. The name has no bracket.
+    Array(String),
+    /// A scalar expression, evaluated one time
+    Scalar(Expression),
+}
+
+/// The right side of a whole-array statement
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrayExpression {
+    /// The first operand
+    pub first: ArrayOperand,
+    /// The next operators and operands, from left to right
+    pub rest: Vec<(BinaryOperator, ArrayOperand)>,
+    /// The values after the first comma, for the elements 1, 2 and more
+    pub list: Vec<Expression>,
+}
+
+/// If the tokens at `pos` are a whole-array reference `name()`, give the
+/// name. Issues #188, #189 and #190 use this for the array functions.
+pub fn parse_array_reference(tokens: &[Token], pos: usize) -> Option<&str> {
+    match tokens.get(pos..pos + 3) {
+        Some([Token::Identifier(name), Token::Separator('('), Token::Separator(')')]) => Some(name),
+        _ => None,
+    }
+}
+
+/// The keyword codes of the operators AND, DIV, EOR, MOD and OR
+const AND: u8 = 0x80;
+const DIV: u8 = 0x81;
+const EOR: u8 = 0x82;
+const MOD: u8 = 0x83;
+const OR: u8 = 0x84;
+
+/// The array operator of a token. The manual gives + - * / ^ AND OR EOR DIV
+/// and MOD. The dot product is issue #189.
+fn array_operator(token: &Token) -> Option<BinaryOperator> {
+    match token {
+        Token::Operator('+') => Some(BinaryOperator::Add),
+        Token::Operator('-') => Some(BinaryOperator::Subtract),
+        Token::Operator('*') => Some(BinaryOperator::Multiply),
+        Token::Operator('/') => Some(BinaryOperator::Divide),
+        Token::Operator('^') => Some(BinaryOperator::Power),
+        Token::Keyword(AND) => Some(BinaryOperator::And),
+        Token::Keyword(DIV) => Some(BinaryOperator::IntegerDivide),
+        Token::Keyword(EOR) => Some(BinaryOperator::Eor),
+        Token::Keyword(MOD) => Some(BinaryOperator::Modulo),
+        Token::Keyword(OR) => Some(BinaryOperator::Or),
+        _ => None,
+    }
+}
+
+/// The lowest precedence that a scalar operand after `op` can contain. `None`
+/// is the first operand. These are the levels of `expra` in BBC BASIC for SDL.
+fn scalar_precedence(op: Option<&BinaryOperator>) -> u8 {
+    match op {
+        Some(BinaryOperator::Or | BinaryOperator::Eor) => 20,
+        Some(BinaryOperator::And) => 40,
+        Some(BinaryOperator::Add | BinaryOperator::Subtract) => 50,
+        _ => 60,
+    }
+}
+
+fn syntax_error(message: String, line_number: Option<u16>) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message,
+        line: line_number,
+    }
+}
+
+/// Parse one operand at `pos`
+fn parse_operand(
+    tokens: &[Token],
+    pos: &mut usize,
+    op: Option<&BinaryOperator>,
+) -> Result<ArrayOperand> {
+    if let Some(name) = parse_array_reference(tokens, *pos) {
+        *pos += 3;
+        return Ok(ArrayOperand::Array(name.to_string()));
+    }
+    let scalar = parse_expr_precedence(tokens, pos, scalar_precedence(op))?;
+    Ok(ArrayOperand::Scalar(scalar))
+}
+
+/// Parse a statement that starts with `name()`. The caller checks the first
+/// 3 tokens with `parse_array_reference`.
+pub(super) fn parse_whole_array_statement(
+    tokens: &[Token],
+    line_number: Option<u16>,
+) -> Result<Statement> {
+    let target = parse_array_reference(tokens, 0)
+        .expect("the caller checks the array reference")
+        .to_string();
+
+    // `=`, or a compound assignment such as `+=`
+    let (operator, mut pos) = match (tokens.get(3), tokens.get(4)) {
+        (Some(Token::Operator('=')), _) => (None, 4),
+        (Some(token), Some(Token::Operator('='))) if array_operator(token).is_some() => {
+            (array_operator(token), 5)
+        }
+        _ => {
+            return Err(syntax_error(
+                "Expected '=' after array".to_string(),
+                line_number,
+            ))
+        }
+    };
+    if pos >= tokens.len() {
+        return Err(syntax_error("Expected expression".to_string(), line_number));
+    }
+
+    // A unary minus before the first array is 0 minus the array, as in BBC
+    // BASIC for SDL. A minus before a number is part of the number.
+    let mut rest = Vec::new();
+    let first = match (tokens.get(pos), parse_array_reference(tokens, pos + 1)) {
+        (Some(Token::Operator('-')), Some(name)) => {
+            rest.push((
+                BinaryOperator::Subtract,
+                ArrayOperand::Array(name.to_string()),
+            ));
+            pos += 4;
+            ArrayOperand::Scalar(Expression::Integer(0))
+        }
+        _ => parse_operand(tokens, &mut pos, None)?,
+    };
+
+    while let Some(op) = tokens.get(pos).and_then(array_operator) {
+        pos += 1;
+        let operand = parse_operand(tokens, &mut pos, Some(&op))?;
+        rest.push((op, operand));
+    }
+
+    let mut list = Vec::new();
+    while let Some(Token::Separator(',')) = tokens.get(pos) {
+        pos += 1;
+        list.push(parse_expr_precedence(tokens, &mut pos, 0)?);
+    }
+
+    if let Some(token) = tokens.get(pos) {
+        return Err(syntax_error(
+            format!(
+                "Unexpected {} after array expression",
+                tokens_text(std::slice::from_ref(token))
+            ),
+            line_number,
+        ));
+    }
+
+    Ok(Statement::ArrayAssign {
+        target,
+        operator,
+        value: ArrayExpression { first, rest, list },
+    })
+}

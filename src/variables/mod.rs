@@ -230,8 +230,8 @@ impl VariableStore {
         Ok(())
     }
 
-    /// Get a dimensioned array by name
-    fn get_array(&self, name: &str) -> Result<&Variable> {
+    /// Get a dimensioned array by name. An array with no DIM gives the Array error.
+    pub fn get_array(&self, name: &str) -> Result<&Variable> {
         match self.arrays.get(name) {
             Some(Some(array)) => Ok(array),
             Some(None) | None => Err(BBCBasicError::Array),
@@ -244,6 +244,13 @@ impl VariableStore {
             Some(Some(array)) => Ok(array),
             Some(None) | None => Err(BBCBasicError::Array),
         }
+    }
+
+    /// Replace all the elements of a dimensioned array (issue #187). An array
+    /// with no DIM gives the Array error.
+    pub fn replace_array(&mut self, name: &str, array: Variable) -> Result<()> {
+        *self.get_array_mut(name)? = array;
+        Ok(())
     }
 
     /// Get a variable by name (immutable)

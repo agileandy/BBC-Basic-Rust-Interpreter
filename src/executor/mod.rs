@@ -7,6 +7,7 @@ mod console;
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
 mod vdu;
+mod whole_array;
 
 pub use console::{Console, Interrupt};
 
@@ -566,6 +567,11 @@ impl Executor {
                 indices,
                 expression,
             } => self.execute_array_assignment(name, indices, expression),
+            Statement::ArrayAssign {
+                target,
+                operator,
+                value,
+            } => self.execute_array_assign(target, operator.as_ref(), value),
             Statement::MemoryAssignment {
                 width,
                 address,
