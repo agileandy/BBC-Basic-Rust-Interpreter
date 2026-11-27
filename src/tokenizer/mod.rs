@@ -338,7 +338,8 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 while chars.next().is_some() {}
             }
             // # starts the channel of a file statement, such as PRINT#
-            '+' | '*' | '/' | '^' | '<' | '>' | '=' | '#' => {
+            // ~ selects hex output, as in PRINT ~X and STR$~(X)
+            '+' | '*' | '/' | '^' | '<' | '>' | '=' | '#' | '~' => {
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
@@ -404,6 +405,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Operator('<'), Token::Operator('>')) => false,
                 // The DATA text holds its own spaces
                 (_, Token::DataText(_)) => false,
+                // The hex forms ~X and STR$~(X) list as typed
+                (Token::Operator('~'), _) => false,
+                (Token::Keyword(0xC3), Token::Operator('~')) => false,
                 // Need space between most tokens
                 _ => true,
             };
@@ -1084,7 +1088,7 @@ mod tests {
     }
 
     /// The characters that the tokenizer does not know (issue 62).
-    const UNKNOWN_CHARACTERS: [char; 11] = ['~', '?', '!', '@', '|', '\\', '[', ']', '{', '}', '`'];
+    const UNKNOWN_CHARACTERS: [char; 10] = ['?', '!', '@', '|', '\\', '[', ']', '{', '}', '`'];
 
     #[test]
     fn test_unknown_character_in_statement_gives_syntax_error() {
@@ -1122,6 +1126,36 @@ mod tests {
         for ch in UNKNOWN_CHARACTERS {
             let source = format!("10 DATA 1, {}2", ch);
             assert!(tokenize(&source).is_ok(), "{:?} gave an error", source);
+        }
+    }
+
+    #[test]
+    fn test_tilde_is_an_operator_for_hex_output() {
+        let line = tokenize("10 PRINT ~X").unwrap();
+        assert_eq!(
+            line.tokens,
+            vec![
+                Token::Keyword(0xF1),
+                Token::Operator('~'),
+                Token::Identifier("X".to_string()),
+            ]
+        );
+        let line = tokenize("10 PRINT STR$~(X)").unwrap();
+        assert_eq!(line.tokens[1], Token::Keyword(0xC3)); // STR$
+        assert_eq!(line.tokens[2], Token::Operator('~'));
+    }
+
+    #[test]
+    fn test_tilde_in_string_is_part_of_the_string() {
+        let line = tokenize("10 PRINT \"~X\"").unwrap();
+        assert_eq!(line.tokens[1], Token::String("~X".to_string()));
+    }
+
+    #[test]
+    fn test_detokenize_shows_tilde_as_typed() {
+        for source in ["10 PRINT ~X", "10 PRINT STR$~(X)", "10 PRINT ~-1;~A%"] {
+            let line = tokenize(source).unwrap();
+            assert_eq!(detokenize(&line).unwrap(), source);
         }
     }
 

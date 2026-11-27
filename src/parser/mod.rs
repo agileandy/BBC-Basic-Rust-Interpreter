@@ -85,6 +85,7 @@ pub enum PrintItem {
     Expression(Expression),
     Tab(Expression), // TAB(n)
     Spc(Expression), // SPC(n)
+    Hex,             // ~ : the numeric items up to the next , or ; print in hex
     Semicolon,       // ;
     Comma,           // ,
 }
@@ -599,6 +600,10 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
             }
             Token::Separator(',') => {
                 items.push(PrintItem::Comma);
+                pos += 1;
+            }
+            Token::Operator('~') => {
+                items.push(PrintItem::Hex);
                 pos += 1;
             }
             // Handle TAB(expr)
@@ -1524,6 +1529,10 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
             }
             Token::Separator(',') => {
                 items.push(PrintItem::Comma);
+                pos += 1;
+            }
+            Token::Operator('~') => {
+                items.push(PrintItem::Hex);
                 pos += 1;
             }
             // Handle TAB(expr)
@@ -2569,6 +2578,11 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                     is_user_function = true;
                     name.clone()
                 }
+                // STR$~(X) gives the hex text of X
+                Some(Token::Operator('~')) if keyword == "STR$" => {
+                    *pos += 1;
+                    "STR$~".to_string()
+                }
                 _ => keyword,
             };
 
@@ -2873,6 +2887,57 @@ mod tests {
             stmt,
             Statement::Print {
                 items: vec![PrintItem::Expression(Expression::Integer(42))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_print_tilde_gives_hex_item() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("PRINT ~X;~5").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::Print {
+                items: vec![
+                    PrintItem::Hex,
+                    PrintItem::Expression(Expression::Variable("X".to_string())),
+                    PrintItem::Semicolon,
+                    PrintItem::Hex,
+                    PrintItem::Expression(Expression::Integer(5)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_str_tilde_gives_hex_function_call() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("PRINT STR$~(X)").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::Print {
+                items: vec![PrintItem::Expression(Expression::FunctionCall {
+                    name: "STR$~".to_string(),
+                    args: vec![Expression::Variable("X".to_string())],
+                })],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_print_tilde_in_string_is_a_string() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("PRINT \"~X\"").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("~X".to_string()))],
             }
         );
     }

@@ -26,8 +26,9 @@ fn syntax_error(line: &str) -> String {
 }
 
 #[test]
-fn test_print_tilde_gives_unknown_character_error() {
-    assert_eq!(syntax_error("10 PRINT ~5"), "Unknown character '~'");
+fn test_print_exclamation_mark_gives_unknown_character_error() {
+    // Issue #63 makes `~` a known character, so this test uses `!`
+    assert_eq!(syntax_error("10 PRINT !5"), "Unknown character '!'");
 }
 
 #[test]
@@ -40,7 +41,7 @@ fn test_program_with_unknown_character_line_does_not_start() {
     // The line with the error is not stored, so the program has no lines.
     let mut executor = Executor::new();
     let mut program = ProgramStore::new();
-    for line in ["10 PRINT ~5", "20 X = ?100"] {
+    for line in ["10 PRINT !5", "20 X = ?100"] {
         if let Ok(tokenized) = tokenize(line) {
             program.store_line(tokenized);
         }
