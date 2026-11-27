@@ -1956,7 +1956,18 @@ impl Executor {
         self.graphics.reset_for_mode(&screen_mode);
         self.text_foreground = screen_mode.colours - 1;
         self.text_background = 0;
+        if let Some(console) = self.console.0.as_mut() {
+            console.screen_mode(screen_mode);
+        }
+        self.send_text_colours();
         self.execute_cls()
+    }
+
+    /// Give the text colours to the console, if there is one (issue #174).
+    fn send_text_colours(&mut self) {
+        if let Some(console) = self.console.0.as_mut() {
+            console.text_colours(self.text_foreground, self.text_background);
+        }
     }
 
     /// Execute COLOUR statement - set the text foreground or background colour
@@ -1970,7 +1981,8 @@ impl Executor {
     /// 128 sets the foreground and a byte from 128 sets the background. The
     /// colour is reduced to the colour count of the current mode, as on a BBC
     /// Micro. No escape code goes to the output: colour output to a real
-    /// terminal is out of scope (issue #101).
+    /// terminal is out of scope (issue #101). A console gets the colours: the
+    /// IDE shows them (issue #174).
     fn set_text_colour(&mut self, byte: u8) {
         let colour = (byte & 0x7F) % self.screen_mode.colours;
         if byte < 128 {
@@ -1978,6 +1990,7 @@ impl Executor {
         } else {
             self.text_background = colour;
         }
+        self.send_text_colours();
     }
 
     /// The current screen mode

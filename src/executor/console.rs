@@ -5,6 +5,7 @@
 //! as the command prompt does. The IDE gives a console that sends the text
 //! to its run pane and takes the keys from it.
 
+use crate::graphics::ScreenMode;
 use std::time::Duration;
 
 /// A request to stop the program. The run loop asks for it before each
@@ -37,6 +38,14 @@ pub trait Console {
     /// Give the pending interrupt, if there is one. An Escape stops the
     /// program one time, so this call clears it. A Quit stays.
     fn interrupt(&mut self) -> Option<Interrupt>;
+
+    /// MODE selected a screen mode. A clear of the screen comes after it.
+    /// The default does nothing (issue #174).
+    fn screen_mode(&mut self, _mode: ScreenMode) {}
+
+    /// The text colours changed (COLOUR, VDU 17 or MODE): the logical
+    /// foreground and background colours. The default does nothing.
+    fn text_colours(&mut self, _foreground: u8, _background: u8) {}
 }
 
 /// The console of an executor, if a front end gave one.

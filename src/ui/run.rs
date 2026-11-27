@@ -13,13 +13,14 @@
 
 mod worker;
 
-use super::{Context, Outcome};
+use super::{theme, Context, Outcome};
+use crate::graphics::ScreenMode;
 use crate::program::ProgramStore;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -54,10 +55,17 @@ const RIGHT: char = '\u{89}';
 const DOWN: char = '\u{8a}';
 const UP: char = '\u{8b}';
 
+/// One character of the screen, with the text colours of its print.
+#[derive(Debug, Clone, Copy)]
+struct Glyph {
+    c: char,
+    style: Style,
+}
+
 /// One row of the screen.
 #[derive(Debug, Default)]
 struct Row {
-    chars: Vec<char>,
+    glyphs: Vec<Glyph>,
     /// True if the row continues the row above it: the text wrapped
     continued: bool,
 }
@@ -72,6 +80,12 @@ struct Screen {
     /// The cursor: the row index and the column
     row: usize,
     col: usize,
+    /// The text colours for the next print. The default style shows the
+    /// colours of the pane.
+    style: Style,
+    /// The colours of a cell with no text: the text colours at the last
+    /// clear, as CLS does on a BBC Micro
+    paper: Style,
 }
 
 impl Screen {
@@ -94,12 +108,20 @@ impl Screen {
                         self.next_row(true);
                     }
                     let col = self.col;
-                    let chars = &mut self.rows[self.row].chars;
-                    if col < chars.len() {
-                        chars[col] = c;
+                    let glyph = Glyph {
+                        c,
+                        style: self.style,
+                    };
+                    let blank = Glyph {
+                        c: ' ',
+                        style: self.paper,
+                    };
+                    let glyphs = &mut self.rows[self.row].glyphs;
+                    if col < glyphs.len() {
+                        glyphs[col] = glyph;
                     } else {
-                        chars.resize(col, ' ');
-                        chars.push(c);
+                        glyphs.resize(col, blank);
+                        glyphs.push(glyph);
                     }
                     self.col += 1;
                 }
@@ -127,6 +149,7 @@ impl Screen {
         self.rows.clear();
         self.row = 0;
         self.col = 0;
+        self.paper = self.style;
     }
 
     /// The count of rows, with the row of the cursor.
@@ -167,6 +190,12 @@ pub struct RunPane {
     /// The width and the height of the pane at the last draw
     width: Cell<usize>,
     page: Cell<usize>,
+    /// The screen mode of the last MODE. None before the first MODE: the
+    /// screen then has the width of the pane and 2 colours, as mode 0.
+    mode: Option<ScreenMode>,
+    /// The count of columns that the last draw showed, if the pane was
+    /// narrower than the screen of the mode
+    cut: Cell<Option<usize>>,
     /// True if a message came after the last tick
     changed: bool,
 }
@@ -179,12 +208,17 @@ impl RunPane {
 
     /// The text for the status line.
     pub fn status(&self) -> String {
-        if self.is_running() {
+        let state = if self.is_running() {
             "running"
         } else {
             "ready"
+        };
+        match (self.cut.get(), self.mode) {
+            (Some(shown), Some(mode)) => {
+                format!("{}  left {} of {} columns", state, shown, mode.text_columns)
+            }
+            _ => state.to_string(),
         }
-        .to_string()
     }
 
     /// The document line to show in the edit mode: the line of an error
@@ -240,6 +274,9 @@ impl RunPane {
                     thread,
                 });
                 self.synced = None;
+                // A new executor starts in mode 0 with the default colours
+                self.mode = None;
+                self.screen.style = Style::default();
                 true
             }
             Err(error) => {
@@ -389,6 +426,14 @@ impl RunPane {
         match message {
             FromWorker::Text(text) => self.screen.write(&text, self.width()),
             FromWorker::Clear => self.screen.clear(),
+            FromWorker::Mode(mode) => {
+                self.mode = Some(mode);
+                self.scroll = 0;
+            }
+            FromWorker::Colours(foreground, background) => {
+                let colours = self.mode.map_or(2, |mode| mode.colours);
+                self.screen.style = theme::screen(foreground, background, colours);
+            }
             FromWorker::Line(line) => {
                 let answer = self.answer(&line, ctx);
                 match answer {
@@ -482,11 +527,41 @@ impl RunPane {
         true
     }
 
+    /// The count of columns of the text screen: the columns of the mode
+    /// after a MODE, or the width of the pane.
     fn width(&self) -> usize {
+        if let Some(mode) = self.mode {
+            return mode.text_columns;
+        }
         match self.width.get() {
             0 => DEFAULT_WIDTH,
             width => width,
         }
+    }
+
+    /// The part of the pane for the text screen. A pane that is wider than
+    /// the screen of the mode has the screen in the centre, with a dim
+    /// border at each side if there is space. A pane that is narrower shows
+    /// the left part, and the status line says so.
+    fn screen_area(&self, frame: &mut Frame, area: Rect) -> Rect {
+        self.cut.set(None);
+        let Some(columns) = self.mode.map(|mode| mode.text_columns as u16) else {
+            return area;
+        };
+        if columns > area.width {
+            self.cut.set(Some(usize::from(area.width)));
+            return area;
+        }
+        let x = area.x + (area.width - columns) / 2;
+        let screen = Rect::new(x, area.y, columns, area.height);
+        if area.width >= columns + 2 {
+            let border = Rect::new(x - 1, area.y, columns + 2, area.height);
+            let block = Block::new()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(theme::dim());
+            frame.render_widget(block, border);
+        }
+        screen
     }
 
     fn page(&self) -> usize {
@@ -498,10 +573,11 @@ impl RunPane {
 
     /// Draw the text screen. Issue #173 adds the canvas for the graphics.
     pub fn draw(&self, frame: &mut Frame, area: Rect, _ctx: &Context) {
-        let style = Style::new().fg(Color::White).bg(Color::Black);
         let height = usize::from(area.height);
         self.width.set(usize::from(area.width));
         self.page.set(height);
+        frame.render_widget(Paragraph::new("").style(theme::text()), area);
+        let area = self.screen_area(frame, area);
         let total = self.screen.len();
         let scroll = self.scroll.min(total.saturating_sub(height));
         let start = total.saturating_sub(height + scroll);
@@ -511,16 +587,24 @@ impl RunPane {
             .iter()
             .skip(start)
             .take(height)
-            .map(|row| Line::from(row.chars.iter().collect::<String>()))
+            .map(|row| {
+                let spans: Vec<Span> = row
+                    .glyphs
+                    .iter()
+                    .map(|glyph| Span::styled(glyph.c.to_string(), glyph.style))
+                    .collect();
+                Line::from(spans)
+            })
             .collect();
-        frame.render_widget(Paragraph::new(rows).style(style), area);
+        let paper = theme::text().patch(self.screen.paper);
+        frame.render_widget(Paragraph::new(rows).style(paper), area);
         let on_page = (start..start + height).contains(&self.screen.row);
         if scroll == 0 && on_page && area.width > 0 {
             let x = self.screen.col.min(usize::from(area.width) - 1);
             let y = self.screen.row - start;
             let position = Position::new(area.x + x as u16, area.y + y as u16);
             if let Some(cell) = frame.buffer_mut().cell_mut(position) {
-                cell.set_style(style.add_modifier(Modifier::REVERSED));
+                cell.set_style(Style::new().add_modifier(Modifier::REVERSED));
             }
         }
     }
@@ -579,7 +663,14 @@ mod tests {
         screen
             .rows
             .iter()
-            .map(|row| row.chars.iter().collect::<String>().trim_end().to_string())
+            .map(|row| {
+                row.glyphs
+                    .iter()
+                    .map(|glyph| glyph.c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
             .collect()
     }
 
@@ -658,7 +749,20 @@ mod tests {
         }
         assert!(pane.wait_for_run(&mut ctx, LIMIT));
         let rows = text(&pane.screen);
-        assert_eq!(rows, ["> RUN", "A", "> RUN", "A", ">"]);
+        assert_eq!(
+            rows,
+            [
+                "BBC Computer 32K",
+                "",
+                "BASIC",
+                "",
+                "> RUN",
+                "A",
+                "> RUN",
+                "A",
+                ">"
+            ]
+        );
     }
 
     #[test]

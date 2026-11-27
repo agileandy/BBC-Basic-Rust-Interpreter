@@ -6,10 +6,10 @@
 //! entries do not show. A question or the input line for a name uses the
 //! last line of the pane.
 
-use super::{Context, Document, Mode, Outcome};
+use super::{theme, Context, Document, Mode, Outcome};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::cell::Cell;
@@ -307,9 +307,9 @@ impl FilesPane {
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, _ctx: &Context) {
-        let plain = Style::new().fg(Color::White).bg(Color::Black);
-        let cyan = Style::new().fg(Color::Cyan).bg(Color::Black);
-        let yellow = Style::new().fg(Color::Yellow).bg(Color::Black);
+        let plain = theme::text();
+        let cyan = theme::info();
+        let yellow = theme::highlight();
         frame.render_widget(Paragraph::new("").style(plain), area);
         if area.height == 0 {
             return;
@@ -563,11 +563,27 @@ fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
             file.write_all(text.as_bytes())?;
             file.sync_all()
         })
+        .and_then(|()| keep_permissions(path, &temp))
         .and_then(|()| std::fs::rename(&temp, path));
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+/// Give the temporary file the mode bits of the old file, if there is an
+/// old file, so that a save does not change them (issue #174).
+#[cfg(unix)]
+fn keep_permissions(old: &Path, temp: &Path) -> std::io::Result<()> {
+    match std::fs::metadata(old) {
+        Ok(metadata) => std::fs::set_permissions(temp, metadata.permissions()),
+        Err(_) => Ok(()),
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_permissions(_old: &Path, _temp: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// The last part of a path, for a message.
