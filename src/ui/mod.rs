@@ -4,15 +4,21 @@
 //! The state (`App`) is separate from the drawing and from the key reading.
 //! A test sends key events to `App::key` and draws with a test backend.
 
+mod document;
 mod editor;
 mod files;
 mod frame;
 mod run;
 
+pub use document::{Document, LineCache, LineMark};
+
 use crate::executor::Executor;
 use crate::program::ProgramStore;
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -103,37 +109,52 @@ const QUIT_QUESTION: &str = "Not saved. Press ^Q again to quit";
 /// The text for a global key that a later issue gives its action.
 const NOT_AVAILABLE: &str = "not available yet";
 
+/// The state that the 3 panes share. The frame gives it to each pane:
+/// `draw(&self, frame, area, &Context)` and `key(&mut self, key, &mut Context)`.
+///
+/// - `document` is the program text: the source. The edit mode changes it.
+///   The files mode loads it (replace it with `Document::from_text`) and saves
+///   it (`Document::text`, then `set_changed(false)`).
+/// - `program` is the stored program. The frame sets it from the text when
+///   the user leaves the edit mode. The run mode can make it again with
+///   `document.to_program()`, which also gives the marks of the faults.
+/// - `executor` is the interpreter for a run.
+/// - `message` is the text of the status line. A pane can set it.
+pub struct Context {
+    pub document: Document,
+    pub program: ProgramStore,
+    pub executor: Executor,
+    pub message: String,
+}
+
 /// The state of the IDE.
 pub struct App {
     mode: Mode,
-    file_name: Option<String>,
-    changed: bool,
-    message: String,
     quit_asked: bool,
     quit: bool,
     editor: editor::EditorPane,
     run: run::RunPane,
     files: files::FilesPane,
-    /// The interpreter that the panes share
-    pub executor: Executor,
-    /// The program that the panes share
-    pub program: ProgramStore,
+    context: Context,
 }
 
 impl App {
+    /// The IDE with the text of the file, if it has a file name.
     pub fn new(file_name: Option<String>) -> Self {
+        let (document, message) = Document::open(file_name);
         Self {
             mode: Mode::Edit,
-            file_name,
-            changed: false,
-            message: String::new(),
             quit_asked: false,
             quit: false,
-            editor: editor::EditorPane::default(),
+            editor: editor::EditorPane::new(&document),
             run: run::RunPane::default(),
             files: files::FilesPane::default(),
-            executor: Executor::new(),
-            program: ProgramStore::new(),
+            context: Context {
+                document,
+                program: ProgramStore::new(),
+                executor: Executor::new(),
+                message: message.unwrap_or_default(),
+            },
         }
     }
 
@@ -142,16 +163,65 @@ impl App {
     }
 
     pub fn message(&self) -> &str {
-        &self.message
+        &self.context.message
     }
 
     pub fn should_quit(&self) -> bool {
         self.quit
     }
 
+    /// The program text.
+    pub fn document(&self) -> &Document {
+        &self.context.document
+    }
+
+    /// The stored program, from the text at the last change of mode.
+    pub fn program(&self) -> &ProgramStore {
+        &self.context.program
+    }
+
+    /// The cursor of the editor: the line index and the character index.
+    pub fn cursor(&self) -> (usize, usize) {
+        self.editor.cursor()
+    }
+
+    /// The faults in the text that the editor shows.
+    pub fn marks(&self) -> &[LineMark] {
+        self.editor.marks()
+    }
+
     /// Set the mark for changes that are not saved.
     pub fn set_changed(&mut self, changed: bool) {
-        self.changed = changed;
+        self.context.document.set_changed(changed);
+    }
+
+    /// Put pasted text in the editor. Other modes ignore a paste.
+    pub fn paste(&mut self, text: &str) {
+        if self.mode == Mode::Edit {
+            self.editor.paste(text, &mut self.context);
+        }
+    }
+
+    /// Change the mode. When the user leaves the edit mode, the text becomes
+    /// the stored program.
+    fn set_mode(&mut self, mode: Mode) {
+        if self.mode == Mode::Edit {
+            self.editor.leave(&mut self.context);
+        }
+        if mode == Mode::Edit {
+            self.editor.resume(&self.context);
+        }
+        self.mode = mode;
+    }
+
+    /// Use one terminal event: a key or a paste. A resize needs no action:
+    /// the next draw uses the new size.
+    pub fn event(&mut self, event: Event) {
+        match event {
+            Event::Key(key) => self.key(key),
+            Event::Paste(text) => self.paste(&text),
+            _ => {}
+        }
     }
 
     /// Use one key: first the global keys, then the pane of the current mode.
@@ -163,25 +233,26 @@ impl App {
         if !is_quit && self.quit_asked {
             // Any other key cancels the question.
             self.quit_asked = false;
-            self.message.clear();
+            self.context.message.clear();
         }
         match key.code {
             // Tab never goes to a pane, so it never puts a tab in the text.
             // Some terminals give Shift-Tab as Tab with Shift.
-            KeyCode::BackTab => self.mode = self.mode.previous(),
+            KeyCode::BackTab => self.set_mode(self.mode.previous()),
             KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.mode = self.mode.previous()
+                self.set_mode(self.mode.previous())
             }
-            KeyCode::Tab => self.mode = self.mode.next(),
+            KeyCode::Tab => self.set_mode(self.mode.next()),
             _ if is_quit => self.ask_to_quit(),
             _ if ['r', 's', 'o'].iter().any(|&c| is_ctrl(key, c)) => {
-                self.message = NOT_AVAILABLE.to_string();
+                self.context.message = NOT_AVAILABLE.to_string();
             }
             _ => {
+                let ctx = &mut self.context;
                 let _ = match self.mode {
-                    Mode::Edit => self.editor.key(key),
-                    Mode::Run => self.run.key(key),
-                    Mode::Files => self.files.key(key),
+                    Mode::Edit => self.editor.key(key, ctx),
+                    Mode::Run => self.run.key(key, ctx),
+                    Mode::Files => self.files.key(key, ctx),
                 };
             }
         }
@@ -189,11 +260,11 @@ impl App {
 
     /// Quit, or ask first if the program has changes that are not saved.
     fn ask_to_quit(&mut self) {
-        if !self.changed || self.quit_asked {
+        if !self.context.document.is_changed() || self.quit_asked {
             self.quit = true;
         } else {
             self.quit_asked = true;
-            self.message = QUIT_QUESTION.to_string();
+            self.context.message = QUIT_QUESTION.to_string();
         }
     }
 
@@ -211,19 +282,30 @@ impl App {
         ])
         .areas(area);
         frame::draw_tabs(frame, tabs, self.mode);
-        match self.mode {
-            Mode::Edit => self.editor.draw(frame, pane),
-            Mode::Run => self.run.draw(frame, pane),
-            Mode::Files => self.files.draw(frame, pane),
-        }
+        let ctx = &self.context;
+        let detail = match self.mode {
+            Mode::Edit => {
+                self.editor.draw(frame, pane, ctx);
+                self.editor.status(&ctx.document)
+            }
+            Mode::Run => {
+                self.run.draw(frame, pane, ctx);
+                String::new()
+            }
+            Mode::Files => {
+                self.files.draw(frame, pane, ctx);
+                String::new()
+            }
+        };
         frame::draw_status(
             frame,
             status,
             &frame::Status {
                 mode: self.mode,
-                file_name: self.file_name.as_deref(),
-                changed: self.changed,
-                message: &self.message,
+                file_name: ctx.document.file_name(),
+                changed: ctx.document.is_changed(),
+                message: &ctx.message,
+                detail: &detail,
             },
         );
     }
@@ -239,12 +321,18 @@ fn is_ctrl(key: KeyEvent, letter: char) -> bool {
 /// clear it. `Terminal::clear` is not used: it asks the terminal for the
 /// cursor position, and some terminals do not answer.
 pub fn enter_screen(out: &mut impl Write) -> io::Result<()> {
-    crossterm::execute!(out, EnterAlternateScreen, Clear(ClearType::All), Hide)
+    crossterm::execute!(
+        out,
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        Hide,
+        EnableBracketedPaste
+    )
 }
 
 /// Write the commands that go back from the alternate screen.
 pub fn leave_screen(out: &mut impl Write) -> io::Result<()> {
-    crossterm::execute!(out, LeaveAlternateScreen, Show)
+    crossterm::execute!(out, DisableBracketedPaste, LeaveAlternateScreen, Show)
 }
 
 /// Leave the raw mode and the alternate screen. Use it on each exit path.
@@ -301,9 +389,7 @@ fn run(mut app: App) -> io::Result<()> {
     while !app.should_quit() {
         // A resize event only draws the frame again at the new size.
         terminal.draw(|frame| app.draw(frame))?;
-        if let Event::Key(key) = event::read()? {
-            app.key(key);
-        }
+        app.event(event::read()?);
     }
     Ok(())
 }
@@ -359,6 +445,45 @@ mod tests {
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\x1b[?1049l"), "{text:?}");
         assert!(text.contains("\x1b[?25h"), "{text:?}");
+    }
+
+    #[test]
+    fn the_screen_commands_turn_the_bracketed_paste_on_and_off() {
+        // A paste then comes as one event, not as keys: a tab or a newline
+        // in it is text, not the Tab key or the Enter key.
+        let mut out = Vec::new();
+        enter_screen(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\x1b[?2004h"), "{text:?}");
+        let mut out = Vec::new();
+        leave_screen(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\x1b[?2004l"), "{text:?}");
+    }
+
+    #[test]
+    fn a_new_document_from_another_mode_moves_the_cursor_into_the_text() {
+        let mut app = App::new(None);
+        app.paste("10 PRINT 1\n20 PRINT 2\n30 PRINT \\");
+        assert_eq!(app.cursor(), (2, 10));
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        // The files mode loads a shorter text.
+        app.context.document = Document::from_text(None, "10 PRINT \\");
+        app.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.cursor(), (0, 10));
+        assert_eq!(app.marks().len(), 1);
+        assert_eq!(app.marks()[0].index, 0);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    #[test]
+    fn a_paste_event_goes_to_the_editor() {
+        let mut app = App::new(None);
+        app.event(Event::Paste("10 END".to_string()));
+        assert_eq!(app.document().lines(), ["10 END"]);
+        app.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        assert_eq!(app.mode(), Mode::Run);
     }
 
     #[test]
