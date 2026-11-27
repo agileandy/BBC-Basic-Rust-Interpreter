@@ -99,3 +99,4 @@ mod issue_97_second_dim;
 mod issue_98_run_resets_error_handler;
 mod issue_99_plot_absolute_bit;
 mod program_run_tests;
+mod issue_115_string_array_limit;

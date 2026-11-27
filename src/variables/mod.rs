@@ -291,6 +291,9 @@ impl VariableStore {
             }
             (Variable::RealArray { values, .. }, Variable::Real(val)) => values[linear_index] = val,
             (Variable::StringArray { values, .. }, Variable::String(val)) => {
+                if val.len() > MAX_STRING_LENGTH {
+                    return Err(BBCBasicError::StringTooLong);
+                }
                 values[linear_index] = val
             }
             _ => return Err(BBCBasicError::TypeMismatch),
