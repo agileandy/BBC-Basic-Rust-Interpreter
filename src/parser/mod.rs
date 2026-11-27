@@ -133,6 +133,7 @@ pub enum PrintItem {
     Hex,                           // ~ : the numeric items up to the next , or ; print in hex
     Semicolon,                     // ;
     Comma,                         // ,
+    NewLine,                       // ' : print a new line and set the column to 0
 }
 
 /// Item of a VDU statement. A semicolon after the item sends it as 2 bytes,
@@ -149,6 +150,8 @@ pub enum InputItem {
     /// A prompt text. `question_mark` is true if a comma or a semicolon follows
     /// the text, so that the next variable shows `?` after the text.
     Prompt { text: String, question_mark: bool },
+    /// An apostrophe: print a new line and set the column to 0
+    NewLine,
     /// A variable that gets a reply
     Variable(String),
     /// An array element that gets a reply. The indices are evaluated when
@@ -1115,6 +1118,10 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
                 items.push(PrintItem::Comma);
                 pos += 1;
             }
+            Token::Separator('\'') => {
+                items.push(PrintItem::NewLine);
+                pos += 1;
+            }
             Token::Operator('~') => {
                 items.push(PrintItem::Hex);
                 pos += 1;
@@ -1215,7 +1222,7 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
                             paren_depth -= 1;
                             end_pos += 1;
                         }
-                        Token::Separator(';') | Token::Separator(',') if paren_depth == 0 => {
+                        Token::Separator(';' | ',' | '\'') if paren_depth == 0 => {
                             break;
                         }
                         _ => {
@@ -1822,6 +1829,7 @@ fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<I
                 }
             }
             Token::Identifier(name) => InputItem::Variable(name.clone()),
+            Token::Separator('\'') => InputItem::NewLine,
             _ => break,
         };
         items.push(item);
@@ -1890,6 +1898,13 @@ fn parse_print_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     }) {
         return Err(BBCBasicError::SyntaxError {
             message: "TAB and SPC are not permitted in PRINT#".to_string(),
+            line: line_number,
+        });
+    }
+    // A file has no new line item either (issue 159)
+    if items.contains(&PrintItem::NewLine) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "' is not permitted in PRINT#".to_string(),
             line: line_number,
         });
     }
