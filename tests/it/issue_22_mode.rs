@@ -52,7 +52,7 @@ fn test_mode_clears_the_graphics_buffer() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n0\n");
+    assert_eq!(output, "3\n0\n");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_mode_sets_the_origin_to_0_0() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "3\n");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_mode_sets_the_default_colours() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "3\n");
 }
 
 #[test]
@@ -125,7 +125,14 @@ fn test_graphics_do_nothing_in_a_text_only_mode() {
 
 #[test]
 fn test_graphics_draw_in_a_graphics_mode() {
-    for mode in [0, 1, 2, 4, 5] {
+    // MODE sets the graphics foreground to the highest colour of the mode
+    for (mode, expected) in [
+        (0, "11\n"),
+        (1, "33\n"),
+        (2, "1515\n"),
+        (4, "11\n"),
+        (5, "33\n"),
+    ] {
         let mode_line = format!("10 MODE {}", mode);
         let (result, output) = run(&[
             &mode_line,
@@ -136,6 +143,6 @@ fn test_graphics_draw_in_a_graphics_mode() {
         ]);
 
         assert_eq!(result, Ok(()), "MODE {}", mode);
-        assert_eq!(output, "11\n", "MODE {}", mode);
+        assert_eq!(output, expected, "MODE {}", mode);
     }
 }

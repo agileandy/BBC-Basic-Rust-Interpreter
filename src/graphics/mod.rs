@@ -99,8 +99,8 @@ struct Point {
 /// Graphics canvas for drawing operations
 #[derive(Debug, Clone)]
 pub struct GraphicsSystem {
-    /// Canvas buffer (true = pixel set, false = pixel clear)
-    canvas: Vec<Vec<bool>>,
+    /// Canvas buffer: the colour number of each pixel, the first row at the top
+    canvas: Vec<Vec<u8>>,
     /// Canvas width in pixels
     width: usize,
     /// Canvas height in pixels
@@ -111,10 +111,14 @@ pub struct GraphicsSystem {
     previous_pos: Point,
     /// Graphics origin offset
     origin: Point,
-    /// Current foreground color (0-255, though we only use on/off for now)
+    /// Current graphics foreground colour number
     foreground_color: u8,
+    /// Current graphics background colour number (CLG and FILL use it)
+    background_color: u8,
     /// Graphics color mode (0 = set, 1 = OR, 2 = AND, 3 = XOR, 4 = invert)
     color_mode: u8,
+    /// The number of colours of the screen mode (2, 4, 8 or 16)
+    colours: u8,
 }
 
 impl GraphicsSystem {
@@ -126,39 +130,52 @@ impl GraphicsSystem {
     /// Create a new graphics system with custom dimensions
     pub fn with_dimensions(width: usize, height: usize) -> Self {
         Self {
-            canvas: vec![vec![false; width]; height],
+            canvas: vec![vec![0; width]; height],
             width,
             height,
             current_pos: Point { x: 0, y: 0 },
             previous_pos: Point { x: 0, y: 0 },
             origin: Point { x: 0, y: 0 },
-            foreground_color: 255, // White
-            color_mode: 0,         // Set mode
+            // The defaults of mode 0: 2 colours, foreground 1, background 0
+            foreground_color: 1,
+            background_color: 0,
+            color_mode: 0, // Set mode
+            colours: 2,
         }
     }
 
-    /// Clear the graphics canvas
+    /// Clear the graphics canvas to the graphics background colour (CLG)
     pub fn clear(&mut self) {
+        let background = self.background_color;
         for row in &mut self.canvas {
-            row.fill(false);
+            row.fill(background);
         }
     }
 
-    /// Reset the graphics for a new screen mode (MODE): clear the canvas,
-    /// move the cursor and the origin to 0, 0 and set the default colours
+    /// Reset the graphics for a new screen mode (MODE): set the default
+    /// colours, clear the canvas and move the cursor and the origin to 0, 0
     pub fn reset_for_mode(&mut self, mode: &ScreenMode) {
+        self.colours = mode.colours;
+        self.foreground_color = mode.colours - 1;
+        self.background_color = 0;
+        self.color_mode = 0;
         self.clear();
         self.current_pos = Point { x: 0, y: 0 };
         self.previous_pos = Point { x: 0, y: 0 };
         self.origin = Point { x: 0, y: 0 };
-        self.foreground_color = mode.colours - 1;
-        self.color_mode = 0;
     }
 
-    /// Set graphics color mode (GCOL)
+    /// GCOL action, colour. A colour below 128 sets the graphics foreground,
+    /// and a colour from 128 sets the graphics background (colour - 128).
+    /// Each is reduced to the colour count of the screen mode.
     pub fn set_color(&mut self, mode: u8, color: u8) {
         self.color_mode = mode;
-        self.foreground_color = color;
+        let reduced = (color & 0x7F) & (self.colours - 1);
+        if color < 128 {
+            self.foreground_color = reduced;
+        } else {
+            self.background_color = reduced;
+        }
     }
 
     /// Set graphics origin (VDU 29)
@@ -188,15 +205,22 @@ impl GraphicsSystem {
     /// Set a pixel at the given coordinates
     fn set_pixel(&mut self, x: i32, y: i32) {
         if let Some((cx, cy)) = self.to_canvas_coords(x, y) {
-            match self.color_mode {
-                0 => self.canvas[cy][cx] = self.foreground_color > 0, // Set
-                1 => self.canvas[cy][cx] |= self.foreground_color > 0, // OR
-                2 => self.canvas[cy][cx] &= self.foreground_color > 0, // AND
-                3 => self.canvas[cy][cx] ^= self.foreground_color > 0, // XOR
-                4 => self.canvas[cy][cx] = !self.canvas[cy][cx],      // Invert
-                _ => self.canvas[cy][cx] = self.foreground_color > 0,
-            }
+            self.canvas[cy][cx] = self.apply_action(self.canvas[cy][cx]);
         }
+    }
+
+    /// The new colour of a pixel of colour `old`, with the GCOL action and
+    /// the foreground colour. The result is a colour of the screen mode.
+    fn apply_action(&self, old: u8) -> u8 {
+        let colour = self.foreground_color;
+        let new = match self.color_mode {
+            1 => old | colour,             // OR
+            2 => old & colour,             // AND
+            3 => old ^ colour,             // EOR
+            4 => old ^ (self.colours - 1), // Invert: the colour count minus 1, EOR old
+            _ => colour,                   // 0 and others: store
+        };
+        new & (self.colours - 1)
     }
 
     /// The lowest and the highest x on the canvas, with the origin offset
@@ -223,10 +247,34 @@ impl GraphicsSystem {
         }
     }
 
-    /// Get pixel state at given coordinates
+    /// True if the pixel at the given coordinates has a colour that is not 0,
+    /// or None off the canvas
     pub fn get_pixel(&self, x: i32, y: i32) -> Option<bool> {
+        self.point(x, y).map(|colour| colour != 0)
+    }
+
+    /// The colour number of the pixel at the given coordinates (POINT), or
+    /// None off the canvas
+    pub fn point(&self, x: i32, y: i32) -> Option<u8> {
         self.to_canvas_coords(x, y)
             .map(|(cx, cy)| self.canvas[cy][cx])
+    }
+
+    /// The width and the height of the canvas in pixels. The IDE canvas
+    /// (issue 173) uses this read-only view.
+    pub fn canvas_size(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
+    /// The colour number at canvas column x and canvas row y, with the
+    /// first row at the top. The IDE canvas (issue 173) uses this read-only
+    /// view. A point off the canvas gives 0.
+    pub fn colour_at(&self, x: usize, y: usize) -> u8 {
+        self.canvas
+            .get(y)
+            .and_then(|row| row.get(x))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Move graphics cursor without drawing (MOVE or PLOT 4)
@@ -738,18 +786,20 @@ impl GraphicsSystem {
         }
     }
 
-    /// Flood fill starting from a point
+    /// Flood fill starting from a point (FILL). The BBC BASIC for Windows
+    /// manual gives the rule: FILL fills in "the current graphics foreground
+    /// colour, starting at the specified point and continuing until
+    /// non-background-colour pixels are found", and "FILL x,y is equivalent
+    /// to PLOT 133,x,y" (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin5.html).
     pub fn flood_fill(&mut self, start_x: i32, start_y: i32) {
-        // Get the target color to replace
-        let target_color = match self.get_pixel(start_x, start_y) {
-            Some(color) => color,
-            None => return, // Outside bounds
-        };
+        let target_color = self.background_color;
+        if self.point(start_x, start_y) != Some(target_color) {
+            return; // Off the canvas, or not the background colour
+        }
 
-        let fill_color = self.foreground_color > 0;
-
-        // Don't fill if already the target color
-        if target_color == fill_color {
+        // Each filled pixel gets the same new colour. If that colour is the
+        // background colour, no pixel changes, and the fill does not end.
+        if self.apply_action(target_color) == target_color {
             return;
         }
 
@@ -759,7 +809,7 @@ impl GraphicsSystem {
 
         while let Some((x, y)) = stack.pop() {
             // Check if pixel is valid and matches target color
-            if let Some(color) = self.get_pixel(x, y) {
+            if let Some(color) = self.point(x, y) {
                 if color == target_color {
                     self.set_pixel(x, y);
 
@@ -818,7 +868,7 @@ impl GraphicsSystem {
                         if x >= self.width {
                             break;
                         }
-                        if self.canvas[y][x] {
+                        if self.canvas[y][x] != 0 {
                             pixel_count += 1;
                         }
                         total_pixels += 1;

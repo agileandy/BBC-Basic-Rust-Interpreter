@@ -1,6 +1,6 @@
 //! Issue 161: POINT gives the colour number of a pixel, and -1 for a point
-//! off the screen. The canvas keeps only set or clear, thus a set pixel gives
-//! 1 and a clear pixel gives 0.
+//! off the screen. These tests use MODE 0, which has 2 colours, thus a set
+//! pixel gives 1 and a clear pixel gives 0 (issue 176 stores the colour).
 
 use crate::common::run_lines;
 

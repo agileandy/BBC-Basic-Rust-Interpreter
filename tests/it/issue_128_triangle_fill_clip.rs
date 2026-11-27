@@ -31,7 +31,7 @@ fn test_the_issue_program_returns_and_fills_the_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "3\n");
 }
 
 #[test]

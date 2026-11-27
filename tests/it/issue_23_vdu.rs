@@ -42,7 +42,7 @@ fn test_vdu_22_selects_a_mode() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert!(output.ends_with("1\n"), "output: {:?}", output);
+    assert!(output.ends_with("3\n"), "output: {:?}", output);
 }
 
 #[test]
