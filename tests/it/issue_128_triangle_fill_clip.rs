@@ -300,6 +300,9 @@ fn old_rectangle(x1: i32, y1: i32, x2: i32, y2: i32, filled: bool) -> Vec<(i32, 
     points
 }
 
+/// The old filled triangle, with the correction of issue 138: a row that
+/// holds 2 corners is filled from one corner to the other. The other rows are
+/// the same as before issue 128.
 fn old_fill_triangle(x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
     let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
@@ -310,9 +313,14 @@ fn old_fill_triangle(x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32) -> Ve
     for y in y1..=y3 {
         let mut x_left = x1;
         let mut x_right = x1;
-        if y <= y2 {
+        if y3 == y1 {
+            x_left = x1.min(x2).min(x3);
+            x_right = x1.max(x2).max(x3);
+        } else if y <= y2 {
             if y2 != y1 {
                 x_left = x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+            } else {
+                x_left = x2;
             }
             if y3 != y1 {
                 x_right = x1 + (x3 - x1) * (y - y1) / (y3 - y1);

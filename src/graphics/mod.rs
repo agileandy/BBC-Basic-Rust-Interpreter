@@ -659,11 +659,18 @@ impl GraphicsSystem {
             let mut x_right = x1;
 
             // Calculate x intersections with triangle edges
-            if y <= y2 {
-                // Upper part of triangle
-                if y2 != y1 {
-                    x_left = edge_x(x1, y1, x2, y2, y);
-                }
+            if y3 == y1 {
+                // All 3 corners are on one row
+                x_left = x1.min(x2).min(x3);
+                x_right = x1.max(x2).max(x3);
+            } else if y <= y2 {
+                // Upper part of triangle. If 2 corners are on the first
+                // row, that row is filled from one corner to the other.
+                x_left = if y2 != y1 {
+                    edge_x(x1, y1, x2, y2, y)
+                } else {
+                    x2
+                };
                 if y3 != y1 {
                     x_right = edge_x(x1, y1, x3, y3, y);
                 }
