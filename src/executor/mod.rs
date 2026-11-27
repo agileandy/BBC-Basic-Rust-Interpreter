@@ -1877,6 +1877,10 @@ impl Executor {
                     UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
                 }
             }
+            // A string function in a numeric context, such as A% = CHR$(65)
+            Expression::FunctionCall { .. } if self.is_string_expr(expr) => {
+                Err(BBCBasicError::TypeMismatch)
+            }
             Expression::FunctionCall { name, args } => self.eval_function_int(name, args),
             _ => Err(BBCBasicError::TypeMismatch),
         }
@@ -1990,6 +1994,10 @@ impl Executor {
                     UnaryOperator::Not => Ok(if val == 0.0 { -1.0 } else { 0.0 }),
                     UnaryOperator::Indirect(_) => unreachable!("memory read returned above"),
                 }
+            }
+            // A string function in a numeric context, such as A = LEFT$("a", 1)
+            Expression::FunctionCall { .. } if self.is_string_expr(expr) => {
+                Err(BBCBasicError::TypeMismatch)
             }
             Expression::FunctionCall { name, args } => {
                 if self.is_real_expr(expr) {

@@ -124,3 +124,4 @@ mod issue_132_typed_line_number_range;
 mod issue_135_return_in_function_body;
 mod issue_145_load_all_or_nothing;
 mod issue_138_triangle_flat_edge;
+mod issue_144_string_in_numeric_context;
