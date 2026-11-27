@@ -7,6 +7,9 @@ use crate::error::BBCBasicError;
 use crate::error::Result;
 use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
 
+mod whole_array;
+pub use whole_array::{parse_array_reference, ArrayExpression, ArrayOperand};
+
 /// The tokens as the user typed them, for an error message. An empty list
 /// shows as "end of line". A whole real number shows with no exponent, so
 /// `2.0` shows as `2`, not as the LIST form `2E0`.
@@ -186,6 +189,13 @@ pub enum Statement {
         name: String,
         indices: Vec<Expression>,
         expression: Expression,
+    },
+    /// Whole-array assignment (issue #187): `A() = B() + 1`, `A() = 1, 2, 3`
+    /// or `A() += 1`. `operator` is the operator of a compound assignment.
+    ArrayAssign {
+        target: String,
+        operator: Option<BinaryOperator>,
+        value: ArrayExpression,
     },
     /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
     /// or `base!offset = value`. The address includes the offset.
@@ -1298,6 +1308,11 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
             })
         }
     };
+
+    // A whole array: A() = ... (issue #187)
+    if parse_array_reference(tokens, 0).is_some() {
+        return whole_array::parse_whole_array_statement(tokens, line_number);
+    }
 
     // Check if this is an array element assignment: array_name(index) = value
     if tokens.len() > 1 && matches!(tokens[1], Token::Separator('(')) {

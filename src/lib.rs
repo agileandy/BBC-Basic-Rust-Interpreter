@@ -7,6 +7,7 @@
 // The tests use 3.14 as an arbitrary real value, not as PI.
 #![cfg_attr(test, allow(clippy::approx_constant))]
 
+pub mod arrays;
 pub mod collections;
 pub mod commands;
 pub mod executor;
