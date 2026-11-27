@@ -1306,6 +1306,7 @@ fn starts_print_item(token: &Token) -> bool {
         | Token::Real(_)
         | Token::String(_)
         | Token::Identifier(_)
+        | Token::Member(..)
         | Token::ExtendedKeyword(_, _)
         | Token::Separator('(')
         | Token::Operator('~') => true,

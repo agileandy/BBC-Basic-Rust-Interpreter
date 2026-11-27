@@ -354,3 +354,100 @@ fn test_list_shows_the_lines_as_typed() {
         assert_eq!(listed, line);
     }
 }
+
+// The corrections of the code review
+
+/// Run the PRINT line with members, and with variables of the same values,
+/// and give the 2 outputs. The PRINT line uses `p.` before each name.
+fn print_member_and_variable(print: &str) -> (String, String) {
+    let (result, member_output) = run(&[
+        "10 DIM p{x, n%, s$}",
+        "20 p.x = 1.5 : p.n% = 7 : p.s$ = \"ab\"",
+        &format!("30 {print}"),
+    ]);
+    assert_eq!(result, Ok(()), "{print}");
+    let (result, variable_output) = run(&[
+        "10 x = 1.5 : n% = 7 : s$ = \"ab\"",
+        &format!("30 {}", print.replace("p.", "")),
+    ]);
+    assert_eq!(result, Ok(()), "{print}");
+    (member_output, variable_output)
+}
+
+#[test]
+fn test_print_a_member_after_an_item_with_no_separator() {
+    for print in ["PRINT \"x=\" p.x", "PRINT p.x p.n%", "PRINT \"s=\" p.s$"] {
+        let (member, variable) = print_member_and_variable(print);
+        assert_eq!(member, variable, "{print}");
+    }
+}
+
+#[test]
+fn test_print_a_member_in_a_field_as_a_variable() {
+    for print in ["PRINT p.n%", "PRINT p.x", "PRINT p.s$", "PRINT p.n%, p.x"] {
+        let (member, variable) = print_member_and_variable(print);
+        assert_eq!(member, variable, "{print}");
+    }
+    let (_, output) = print_member_and_variable("PRINT p.n%");
+    assert_eq!(output, "         7\n");
+}
+
+#[test]
+fn test_input_checks_the_member_before_the_reply() {
+    for input in ["20 INPUT p.z", "20 INPUT LINE p.z$"] {
+        let (result, output) = run_with_replies(&["10 DIM p{x}", input], &["5"]);
+        let name = input.rsplit(' ').next().unwrap();
+        assert_eq!(
+            result,
+            Err(format!("No such variable: {name} at line 20")),
+            "{input}"
+        );
+        assert_eq!(output, "", "{input}");
+    }
+}
+
+#[test]
+fn test_read_checks_the_member_before_it_takes_a_value() {
+    let (result, output) = run(&[
+        "10 ON ERROR READ a : PRINT ;a : END",
+        "20 READ q.x",
+        "30 DATA 7",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "7\n");
+}
+
+#[test]
+fn test_input_file_checks_the_member_before_it_takes_a_record() {
+    let dir = std::env::temp_dir().join(format!("bbc_issue_191_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir is created");
+    let file = dir.join("data.txt").to_string_lossy().into_owned();
+    let (result, output) = run(&[
+        &format!("10 H = OPENOUT(\"{file}\")"),
+        "20 PRINT#H, \"first\" : CLOSE#H",
+        &format!("30 H = OPENIN(\"{file}\")"),
+        "40 ON ERROR INPUT#H, a$ : PRINT a$ : CLOSE#H : END",
+        "50 INPUT#H, q.x",
+    ]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "first\n");
+}
+
+#[test]
+fn test_a_member_name_can_start_with_an_underscore() {
+    let (result, output) = run(&["10 DIM p{_a}", "20 p._a = 2", "30 PRINT ;p._a"]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "2\n");
+    for text in ["PRINT a.b.c", "PRINT a.b._c"] {
+        assert!(
+            matches!(
+                tokenize(text),
+                Err(BBCBasicError::SyntaxError { ref message, .. })
+                    if message == "Nested structures are not supported"
+            ),
+            "{text}"
+        );
+    }
+}

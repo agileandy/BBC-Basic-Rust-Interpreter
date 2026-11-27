@@ -396,15 +396,12 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
             // such as point.x (issue #191). A short form wins (above).
             if chars.peek() == Some(&'.')
                 && is_structure_name(&word, &keyword_map, &extended_map)
-                && chars
-                    .clone()
-                    .nth(1)
-                    .is_some_and(|c| c.is_alphabetic() || c == '_')
+                && chars.clone().nth(1).is_some_and(starts_member_name)
             {
                 chars.next(); // consume the '.'
                 let member = take_name(&mut chars);
                 if chars.peek() == Some(&'.')
-                    && chars.clone().nth(1).is_some_and(|c| c.is_alphabetic())
+                    && chars.clone().nth(1).is_some_and(starts_member_name)
                 {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Nested structures are not supported".to_string(),
@@ -962,6 +959,12 @@ fn is_structure_name(
         && !keyword_map.contains_key(word)
         && !extended_map.contains_key(word)
         && split_proc_or_fn(word).is_none()
+}
+
+/// True if the character can start a member name: a letter or `_`, as at
+/// the start of a variable name
+fn starts_member_name(ch: char) -> bool {
+    ch.is_alphabetic() || ch == '_'
 }
 
 /// Take a name from the characters: letters, digits, `_`, `%` and `$`

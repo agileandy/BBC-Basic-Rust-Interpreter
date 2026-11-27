@@ -1031,9 +1031,7 @@ impl Executor {
             Expression::Integer(_) => Ok((self.eval_integer(expr)?.to_string(), true)),
             Expression::Real(_) => self.format_real_item(expr),
             Expression::String(_) => Ok((self.eval_string(expr)?, false)),
-            Expression::Member { structure, member } => {
-                self.format_member(structure, member).map(|text| (text, false))
-            }
+            Expression::Member { structure, member } => self.format_member(structure, member),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
                     Ok((self.eval_integer(expr)?.to_string(), true))
@@ -1539,6 +1537,7 @@ impl Executor {
                 InputItem::ArrayElement { name, .. } => name,
                 InputItem::Member { member, .. } => member,
             };
+            self.check_member_target(item)?;
             if values.is_empty() {
                 let reply = self.read_input_reply(question_mark)?;
                 values = split_input_reply(&reply);
@@ -1627,6 +1626,7 @@ impl Executor {
                 InputItem::ArrayElement { name, .. } => name,
                 InputItem::Member { member, .. } => member,
             };
+            self.check_member_target(item)?;
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
             }
@@ -1830,6 +1830,7 @@ impl Executor {
                     })
                 }
             };
+            self.check_member_target(target)?;
             // Check if we've run out of data
             if self.data_pointer >= self.data_values.len() {
                 return Err(BBCBasicError::OutOfData);
@@ -4780,6 +4781,7 @@ impl Executor {
                 // The parser gives no prompt text and no ' in INPUT#
                 InputItem::Prompt { .. } | InputItem::NewLine => continue,
             };
+            self.check_member_target(target)?;
             let record = self.read_file_record(handle)?;
 
             // The value type comes from the name of the target. A string gets

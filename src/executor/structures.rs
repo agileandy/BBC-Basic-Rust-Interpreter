@@ -6,7 +6,7 @@
 
 use super::{format_number, format_real, real_to_integer, Executor};
 use crate::error::{BBCBasicError, Result};
-use crate::parser::Expression;
+use crate::parser::{Expression, InputItem};
 use crate::variables::Variable;
 
 impl Executor {
@@ -69,13 +69,24 @@ impl Executor {
     }
 
     /// The PRINT text of a member
-    pub(super) fn format_member(&self, structure: &str, member: &str) -> Result<String> {
+    /// and a flag that is true for a number, as `format_expression` gives
+    pub(super) fn format_member(&self, structure: &str, member: &str) -> Result<(String, bool)> {
         Ok(match self.member_value(structure, member)? {
-            Variable::Integer(value) => value.to_string(),
-            Variable::Real(value) => format_real(value, self.exact_reals),
-            Variable::String(value) => value,
+            Variable::Integer(value) => (value.to_string(), true),
+            Variable::Real(value) => (format_real(value, self.exact_reals), true),
+            Variable::String(value) => (value, false),
             _ => return Err(BBCBasicError::TypeMismatch),
         })
+    }
+
+    /// Check that a member target of INPUT, READ or INPUT# exists, before
+    /// the statement takes a reply, a DATA value or a record. Another target
+    /// needs no check here.
+    pub(super) fn check_member_target(&self, target: &InputItem) -> Result<()> {
+        if let InputItem::Member { structure, member } = target {
+            self.variables.get_member(structure, member)?;
+        }
+        Ok(())
     }
 
     /// The LVAR lines of the structures: one line for each member, such as
