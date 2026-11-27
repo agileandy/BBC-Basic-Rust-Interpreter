@@ -9,10 +9,52 @@ use crate::parser::{DataValue, Expression, Statement};
 use crate::variables::{Variable, VariableStore};
 use rand::Rng;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::rc::Rc;
+
+/// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
+/// The number has an optional sign, digits with one optional decimal point, and an
+/// optional exponent. If there is no number, the result is 0.
+fn parse_leading_number(text: &str) -> f64 {
+    let text = text.trim_start();
+    let bytes = text.as_bytes();
+    let digits_from = |mut i: usize| {
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        i
+    };
+
+    let mut end = 0;
+    if matches!(bytes.first(), Some(b'+') | Some(b'-')) {
+        end = 1;
+    }
+    let int_end = digits_from(end);
+    let mut mantissa_end = int_end;
+    if bytes.get(int_end) == Some(&b'.') {
+        mantissa_end = digits_from(int_end + 1);
+    }
+    // The mantissa must hold at least one digit
+    if mantissa_end - end == 0 || (mantissa_end - end == 1 && bytes[end] == b'.') {
+        return 0.0;
+    }
+    end = mantissa_end;
+
+    if matches!(bytes.get(end), Some(b'E') | Some(b'e')) {
+        let mut exp_start = end + 1;
+        if matches!(bytes.get(exp_start), Some(b'+') | Some(b'-')) {
+            exp_start += 1;
+        }
+        let exp_end = digits_from(exp_start);
+        if exp_end > exp_start {
+            end = exp_end;
+        }
+    }
+
+    text[..end].parse::<f64>().unwrap_or(0.0)
+}
 
 /// File handle for file I/O operations
 #[derive(Debug)]
@@ -141,6 +183,8 @@ pub struct Executor {
     next_loop_line: Option<u16>,
     // Start instant: TIME counts centiseconds from here
     start_time: std::time::Instant,
+    // Replies for INPUT, used before stdin (for testing)
+    input_queue: VecDeque<String>,
     // Output buffer (for testing)
     output: String,
 }
@@ -171,6 +215,7 @@ impl Executor {
             next_file_handle: 1,
             next_loop_line: None,
             start_time: std::time::Instant::now(),
+            input_queue: VecDeque::new(),
             output: String::new(),
         }
     }
@@ -482,6 +527,11 @@ impl Executor {
         &self.output
     }
 
+    /// Add a reply for a later INPUT. Queued replies are used before stdin.
+    pub fn queue_input(&mut self, line: &str) {
+        self.input_queue.push_back(line.to_string());
+    }
+
     /// Clear output buffer (for testing)
     pub fn clear_output(&mut self) {
         self.output.clear();
@@ -579,51 +629,49 @@ impl Executor {
     }
 
     /// Execute INPUT statement
-    fn execute_input(&mut self, _variables: &[String]) -> Result<()> {
-        // In a real implementation, this would read from stdin
-        // For now, we'll just set default values for testing
-        // Full implementation requires I/O handling
-        #[cfg(test)]
-        {
-            // In test mode, set variables to test values
-            for var in _variables {
-                if var.ends_with('%') {
-                    self.variables.set_integer_var(var.clone(), 0);
-                } else if var.ends_with('$') {
-                    self.variables.set_string_var(var.clone(), String::new())?;
-                } else {
-                    self.variables.set_real_var(var.clone(), 0.0);
-                }
-            }
-        }
-        #[cfg(not(test))]
-        {
-            // Production mode: read from stdin
-            use std::io::{self, Write};
+    fn execute_input(&mut self, variables: &[String]) -> Result<()> {
+        for var in variables {
+            let reply = self.next_input_reply();
+            let reply = reply.trim();
 
-            for var in _variables {
-                print!("? ");
-                io::stdout().flush().unwrap();
-
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
-                let input = input.trim();
-
-                if var.ends_with('%') {
-                    if let Ok(val) = input.parse::<i32>() {
-                        self.variables.set_integer_var(var.clone(), val);
-                    }
-                } else if var.ends_with('$') {
-                    self.variables
-                        .set_string_var(var.clone(), input.to_string())?;
-                } else {
-                    if let Ok(val) = input.parse::<f64>() {
-                        self.variables.set_real_var(var.clone(), val);
-                    }
-                }
+            // A reply that is not a number gives 0, as on a BBC Micro
+            if var.ends_with('%') {
+                let val = parse_leading_number(reply) as i32;
+                self.variables.set_integer_var(var.clone(), val);
+            } else if var.ends_with('$') {
+                self.variables
+                    .set_string_var(var.clone(), reply.to_string())?;
+            } else {
+                let val = parse_leading_number(reply);
+                self.variables.set_real_var(var.clone(), val);
             }
         }
         Ok(())
+    }
+
+    /// Take the next INPUT reply from the queue. If the queue is empty, read stdin.
+    /// A read error or the end of input gives an empty reply.
+    fn next_input_reply(&mut self) -> String {
+        if let Some(reply) = self.input_queue.pop_front() {
+            return reply;
+        }
+        #[cfg(test)]
+        {
+            String::new()
+        }
+        #[cfg(not(test))]
+        {
+            use std::io;
+
+            print!("? ");
+            let _ = io::stdout().flush();
+
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input).is_err() {
+                input.clear();
+            }
+            input
+        }
     }
 
     /// Execute DIM statement
@@ -1385,7 +1433,7 @@ impl Executor {
                 }
                 let s = self.eval_string(&args[0])?;
                 // BBC BASIC returns 0 for non-numeric strings. A real value is truncated.
-                Ok(s.trim().parse::<f64>().map(|v| v as i32).unwrap_or(0))
+                Ok(parse_leading_number(&s) as i32)
             }
             "ERL" => {
                 // Error line number - returns 0 if no error has occurred
@@ -1697,7 +1745,8 @@ impl Executor {
                     });
                 }
                 let s = self.eval_string(&args[0])?;
-                s.trim().parse::<f64>().or(Ok(0.0)) // BBC BASIC returns 0 for non-numeric strings
+                // BBC BASIC reads the leading number and gives 0 for non-numeric strings
+                Ok(parse_leading_number(&s))
             }
             "SQRT" => {
                 // SQRT is an alias for SQR in BBC BASIC
@@ -2746,6 +2795,19 @@ impl Default for Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_leading_number_edge_cases() {
+        assert_eq!(parse_leading_number(".5"), 0.5);
+        assert_eq!(parse_leading_number("+5"), 5.0);
+        assert_eq!(parse_leading_number("7."), 7.0);
+        assert_eq!(parse_leading_number("-"), 0.0);
+        assert_eq!(parse_leading_number("."), 0.0);
+        assert_eq!(parse_leading_number("-.x"), 0.0);
+        assert_eq!(parse_leading_number("1E"), 1.0);
+        assert_eq!(parse_leading_number("2e+2x"), 200.0);
+        assert_eq!(parse_leading_number("1.5.6"), 1.5);
+    }
     use crate::parser::BinaryOperator;
 
     #[test]
