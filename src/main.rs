@@ -193,18 +193,22 @@ fn extract_filename(input: &str) -> Result<String, String> {
     Ok(filename.to_string())
 }
 
+/// Use the file name as given if it has an extension, else add .bbas
+fn resolve_program_path(filename: &str) -> String {
+    if std::path::Path::new(filename).extension().is_some() {
+        filename.to_string()
+    } else {
+        format!("{}.bbas", filename)
+    }
+}
+
 /// Save current program to a .bbas file
 fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     if program.is_empty() {
         return Err("No program to save".to_string());
     }
 
-    // Add .bbas extension if not present
-    let path = if filename.ends_with(".bbas") {
-        filename.to_string()
-    } else {
-        format!("{}.bbas", filename)
-    };
+    let path = resolve_program_path(filename);
 
     // Open file for writing
     let mut file =
@@ -225,16 +229,11 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
 
 /// Load program from a .bbas file
 fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String> {
-    // Add .bbas extension if not present
-    let path = if filename.ends_with(".bbas") {
-        filename.to_string()
-    } else {
-        format!("{}.bbas", filename)
-    };
+    let path = resolve_program_path(filename);
 
     // Read file
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file {}: {}", path, e))?;
 
     // Clear current program (like NEW command)
     program.clear();
