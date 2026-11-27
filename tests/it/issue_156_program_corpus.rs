@@ -74,10 +74,7 @@ macro_rules! corpus {
 
 corpus!(data_table_1d);
 corpus!(data_table_2d);
-corpus!(
-    #[ignore = "issue #153"]
-    data_read_into_array
-);
+corpus!(data_read_into_array);
 corpus!(bubble_sort);
 corpus!(string_sort);
 corpus!(menu_on_goto, &["1", "50", "4", "2", "500", "2", "30", "3"]);
@@ -91,10 +88,7 @@ corpus!(
     #[ignore = "defect F6: PRINT# of two items writes one line, and INPUT# reads it into one item"]
     file_write_read
 );
-corpus!(
-    #[ignore = "issue #154"]
-    file_input_array
-);
+corpus!(file_input_array);
 corpus!(
     #[ignore = "defect F3: POINT gives -1 for a lit pixel and 0 off the screen"]
     graphics_points
