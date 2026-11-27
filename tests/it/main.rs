@@ -181,3 +181,4 @@ mod issue_194_structure_parameters;
 mod issue_196_print_stray_token;
 mod issue_197_rom_number_formats;
 mod issue_201_error_statement;
+mod issue_192_structure_array_members;

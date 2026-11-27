@@ -31,9 +31,9 @@ pub enum Token {
     RemText(String),
     /// Variable or procedure name
     Identifier(String),
-    /// A structure member, such as `point.x`: the structure name and the
-    /// member name (issue #191)
-    Member(String, String),
+    /// A structure member, such as `point.x` or `shape.pos.x`: the structure
+    /// name and the member names of the path (issues #191 and #192)
+    Member(String, Vec<String>),
     /// Operators (+, -, *, etc.)
     Operator(char),
     /// Separators (,, ;, :)
@@ -406,22 +406,21 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
             }
 
             // A name, a full stop and a letter start a structure member,
-            // such as point.x (issue #191). A short form wins (above).
+            // such as point.x (issue #191). A short form wins (above). Each
+            // more full stop and letter add a member of a nested structure,
+            // such as shape.pos.x (issue #192).
             if chars.peek() == Some(&'.')
                 && is_structure_name(&word, &keyword_map, &extended_map)
                 && chars.clone().nth(1).is_some_and(starts_member_name)
             {
-                chars.next(); // consume the '.'
-                let member = take_name(&mut chars);
-                if chars.peek() == Some(&'.')
+                let mut members = Vec::new();
+                while chars.peek() == Some(&'.')
                     && chars.clone().nth(1).is_some_and(starts_member_name)
                 {
-                    return Err(BBCBasicError::SyntaxError {
-                        message: "Nested structures are not supported".to_string(),
-                        line: line_number,
-                    });
+                    chars.next(); // consume the '.'
+                    members.push(take_name(&mut chars));
                 }
-                tokens.push(Token::Member(word, member));
+                tokens.push(Token::Member(word, members));
                 continue;
             }
 
@@ -545,6 +544,8 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                     false
                 }
                 (Token::Identifier(_), Token::Separator('(')) => false,
+                // An array member joins its bracket: s.a(1) (issue #192)
+                (Token::Member(..), Token::Separator('(')) => false,
                 // A structure lists as typed: DIM point{x,y%}
                 (Token::Identifier(_), Token::Separator('{')) => false,
                 (_, Token::Separator('}')) => false,
@@ -641,8 +642,12 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             Token::Identifier(name) => {
                 result.push_str(name);
             }
-            Token::Member(structure, member) => {
-                result.push_str(&format!("{structure}.{member}"));
+            Token::Member(structure, members) => {
+                result.push_str(structure);
+                for member in members {
+                    result.push('.');
+                    result.push_str(member);
+                }
             }
             Token::DataText(text) | Token::RemText(text) => {
                 result.push_str(text);
@@ -1680,7 +1685,7 @@ mod tests {
             tokenize("10 PRINT X.B").unwrap().tokens,
             vec![
                 Token::Keyword(0xF1),
-                Token::Member("X".to_string(), "B".to_string())
+                Token::Member("X".to_string(), vec!["B".to_string()])
             ]
         );
     }
@@ -2199,11 +2204,30 @@ mod tests {
         assert_eq!(
             tokens_of("p.x%=XY.n$"),
             vec![
-                Token::Member("p".to_string(), "x%".to_string()),
+                Token::Member("p".to_string(), vec!["x%".to_string()]),
                 Token::Operator('='),
-                Token::Member("XY".to_string(), "n$".to_string()),
+                Token::Member("XY".to_string(), vec!["n$".to_string()]),
             ]
         );
+    }
+
+    #[test]
+    fn test_a_member_path_is_one_token() {
+        // A nested structure and an array member (issue #192)
+        let path = |names: &[&str]| names.iter().map(|name| name.to_string()).collect();
+        assert_eq!(
+            tokens_of("s.p._q.t$=s.a(1).5"),
+            vec![
+                Token::Member("s".to_string(), path(&["p", "_q", "t$"])),
+                Token::Operator('='),
+                Token::Member("s".to_string(), path(&["a"])),
+                Token::Separator('('),
+                Token::Integer(1),
+                Token::Separator(')'),
+                Token::Real(0.5),
+            ]
+        );
+        assert_round_trip("10 s.p.q.t$ = s.a(1)", "10 s.p.q.t$ = s.a(1)");
     }
 
     #[test]
