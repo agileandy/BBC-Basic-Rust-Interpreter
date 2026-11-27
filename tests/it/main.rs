@@ -8,6 +8,7 @@ mod common;
 mod graphics_tests;
 mod issue_101_colour;
 mod issue_102_json_load_save;
+mod issue_103_json_path_read;
 mod issue_105_openin_and_openup;
 mod issue_106_directory_functions;
 mod issue_108_local_proc_parameters;

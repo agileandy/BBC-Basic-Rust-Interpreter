@@ -100,6 +100,9 @@ pub mod error {
         BadMode,
         // A text that is not JSON, with the detail from the parser (issue #102)
         BadJson(String),
+        // A JSON path with wrong syntax, or with no value at it, with the
+        // path text (issue #103)
+        BadPath(String),
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -149,6 +152,7 @@ pub mod error {
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),
                 BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
+                BBCBasicError::BadPath(path) => write!(f, "Bad path: {}", path),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }

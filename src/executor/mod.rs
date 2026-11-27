@@ -44,6 +44,14 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
+/// The error for a JSON function call with the wrong number of arguments.
+fn json_argument_count_error(name: &str, count: usize) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message: format!("{} requires {} arguments", name, count),
+        line: None,
+    }
+}
+
 /// Remove the line end (`\n` or `\r\n`) of a reply, if there is one
 fn without_line_end(reply: &str) -> &str {
     reply
@@ -1628,6 +1636,13 @@ impl Executor {
                 let text = self.eval_json_argument(name, indices)?;
                 Ok(if crate::json::is_valid(&text) { -1 } else { 0 })
             }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONLEN") => {
+                let (json, path) = self.eval_json_path_arguments(name, indices)?;
+                i32::try_from(crate::json::length(&json, &path)?).map_err(|_| BBCBasicError::TooBig)
+            }
+            Expression::ArrayAccess { name, .. } if self.is_json_call(name, "JSONGET") => {
+                real_to_integer(self.eval_real(expr)?)
+            }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
                 // Evaluate all indices to integers
@@ -1809,8 +1824,14 @@ impl Executor {
                     }
                 }
             }
-            Expression::ArrayAccess { name, .. } if self.is_json_call(name, "JSONVALID") => {
+            Expression::ArrayAccess { name, .. }
+                if self.is_json_call(name, "JSONVALID") || self.is_json_call(name, "JSONLEN") =>
+            {
                 self.eval_integer(expr).map(f64::from)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONGET") => {
+                let (json, path) = self.eval_json_path_arguments(name, indices)?;
+                Ok(crate::json::get_number(&json, &path)?)
             }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
@@ -1987,6 +2008,26 @@ impl Executor {
                     return Err(BBCBasicError::StringTooLong);
                 }
                 Ok(text)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONGET$") => {
+                let (json, path) = self.eval_json_path_arguments(name, indices)?;
+                let text = crate::json::get_text(&json, &path)?;
+                if text.len() > crate::variables::MAX_STRING_LENGTH {
+                    return Err(BBCBasicError::StringTooLong);
+                }
+                Ok(text)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONTYPE$") => {
+                let (json, path) = self.eval_json_path_arguments(name, indices)?;
+                Ok(crate::json::type_name(&json, &path)?.to_string())
+            }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONKEY$") => {
+                let [json, path, n] = indices.as_slice() else {
+                    return Err(json_argument_count_error(name, 3));
+                };
+                let (json, path) = (self.eval_string(json)?, self.eval_string(path)?);
+                let n = self.eval_integer(n)?;
+                Ok(crate::json::key_at(&json, &path, n)?)
             }
             // LISTDIR$(path$) is an extension. The parser cannot tell it from
             // an array, so an array named LISTDIR$ keeps its old meaning.
@@ -2695,6 +2736,18 @@ impl Executor {
                 message: format!("{} requires 1 argument", name),
                 line: None,
             }),
+        }
+    }
+
+    /// Evaluate the text and path arguments of a JSON path function.
+    fn eval_json_path_arguments(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+    ) -> Result<(String, String)> {
+        match args {
+            [json, path] => Ok((self.eval_string(json)?, self.eval_string(path)?)),
+            _ => Err(json_argument_count_error(name, 2)),
         }
     }
 

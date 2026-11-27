@@ -19,6 +19,11 @@
 //! | `LOADJSON$(file$)` | Read a JSON file as compact text (`src/json`) | ❌ No |
 //! | `JSONVALID(json$)` | TRUE if the text is correct JSON (`src/json`) | ❌ No |
 //! | `SAVEJSON file$, json$` | Statement: write JSON text with indentation (`src/json`) | ❌ No |
+//! | `JSONGET$(json$, path$)` | The value at a path: a string as text, else JSON (`src/json`) | ❌ No |
+//! | `JSONGET(json$, path$)` | The number at a path; TRUE -1, FALSE and null 0 (`src/json`) | ❌ No |
+//! | `JSONTYPE$(json$, path$)` | The type name at a path, or `missing` (`src/json`) | ❌ No |
+//! | `JSONLEN(json$, path$)` | The length of the array, object or string at a path (`src/json`) | ❌ No |
+//! | `JSONKEY$(json$, path$, n)` | The key n (from 0) of the object at a path (`src/json`) | ❌ No |
 //!
 //! ### Standard BBC BASIC String Functions (for reference)
 //!
