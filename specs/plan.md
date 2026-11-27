@@ -8,58 +8,36 @@ This comprehensive manual covers BBC BASIC syntax, functions, statements, and ex
 
 ---
 
-## Current Status (December 24, 2024)
+## Current Status
 
-### Project Summary: **COMPLETE** ✅
+The interpreter is partial. It runs many BBC BASIC programs, but some features are missing or have defects.
 
-The BBC BASIC interpreter implementation is **100% feature complete** for all practical BBC BASIC programming. All core language features, graphics, sound, file I/O, and error handling have been implemented and tested.
+- The measured state is in `README.md`: the test counts and the section "Known Limitations".
+- The open work is in the Gitea issue tracker, in milestones.
 
-### Session Work (December 24, 2024)
-
-**Bug Fixes Completed:**
-1. ✅ Fixed array assignment parsing - `parse_assignment` now handles `array(index) = value`
-2. ✅ Added executor support for `ArrayAssignment` statement
-3. ✅ Fixed comparison operators `>=` and `<=` by detecting two-character operator sequences
-4. ✅ Added AND and OR keyword operators to expression parser with proper precedence
-5. ✅ Fixed variable lookup fallback - `eval_integer` and `eval_real` now check both real and integer variables
-6. ✅ Fixed DIM statement bug - array names no longer include trailing `(` suffix
-7. ✅ Added array access parsing to `parse_primary` for reading array elements in expressions
-8. ✅ Created working demo file `demo_final.bbas` that demonstrates all features
-
-**Test Count:** 232 passing unit tests
-**Lines of Code:** ~11,500 LOC
-
-### Implementation Progress
-- **Core Language:** 100% complete ✅
-- **Console I/O:** 100% complete ✅
-- **File Operations:** 100% complete (SAVE/LOAD/CHAIN/OPENIN/OPENOUT/PRINT#/INPUT#/CLOSE#/EOF#/BGET#/BPUT#/PTR#/EXT#) ✅
-- **Math Functions:** 100% complete (SIN/COS/TAN/ATN/LN/LOG/EXP/SQR/SQRT/ACS/ASN/ABS/INT/SGN/RND/PI/DEG/RAD) ✅
-- **String Functions:** 100% complete (LEFT$/RIGHT$/MID$/CHR$/STR$/ASC/LEN/INSTR/STRING$/UPPER$/LOWER$/VAL) ✅
-- **Error Handling:** 100% complete (ON ERROR/ON ERROR OFF/ERL/ERR/REPORT$/ERROR statement) ✅
-- **Graphics:** 100% complete (MOVE/DRAW/PLOT/CIRCLE/ELLIPSE/RECTANGLE/FILL/CLG/GCOL/COLOUR/ORIGIN/POINT) ✅
-- **Sound:** 100% complete (SOUND/ENVELOPE/TEMPO/VOICE) ✅
-- **Memory:** 100% complete (PEEK/POKE/?/!/$ indirection operators) ✅
+This document does not copy test counts or lists of limitations, because they go out of date. The history of the work is in `development-log.md`, `SESSION_SUMMARY_2024-12-22.md` and the git log.
 
 ---
 
 ## Architecture Overview
 
-### Current Codebase Structure (~11,500 LOC)
+### Codebase Structure
 
 ```
 src/
-├── main.rs              - REPL loop, command handlers, program execution
+├── main.rs              - REPL loop and command handlers (LIST, SAVE, LOAD, CAT, HELP)
 ├── lib.rs               - Public API exports
+├── runner/              - Program run loop and control flow between statements
 ├── tokenizer/           - Lexical analysis (text → tokens)
 ├── parser/              - Syntax analysis (tokens → AST)
-├── executor/            - Runtime execution engine
+├── executor/            - Statement execution and expression evaluation
 ├── variables/           - Variable storage (integer, real, string, arrays)
-├── program/             - Program line storage and control flow
+├── program/             - Program line storage and positions
 ├── memory/              - Heap memory management
 ├── filesystem/          - File I/O implementation
-├── graphics/            - Graphics operations (FULLY IMPLEMENTED)
-├── sound/               - Sound operations (FULLY IMPLEMENTED)
-├── extensions/          - Non-standard extensions (UPPER$/LOWER$/STRING$/REPORT$)
+├── graphics/            - Graphics operations
+├── sound/               - Sound system (stub, not implemented)
+├── extensions/          - Documentation of the non-standard functions (UPPER$/LOWER$/STRING$/REPORT$)
 └── os/                  - OS interface (stub)
 ```
 
@@ -71,13 +49,16 @@ src/
 3. **Executor** → Execute statements, manage runtime state
 
 **Control Flow Handling:**
-- Most control flow (GOTO, GOSUB, FOR, REPEAT, PROC) handled in `main.rs` runtime loop
-- Executor maintains stacks for:
+- The run loop is in `src/runner/mod.rs`. It handles GOTO, GOSUB, IF, the loops, PROC, multi-line FN and ON ERROR.
+- A `Position` (in `src/program/mod.rs`) identifies one statement: a line number and a statement index in that line.
+- The runner makes a run list for each line. An IF becomes a list of items, so that each statement in a THEN or ELSE branch has a position.
+- The executor keeps these stacks of positions:
   - `return_stack` - GOSUB/RETURN and PROC/ENDPROC calls
-  - `for_loops` - FOR loop state (variable, end, step, line)
-  - `repeat_stack` - REPEAT loop line numbers
-  - `while_stack` - WHILE loop line numbers
-- ProgramStore manages line navigation (goto_line, next_line)
+  - `for_loops` - FOR loop state (variable, end, step, position)
+  - `repeat_stack` - REPEAT positions
+  - `while_stack` - WHILE positions
+- The executor also keeps `local_stack`, the LOCAL variable frames for PROC and FN.
+- `ProgramStore` manages the current position (`goto`, next statement, next line).
 
 ---
 
@@ -89,12 +70,16 @@ src/
 
 ```rust
 struct Executor {
-    return_stack: Vec<u16>,           // Line numbers
-    for_loops: Vec<(String, i32, i32, u16)>,  // (var, end, step, line)
-    repeat_stack: Vec<u16>,           // Line numbers
-    while_stack: Vec<u16>,            // Line numbers
+    return_stack: Vec<Position>,
+    for_loops: Vec<(String, f64, f64, Position)>,  // (var, end, step, position)
+    repeat_stack: Vec<Position>,
+    while_stack: Vec<Position>,
+    local_stack: Vec<LocalFrame>,
+    // ... other fields
 }
 ```
+
+A PROC call pushes its position on `return_stack`. ENDPROC removes the LOCAL frame, then goes back to the statement after the call.
 
 ### 2. Array Access Pattern
 
@@ -118,112 +103,15 @@ Expression::ArrayAccess { name, indices }
 
 **Used for:** All variable access and assignment
 
-```rust
-// Variables can be accessed without % suffix if they exist as integers
-// This enables FOR loop variables (stored as integers) to be used in expressions
-fn eval_integer(&self, expr: &Expression) -> Result<i32> {
-    match expr {
-        Expression::Variable(name) => {
-            if name.ends_with('%') {
-                self.variables.get_integer_var(name)
-            } else {
-                // Try real first, then integer (for loop vars without %)
-                if let Some(real_val) = self.variables.get_real_var(name) {
-                    Ok(real_val as i32)
-                } else if let Some(int_val) = self.variables.get_integer_var(name) {
-                    Ok(int_val)
-                } else {
-                    Err(BBCBasicError::NoSuchVariable(name.clone()))
-                }
-            }
-        }
-        // ... other cases
-    }
-}
-```
+In `eval_integer` and `eval_real`, a name with the suffix `%` is an integer variable. For a name with no suffix, the executor tries a real variable first, then an integer variable. If neither exists, the result is `NoSuchVariable`. The pseudo-variables (`TIME`, `HIMEM`, `LOMEM`, `ERR`, `ERL`) are checked before the variable store.
 
 ---
 
-## Recent Bug Fixes (December 24, 2024)
+## Feature List
 
-### 1. Array Assignment and Access
+This list shows the scope of the implementation. It does not show that each feature is free of defects. See "Known Limitations" in `README.md` and the open Gitea issues.
 
-**Problem:** `numbers(I) = value` and `x = numbers(I)` were not working
-
-**Solution:**
-- Modified `parse_assignment` to detect array element assignments
-- Added `execute_array_assignment` to executor
-- Added `ArrayAccess` parsing to `parse_primary`
-- Fixed DIM statement to not include `(` in array names
-
-**Files Modified:**
-- `src/parser/mod.rs` - parse_assignment, parse_primary, parse_dim_statement
-- `src/executor/mod.rs` - execute_array_assignment, ArrayAccess handlers
-
-### 2. Comparison Operators
-
-**Problem:** `>=` and `<=` were tokenized as two separate tokens `>` `=` and `<` `=`
-
-**Solution:**
-- Modified `parse_expr_precedence` to detect `>` or `<` followed by `=`
-- Combined them into `GreaterThanOrEqual` and `LessThanOrEqual` operators
-- Added proper precedence (30, same as other comparison operators)
-
-**Files Modified:**
-- `src/parser/mod.rs` - parse_expr_precedence
-
-### 3. AND/OR Operators
-
-**Problem:** AND and OR keyword operators weren't parsed in expressions
-
-**Solution:**
-- Added AND (0x80) and OR (0x82) to `get_keyword_precedence`
-- Added AND and OR to `keyword_to_binary_op`
-- Set precedence: AND (20), OR (15) - lower than comparisons
-
-**Files Modified:**
-- `src/parser/mod.rs` - get_keyword_precedence, keyword_to_binary_op
-
-### 4. Variable Lookup Fallback
-
-**Problem:** FOR loop variable `I` (stored as integer) couldn't be accessed in expressions
-
-**Solution:**
-- Modified `eval_integer` and `eval_real` to fallback to integer variables
-- Try real variable first, then integer if not found
-- Enables loop variables without `%` suffix to work correctly
-
-**Files Modified:**
-- `src/executor/mod.rs` - eval_integer, eval_real, eval_string
-
----
-
-## Test Coverage
-
-### Unit Tests: 232 Passing
-
-**Component breakdown:**
-- Tokenizer tests: ~40 tests
-- Parser tests: ~50 tests
-- Executor tests: ~90 tests
-- Variable storage tests: ~20 tests
-- Graphics tests: ~15 tests
-- Sound tests: ~10 tests
-- File I/O tests: ~7 tests
-
-### Integration Tests
-
-**Test files:**
-- `demo_final.bbas` - Complete feature demonstration
-- `test_file_io.bas` - File I/O testing
-- `test_while.bas` - WHILE loop testing
-- `test_error_handling.bas` - Error handling testing
-
----
-
-## Complete Feature List
-
-### ✅ Core Language (100% Complete)
+### Core Language
 
 **Variables & Types:**
 - Integer variables (suffix `%`)
@@ -250,7 +138,7 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 
 **Procedures & Functions:**
 - DEF PROC...ENDPROC
-- DEF FN (single-line functions)
+- DEF FN (single-line and multi-line functions)
 - LOCAL variables
 - Parameters
 
@@ -271,7 +159,7 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - LOAD
 - CHAIN
 
-### ✅ Math Functions (100% Complete)
+### Math Functions
 
 - SIN, COS, TAN, ASN, ACS, ATN
 - LOG, LN, EXP, SQR
@@ -280,7 +168,7 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - RND (random number)
 - LEN (string length)
 
-### ✅ String Functions (100% Complete)
+### String Functions
 
 - LEFT$, RIGHT$, MID$
 - CHR$, ASC
@@ -289,7 +177,7 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - STRING$ (extension)
 - UPPER$, LOWER$ (extensions)
 
-### ✅ Graphics (100% Complete)
+### Graphics
 
 - MOVE, DRAW, PLOT (all modes 0-191)
 - CIRCLE, ELLIPSE, RECTANGLE
@@ -299,14 +187,11 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - ORIGIN
 - POINT (pixel reading)
 
-### ✅ Sound (100% Complete)
+### Sound (not implemented)
 
-- SOUND (channel, pitch, duration, amplitude)
-- ENVELOPE
-- TEMPO
-- VOICE
+SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented. `src/sound/mod.rs` is a stub.
 
-### ✅ File I/O (100% Complete)
+### File I/O
 
 - OPENIN, OPENOUT, OPENUP
 - PRINT#, INPUT#
@@ -315,7 +200,7 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - EOF#
 - CLOSE#
 
-### ✅ Error Handling (100% Complete)
+### Error Handling
 
 - ON ERROR GOTO
 - ON ERROR OFF
@@ -324,12 +209,9 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 - REPORT$ (error message)
 - ERROR statement (raise errors)
 
-### ✅ Memory Operations (100% Complete)
+### Memory Operations (not available in programs)
 
-- PEEK, POKE
-- `?` (byte indirection)
-- `!` (word indirection)
-- `$` (string indirection)
+`src/memory/mod.rs` has `peek` and `poke` functions. A program cannot use them: PEEK, POKE and the `?` and `!` indirection operators do not work.
 
 ---
 
@@ -339,25 +221,35 @@ fn eval_integer(&self, expr: &Expression) -> Result<i32> {
 
 ```bash
 # Run all tests
-cargo test
+cargo test --locked
 
 # Run with output
-cargo test -- --nocapture
+cargo test --locked -- --nocapture
 
 # Run specific module
-cargo test executor::tests
+cargo test --locked executor::tests
 
-# Run integration test
-(echo "LOAD demo_final"; echo "RUN") | cargo run
+# Run one test file in tests/
+cargo test --locked --test program_run_tests
+
+# Run an example program (end the input with EXIT and use a time limit)
+cargo build --locked
+printf 'LOAD "examples/test_while.bas"\nRUN\nEXIT\n' | perl -e 'alarm 5; exec @ARGV' ./target/debug/bbc-basic-interpreter
 ```
+
+Unit tests are in each module. Program tests are in `tests/`, with one file for each issue (`tests/issue_<N>_<name>.rs`). Example programs are in `examples/`.
 
 ### Code Quality
 
-- All code follows Rust best practices
-- Clippy warnings addressed
-- Consistent error handling using `Result<T>`
-- Comprehensive unit tests for all features
-- Integration tests for complex scenarios
+These 3 commands must pass before a merge:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+Errors use `Result<T>` with `BBCBasicError`.
 
 ---
 
@@ -365,42 +257,11 @@ cargo test executor::tests
 
 | Feature Type | Files to Touch |
 |--------------|----------------|
-| New statement | `parser/mod.rs`, `executor/mod.rs`, `main.rs` |
+| New statement | `parser/mod.rs`, `executor/mod.rs`, `runner/mod.rs` (if it changes control flow) |
 | New function | `parser/mod.rs`, `executor/mod.rs` (eval_*) |
 | New operator | `tokenizer/mod.rs`, `parser/mod.rs`, `executor/mod.rs` |
-| Control flow | `parser/mod.rs`, `main.rs` (runtime loop) |
+| Control flow | `parser/mod.rs`, `runner/mod.rs` (run loop) |
 | REPL command | `main.rs` only |
 | File operations | `filesystem/mod.rs`, `executor/mod.rs` |
 | Graphics | `graphics/mod.rs`, `executor/mod.rs` |
 | Sound | `sound/mod.rs`, `executor/mod.rs` |
-
----
-
-## Summary
-
-### Achievement Unlocked: Complete BBC BASIC Implementation ✅
-
-**Status:** Production Ready
-**Test Coverage:** 232 passing tests (100%)
-**Feature Completeness:** 100% of practical BBC BASIC features
-**Code Quality:** Clean, well-documented, maintainable
-
-**The interpreter can now:**
-- Run any standard BBC BASIC program
-- Handle complex graphics and sound
-- Perform file I/O operations
-- Execute user-defined procedures and functions
-- Provide comprehensive error handling
-- Support all standard data types and operators
-
-**Project Metrics:**
-- ~11,500 lines of code
-- 232 unit tests
-- Zero failing tests
-- Full feature parity with BBC BASIC Model B (plus graphics/sound extensions)
-
----
-
-**Date:** December 24, 2024
-**Status:** COMPLETE ✅
-**Next Steps:** Maintenance, documentation, and user support
