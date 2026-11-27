@@ -132,11 +132,20 @@ pub struct VariableStore {
     arrays: HashMap<String, Option<Variable>>,
 }
 
+/// True if the name is one of the resident integer variables A% to Z%
+pub fn is_resident_integer(name: &str) -> bool {
+    matches!(name.as_bytes(), [b'A'..=b'Z', b'%'])
+}
+
 impl VariableStore {
-    /// Create a new variable store
+    /// Create a new variable store. The resident integer variables A% to Z%
+    /// exist from the start with the value 0.
     pub fn new() -> Self {
+        let variables = ('A'..='Z')
+            .map(|letter| (format!("{letter}%"), Variable::Integer(0)))
+            .collect();
         Self {
-            variables: HashMap::new(),
+            variables,
             arrays: HashMap::new(),
         }
     }
@@ -335,9 +344,10 @@ impl VariableStore {
         arrays
     }
 
-    /// Clear all variables and arrays
+    /// Clear all variables and arrays. The resident integer variables A% to
+    /// Z% keep their values.
     pub fn clear(&mut self) {
-        self.variables.clear();
+        self.variables.retain(|name, _| is_resident_integer(name));
         self.arrays.clear();
     }
 }
