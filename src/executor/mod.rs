@@ -1050,9 +1050,12 @@ impl Executor {
     }
 
     /// The stop check: give the pending interrupt of the console, if there
-    /// is one. With no console, there is never an interrupt.
+    /// is one. With no console, there is never an interrupt. First the
+    /// console sees the graphics canvas (issue #173).
     pub fn take_interrupt(&mut self) -> Option<Interrupt> {
-        self.console.0.as_mut()?.interrupt()
+        let console = self.console.0.as_mut()?;
+        console.see_graphics(&self.graphics, self.screen_mode);
+        console.interrupt()
     }
 
     /// Show text with no change to the print column: to the console, or to
@@ -1996,6 +1999,11 @@ impl Executor {
     /// The current screen mode
     pub fn screen_mode(&self) -> ScreenMode {
         self.screen_mode
+    }
+
+    /// A read-only view of the graphics canvas. The IDE shows it (issue #173).
+    pub fn graphics(&self) -> &GraphicsSystem {
+        &self.graphics
     }
 
     /// The current text foreground colour

@@ -5,14 +5,16 @@
 //! the prompt mode.
 //!
 //! The frame stays live during a run: the worker sends its text through a
-//! channel, and the frame takes the messages at each tick. Graphics
-//! statements run and show nothing: issue #173 adds the canvas.
+//! channel, and the frame takes the messages at each tick. The worker also
+//! sends the picture of the graphics canvas, and the pane shows it under
+//! the text (issue #173, `src/ui/canvas.rs`).
 //!
 //! The editor text is the source. Each typed line runs with the program of
 //! the editor text, and a typed line is refused while the text has a fault.
 
 mod worker;
 
+use super::canvas::{self, Picture};
 use super::{theme, Context, Outcome};
 use crate::graphics::ScreenMode;
 use crate::program::ProgramStore;
@@ -29,7 +31,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use worker::{Answer, Flags, FromWorker, Link, ToWorker, DELETE, ENTER};
+use worker::{pack_size, Answer, Flags, FromWorker, Link, ToWorker, DELETE, ENTER};
 
 /// The name of the worker thread. The panic hook of the IDE uses it.
 pub(super) const WORKER_NAME: &str = "ide-interpreter";
@@ -198,6 +200,11 @@ pub struct RunPane {
     cut: Cell<Option<usize>>,
     /// True if a message came after the last tick
     changed: bool,
+    /// The picture of the graphics canvas, if the mode has graphics
+    picture: Option<Picture>,
+    /// The width and the height in cells of the picture area at the last
+    /// draw
+    picture_area: Cell<(u16, u16)>,
 }
 
 impl RunPane {
@@ -244,6 +251,7 @@ impl RunPane {
         }
         self.synced = Some(program.clone());
         self.clear_escape();
+        self.send_size();
         self.send(ToWorker::Run(program));
         self.starting = true;
         self.run_pending = true;
@@ -260,6 +268,7 @@ impl RunPane {
         let (input, worker_input) = mpsc::channel();
         let (worker_output, output) = mpsc::sync_channel(QUEUE);
         let flags = Arc::new(Flags::default());
+        flags.size.store(self.size_flag(), Ordering::Relaxed);
         let link = Link::new(worker_input, worker_output, Arc::clone(&flags));
         let spawned = thread::Builder::new()
             .name(WORKER_NAME.to_string())
@@ -274,9 +283,11 @@ impl RunPane {
                     thread,
                 });
                 self.synced = None;
-                // A new executor starts in mode 0 with the default colours
+                // A new executor starts in mode 0 with the default colours,
+                // and its canvas is clear
                 self.mode = None;
                 self.screen.style = Style::default();
+                self.picture = None;
                 true
             }
             Err(error) => {
@@ -289,6 +300,31 @@ impl RunPane {
     fn send(&mut self, message: ToWorker) {
         if let Some(worker) = &self.worker {
             let _ = worker.input.send(message);
+        }
+    }
+
+    /// The size flag for the worker: the picture area of the last draw, or
+    /// of the default pane before the first draw.
+    fn size_flag(&self) -> u32 {
+        let (columns, rows) = match self.picture_area.get() {
+            (0, 0) => {
+                let pane = Rect::new(0, 0, DEFAULT_WIDTH as u16, DEFAULT_PAGE as u16);
+                let area = canvas::picture_area(pane);
+                (area.width, area.height)
+            }
+            size => size,
+        };
+        pack_size(columns, rows)
+    }
+
+    /// If the picture area changed, give the new size to the worker, and
+    /// wake it if it waits at the prompt: it sends a new picture.
+    fn send_size(&self) {
+        let size = self.size_flag();
+        if let Some(worker) = &self.worker {
+            if worker.flags.size.swap(size, Ordering::Relaxed) != size {
+                let _ = worker.input.send(ToWorker::Wake);
+            }
         }
     }
 
@@ -395,6 +431,7 @@ impl RunPane {
     /// Take each message that waits. Then, with `until_ready`, wait for more
     /// messages while a program runs. Give true if no program runs.
     fn take_messages(&mut self, ctx: &mut Context, deadline: Instant, until_ready: bool) -> bool {
+        self.send_size();
         loop {
             let Some(worker) = &self.worker else {
                 return !self.is_running();
@@ -434,6 +471,7 @@ impl RunPane {
                 let colours = self.mode.map_or(2, |mode| mode.colours);
                 self.screen.style = theme::screen(foreground, background, colours);
             }
+            FromWorker::Picture(picture) => self.picture = picture,
             FromWorker::Line(line) => {
                 let answer = self.answer(&line, ctx);
                 match answer {
@@ -571,8 +609,12 @@ impl RunPane {
         }
     }
 
-    /// Draw the text screen. Issue #173 adds the canvas for the graphics.
+    /// Draw the text screen, and the picture of the canvas under the text:
+    /// a text cell that is not a space shows above the picture.
     pub fn draw(&self, frame: &mut Frame, area: Rect, _ctx: &Context) {
+        let picture_area = canvas::picture_area(area);
+        self.picture_area
+            .set((picture_area.width, picture_area.height));
         let height = usize::from(area.height);
         self.width.set(usize::from(area.width));
         self.page.set(height);
@@ -598,6 +640,9 @@ impl RunPane {
             .collect();
         let paper = theme::text().patch(self.screen.paper);
         frame.render_widget(Paragraph::new(rows).style(paper), area);
+        if let Some(picture) = &self.picture {
+            canvas::draw(frame.buffer_mut(), picture_area, picture, area);
+        }
         let on_page = (start..start + height).contains(&self.screen.row);
         if scroll == 0 && on_page && area.width > 0 {
             let x = self.screen.col.min(usize::from(area.width) - 1);

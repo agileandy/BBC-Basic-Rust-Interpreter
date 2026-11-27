@@ -4,6 +4,7 @@
 //! The state (`App`) is separate from the drawing and from the key reading.
 //! A test sends key events to `App::key` and draws with a test backend.
 
+mod canvas;
 mod document;
 mod editor;
 mod files;

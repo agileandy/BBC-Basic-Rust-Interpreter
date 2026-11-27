@@ -12,16 +12,22 @@
 //! waits for the answer, because only the pane knows the editor text: the
 //! pane can refuse the line, or give the program of the editor text. Thus
 //! a line that the user typed during a run also gets this check.
+//!
+//! The worker also sends the picture of the graphics canvas (issue #173),
+//! scaled to the picture area that the size flag gives. It sends a picture
+//! only if the canvas, the mode or the size changed: during a run at most
+//! 30 times in one second, and at the end of each command.
 
 use crate::commands::run_command;
 use crate::executor::{Console, Executor, Interrupt};
-use crate::graphics::ScreenMode;
+use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::program::ProgramStore;
 use crate::tokenizer::expand_short_form;
+use crate::ui::canvas::Picture;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -76,13 +82,38 @@ pub(super) enum FromWorker {
         error_line: Option<u16>,
         changed: bool,
     },
+    /// The picture of the canvas, or None if the mode has no graphics
+    Picture(Option<Picture>),
 }
+
+/// The shortest time between 2 pictures during a run: 30 in one second.
+const PICTURE_GAP: Duration = Duration::from_micros(1_000_000 / 30);
 
 /// The flags that the pane sets and the stop check reads.
 #[derive(Default)]
 pub(super) struct Flags {
     pub escape: AtomicBool,
     pub quit: AtomicBool,
+    /// The picture area in cells: the width in the high 16 bits and the
+    /// height in the low 16 bits. The pane sets it with `pack_size`.
+    pub size: AtomicU32,
+}
+
+/// The value of the size flag for an area of `columns` by `rows` cells.
+pub(super) fn pack_size(columns: u16, rows: u16) -> u32 {
+    (u32::from(columns) << 16) | u32::from(rows)
+}
+
+/// What the last picture showed. If it is the same now, the worker sends
+/// no picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Shown {
+    /// The change count of the canvas (0 in a mode with no graphics)
+    changes: u64,
+    /// The size flag (0 in a mode with no graphics)
+    size: u32,
+    graphics: bool,
+    colours: u8,
 }
 
 /// The result of a wait for a key.
@@ -108,7 +139,13 @@ pub(super) struct Link {
     closed: bool,
     /// True if the cursor is at the start of a line
     at_line_start: bool,
+    /// What the last picture showed, and when the worker sent it
+    shown: Option<Shown>,
+    shown_at: Option<Instant>,
 }
+
+/// The canvas and the screen mode of the executor, for a wait at the prompt.
+type View<'a> = Option<(&'a GraphicsSystem, ScreenMode)>;
 
 impl Link {
     pub(super) fn new(
@@ -125,7 +162,46 @@ impl Link {
             answer: None,
             closed: false,
             at_line_start: true,
+            shown: None,
+            shown_at: None,
         }
+    }
+
+    /// Send the picture of the canvas if the canvas, the mode or the size
+    /// changed after the last picture. With no `force`, wait for the gap
+    /// after the last picture. A canvas that no statement changed since the
+    /// start gives no picture.
+    fn picture(&mut self, graphics: &GraphicsSystem, mode: ScreenMode, force: bool) {
+        if graphics.changes() == 0 {
+            return;
+        }
+        let size = self.flags.size.load(Ordering::Relaxed);
+        let shown = Shown {
+            changes: if mode.has_graphics {
+                graphics.changes()
+            } else {
+                0
+            },
+            size: if mode.has_graphics { size } else { 0 },
+            graphics: mode.has_graphics,
+            colours: mode.colours,
+        };
+        if self.shown == Some(shown) {
+            return;
+        }
+        let now = Instant::now();
+        let early = self
+            .shown_at
+            .is_some_and(|at| now.duration_since(at) < PICTURE_GAP);
+        if early && !force {
+            return;
+        }
+        let (columns, rows) = ((size >> 16) as usize, (size & 0xFFFF) as usize);
+        self.send(FromWorker::Picture(Picture::of(
+            graphics, mode, columns, rows,
+        )));
+        self.shown = Some(shown);
+        self.shown_at = Some(now);
     }
 
     fn send(&mut self, message: FromWorker) {
@@ -174,7 +250,9 @@ impl Link {
     }
 
     /// Wait for the next key, for a maximum of `limit` if there is a limit.
-    fn next_key(&mut self, limit: Option<Duration>, at_prompt: bool) -> KeyWait {
+    /// With a view of the canvas, a new size of the pane gets a new picture
+    /// during the wait.
+    fn next_key(&mut self, limit: Option<Duration>, at_prompt: bool, view: View) -> KeyWait {
         let deadline = limit.map(|limit| Instant::now() + limit);
         loop {
             if self.stopped(at_prompt) {
@@ -182,6 +260,9 @@ impl Link {
             }
             if let Some(key) = self.keys.pop_front() {
                 return KeyWait::Key(key);
+            }
+            if let Some((graphics, mode)) = view {
+                self.picture(graphics, mode, true);
             }
             let message = match deadline {
                 None => self
@@ -219,10 +300,10 @@ impl Link {
 
     /// Read one typed line, with its echo. Enter ends the line, and the
     /// Delete key removes the last character. Give None if the wait stops.
-    fn read_line(&mut self, at_prompt: bool) -> Option<String> {
+    fn read_line(&mut self, at_prompt: bool, view: View) -> Option<String> {
         let mut line = String::new();
         loop {
-            match self.next_key(None, at_prompt) {
+            match self.next_key(None, at_prompt, view) {
                 KeyWait::Key(ENTER) => {
                     self.write("\n");
                     return Some(line);
@@ -265,11 +346,11 @@ impl Console for WorkerConsole {
     }
 
     fn read_line(&mut self) -> Option<String> {
-        self.0.borrow_mut().read_line(false)
+        self.0.borrow_mut().read_line(false, None)
     }
 
     fn read_key(&mut self, limit: Option<Duration>) -> Option<char> {
-        match self.0.borrow_mut().next_key(limit, false) {
+        match self.0.borrow_mut().next_key(limit, false, None) {
             KeyWait::Key(key) => Some(key),
             KeyWait::TimeOut | KeyWait::Stop => None,
         }
@@ -297,6 +378,10 @@ impl Console for WorkerConsole {
             .borrow_mut()
             .send(FromWorker::Colours(foreground, background));
     }
+
+    fn see_graphics(&mut self, graphics: &GraphicsSystem, mode: ScreenMode) {
+        self.0.borrow_mut().picture(graphics, mode, false);
+    }
 }
 
 /// A command for the worker: the text, and true if it is a run request of
@@ -308,9 +393,9 @@ struct Command {
 
 /// Read the next command: a run request, or a typed line that the pane
 /// accepts. None if the pane closes.
-fn next_command(link: &mut Link, program: &mut ProgramStore) -> Option<Command> {
+fn next_command(link: &mut Link, program: &mut ProgramStore, view: View) -> Option<Command> {
     loop {
-        let line = link.read_line(true);
+        let line = link.read_line(true, view);
         if let Some(run) = link.run.take() {
             *program = run;
             link.write("RUN\n");
@@ -350,7 +435,8 @@ pub(super) fn run_worker(link: Link) {
     link.borrow_mut().write(PROMPT);
 
     loop {
-        let Some(command) = next_command(&mut link.borrow_mut(), &mut program) else {
+        let view = Some((executor.graphics(), executor.screen_mode()));
+        let Some(command) = next_command(&mut link.borrow_mut(), &mut program, view) else {
             return;
         };
 
@@ -371,6 +457,8 @@ pub(super) fn run_worker(link: Link) {
         // Only an error of the editor program has a line of the editor
         let editor_run = !changed && (command.run_request || is_run(&command.line));
         let error_line = error.as_deref().filter(|_| editor_run).and_then(error_line);
+        // The last picture of the command comes before the end of the run
+        link.picture(executor.graphics(), executor.screen_mode(), true);
         link.new_line();
         link.write(PROMPT);
         link.send(FromWorker::Ready {
@@ -396,6 +484,79 @@ fn error_line(message: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    /// A link with a picture area of 4 by 2 cells, and the pane end of its
+    /// output channel. The input channel stays open.
+    fn link() -> (Link, Receiver<FromWorker>, mpsc::Sender<ToWorker>) {
+        let (input, worker_input) = mpsc::channel();
+        let (worker_output, output) = mpsc::sync_channel(16);
+        let flags = Arc::new(Flags::default());
+        flags.size.store(pack_size(4, 2), Ordering::Relaxed);
+        (Link::new(worker_input, worker_output, flags), output, input)
+    }
+
+    fn pictures(output: &Receiver<FromWorker>) -> Vec<Option<Picture>> {
+        output
+            .try_iter()
+            .filter_map(|message| match message {
+                FromWorker::Picture(picture) => Some(picture),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn mode(number: i32) -> ScreenMode {
+        ScreenMode::from_number(number).expect("a mode")
+    }
+
+    #[test]
+    fn a_canvas_that_did_not_change_gives_no_picture() {
+        let (mut link, output, _input) = link();
+        let mut graphics = GraphicsSystem::new();
+        // No statement drew since the start
+        link.picture(&graphics, mode(0), true);
+        assert!(pictures(&output).is_empty());
+        graphics.plot(69, 0, 0);
+        link.picture(&graphics, mode(0), true);
+        link.picture(&graphics, mode(0), true);
+        assert_eq!(pictures(&output).len(), 1);
+        // A new size gives a new picture of the same canvas
+        link.flags.size.store(pack_size(8, 4), Ordering::Relaxed);
+        link.picture(&graphics, mode(0), true);
+        assert_eq!(pictures(&output).len(), 1);
+    }
+
+    #[test]
+    fn during_a_run_the_pictures_come_at_most_30_times_in_one_second() {
+        let (mut link, output, _input) = link();
+        let mut graphics = GraphicsSystem::new();
+        graphics.plot(69, 0, 0);
+        link.picture(&graphics, mode(0), false);
+        graphics.plot(69, 4, 0);
+        // Directly after a picture: no picture, then one after the gap
+        link.picture(&graphics, mode(0), false);
+        assert_eq!(pictures(&output).len(), 1);
+        link.shown_at = Some(Instant::now() - PICTURE_GAP);
+        link.picture(&graphics, mode(0), false);
+        assert_eq!(pictures(&output).len(), 1);
+        // The end of a command does not wait for the gap
+        graphics.plot(69, 8, 0);
+        link.picture(&graphics, mode(0), true);
+        assert_eq!(pictures(&output).len(), 1);
+    }
+
+    #[test]
+    fn a_mode_with_no_graphics_gives_one_empty_picture() {
+        let (mut link, output, _input) = link();
+        let mut graphics = GraphicsSystem::new();
+        graphics.clear();
+        link.picture(&graphics, mode(3), true);
+        graphics.clear();
+        link.flags.size.store(pack_size(8, 4), Ordering::Relaxed);
+        link.picture(&graphics, mode(3), true);
+        assert_eq!(pictures(&output), [None]);
+    }
 
     #[test]
     fn the_error_line_comes_from_the_text_of_the_error() {
