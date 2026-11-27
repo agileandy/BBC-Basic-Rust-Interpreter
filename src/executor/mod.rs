@@ -2041,9 +2041,11 @@ impl Executor {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
 
-        // A text-only screen mode has no graphics
+        // "FILL x,y is equivalent to PLOT 133,x,y" (BBC BASIC for Windows
+        // manual), so FILL also moves the last point. A text-only screen
+        // mode has no graphics, as for PLOT
         if self.screen_mode.has_graphics {
-            self.graphics.flood_fill(x_val, y_val);
+            self.graphics.plot(133, x_val, y_val);
         }
         Ok(())
     }
