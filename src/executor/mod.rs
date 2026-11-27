@@ -1584,8 +1584,7 @@ impl Executor {
                         line: None,
                     });
                 }
-                let degrees = self.eval_real(&args[0])?;
-                let radians = degrees.to_radians();
+                let radians = self.eval_real(&args[0])?;
                 Ok(radians.sin())
             }
             "COS" => {
@@ -1595,8 +1594,7 @@ impl Executor {
                         line: None,
                     });
                 }
-                let degrees = self.eval_real(&args[0])?;
-                let radians = degrees.to_radians();
+                let radians = self.eval_real(&args[0])?;
                 Ok(radians.cos())
             }
             "TAN" => {
@@ -1606,8 +1604,7 @@ impl Executor {
                         line: None,
                     });
                 }
-                let degrees = self.eval_real(&args[0])?;
-                let radians = degrees.to_radians();
+                let radians = self.eval_real(&args[0])?;
                 Ok(radians.tan())
             }
             "ATN" => {
@@ -1618,8 +1615,7 @@ impl Executor {
                     });
                 }
                 let val = self.eval_real(&args[0])?;
-                let radians = val.atan();
-                Ok(radians.to_degrees())
+                Ok(val.atan())
             }
             "SQR" => {
                 if args.len() != 1 {
@@ -3335,15 +3331,15 @@ mod tests {
 
     #[test]
     fn test_sin_function() {
-        // RED: Test SIN(90) = 1 (BBC BASIC uses degrees)
+        // RED: Test SIN(PI / 2) = 1 (BBC BASIC uses radians)
         let mut executor = Executor::new();
 
-        let sin_90 = Expression::FunctionCall {
+        let sin_half_pi = Expression::FunctionCall {
             name: "SIN".to_string(),
-            args: vec![Expression::Real(90.0)],
+            args: vec![Expression::Real(std::f64::consts::FRAC_PI_2)],
         };
 
-        let result = executor.eval_real(&sin_90).unwrap();
+        let result = executor.eval_real(&sin_half_pi).unwrap();
         assert!((result - 1.0).abs() < 0.0001);
     }
 
@@ -3363,21 +3359,21 @@ mod tests {
 
     #[test]
     fn test_tan_function() {
-        // RED: Test TAN(45) ≈ 1.0 (BBC BASIC uses degrees)
+        // RED: Test TAN(PI / 4) ≈ 1.0 (BBC BASIC uses radians)
         let mut executor = Executor::new();
 
-        let tan_45 = Expression::FunctionCall {
+        let tan_quarter_pi = Expression::FunctionCall {
             name: "TAN".to_string(),
-            args: vec![Expression::Real(45.0)],
+            args: vec![Expression::Real(std::f64::consts::FRAC_PI_4)],
         };
 
-        let result = executor.eval_real(&tan_45).unwrap();
+        let result = executor.eval_real(&tan_quarter_pi).unwrap();
         assert!((result - 1.0).abs() < 0.0001);
     }
 
     #[test]
     fn test_atn_function() {
-        // RED: Test ATN(1) = 45 degrees
+        // RED: Test ATN(1) = PI / 4 radians
         let mut executor = Executor::new();
 
         let atn_expr = Expression::FunctionCall {
@@ -3386,7 +3382,7 @@ mod tests {
         };
 
         let result = executor.eval_real(&atn_expr).unwrap();
-        assert!((result - 45.0).abs() < 0.0001);
+        assert!((result - std::f64::consts::FRAC_PI_4).abs() < 0.0001);
     }
 
     #[test]
