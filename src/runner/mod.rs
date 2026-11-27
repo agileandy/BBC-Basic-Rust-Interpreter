@@ -152,12 +152,18 @@ impl ProgramLines {
         self.statement(Position { line, index: 0 })
     }
 
-    /// True if the line ends with `CASE expr OF`, so it opens a CASE structure
+    /// True if the line ends with `CASE expr OF`, so it opens a CASE
+    /// structure. An empty statement or a REM can follow the CASE.
     fn ends_with_case(&self, line: u32) -> bool {
-        matches!(
-            self.items.get(&line).and_then(|items| items.last()),
-            Some(Item::Statement(Statement::Case { .. }))
-        )
+        let last = self.items.get(&line).and_then(|items| {
+            items.iter().rev().find(|item| {
+                !matches!(
+                    item,
+                    Item::Statement(Statement::Empty | Statement::Rem { .. })
+                )
+            })
+        });
+        matches!(last, Some(Item::Statement(Statement::Case { .. })))
     }
 
     /// The next WHEN, OTHERWISE or ENDCASE line of a CASE structure, after
@@ -341,6 +347,9 @@ struct BodyFailure {
 enum StepError {
     /// A BASIC error. An ON ERROR handler can catch it.
     Runtime(BBCBasicError),
+    /// A BASIC error on a different line from the statement, such as an
+    /// error in the value of a WHEN line that the CASE statement evaluates
+    RuntimeAt(BBCBasicError, u32),
     /// An error that stops the program.
     Fatal(String),
 }
@@ -508,7 +517,9 @@ pub fn run_typed_line(
     // A stored line that does not parse is an Invalid item, and the check
     // does not count it
     check_if_blocks(&lines)?;
-    check_case_blocks(&lines)?;
+    // No CASE check here: a stored CASE mistake must not stop a typed
+    // command. A typed line cannot hold a CASE. If the run gets to a stored
+    // CASE structure with no ENDCASE, the CASE scan gives the error.
     let failure = install_function_body_runner(executor, &lines);
 
     executor.clear_control_stacks();
@@ -728,10 +739,14 @@ fn run_lines(
             }
             Err(error) => error,
         };
+        let step_line = match &error {
+            StepError::RuntimeAt(_, line) => *line,
+            _ => line_number,
+        };
 
         // An error in a function body: use the line of the body statement
         let body = std::mem::take(&mut *failure.borrow_mut());
-        let error_line = body.line.unwrap_or(line_number);
+        let error_line = body.line.unwrap_or(step_line);
 
         match (body.abort, error) {
             (Some(BodyAbort::Stop), _) => break,
@@ -739,7 +754,7 @@ fn run_lines(
             (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
                 return Err(message);
             }
-            (None, StepError::Runtime(e)) => {
+            (None, StepError::Runtime(e) | StepError::RuntimeAt(e, _)) => {
                 // Set ERL, ERR and the text for REPORT, also when no
                 // handler catches the error
                 record_error(executor, &e, error_line);
@@ -844,6 +859,10 @@ fn run_function_body(
                 failure.borrow_mut().line.get_or_insert(line_number);
                 Err(e)
             }
+            Err(StepError::RuntimeAt(e, error_line)) => {
+                failure.borrow_mut().line.get_or_insert(error_line);
+                Err(e)
+            }
             Err(StepError::Fatal(message)) => {
                 abort_program(failure, line_number, BodyAbort::Fatal(message))
             }
@@ -874,43 +893,59 @@ fn abort_program(
 /// ENDCASE.
 ///
 /// Numbers compare as numbers and strings as strings. A string and a number
-/// give "Type mismatch".
+/// give "Type mismatch". An error in a WHEN value has the line of the WHEN.
+///
+/// The scan finds the ENDCASE before it evaluates a value, so that a
+/// structure with no ENDCASE gives an error also when the pre-run check did
+/// not run (a typed line).
 fn run_case(
     executor: &mut Executor,
     program: &mut Cursor,
     value: &Expression,
     line_number: u32,
 ) -> Result<(), StepError> {
-    let value = executor.eval_to_literal(value)?;
     let lines = program.lines;
-    let mut line = line_number;
-    let mut opens = true;
+    // The WHEN and OTHERWISE lines of the structure, and its ENDCASE line
+    let mut case_lines = Vec::new();
+    let mut end_line = line_number;
     loop {
-        line = lines
-            .next_case_line(line, opens)
+        end_line = lines
+            .next_case_line(end_line, end_line == line_number)
             .ok_or_else(|| format!("CASE without matching ENDCASE{}", at_line(line_number)))?;
-        opens = false;
-        if let Some(Statement::When { values }) = lines.first_statement(line) {
-            let mut matched = false;
-            for when_value in values {
-                let equal = Expression::BinaryOp {
-                    left: Box::new(value.clone()),
-                    op: BinaryOperator::Equal,
-                    right: Box::new(when_value.clone()),
-                };
-                if executor.eval_integer(&equal)? != 0 {
-                    matched = true;
-                    break;
-                }
-            }
-            if !matched {
-                continue;
+        if let Some(Statement::EndCase) = lines.first_statement(end_line) {
+            break;
+        }
+        case_lines.push(end_line);
+    }
+
+    let value = executor.eval_to_literal(value)?;
+    let mut target = end_line;
+    'cases: for &line in &case_lines {
+        let Some(Statement::When { values }) = lines.first_statement(line) else {
+            // OTHERWISE
+            target = line;
+            break;
+        };
+        for when_value in values {
+            let equal = Expression::BinaryOp {
+                left: Box::new(value.clone()),
+                op: BinaryOperator::Equal,
+                right: Box::new(when_value.clone()),
+            };
+            // An error in a WHEN value, or a type mismatch, has the line of
+            // the WHEN
+            let result = executor.eval_integer(&equal);
+            if result.map_err(|e| StepError::RuntimeAt(e, line))? != 0 {
+                target = line;
+                break 'cases;
             }
         }
-        // A matched WHEN, an OTHERWISE or the ENDCASE
-        program.goto(Position { line, index: 1 });
-        return Ok(());
     }
+    program.goto(Position {
+        line: target,
+        index: 1,
+    });
+    Ok(())
 }
 
 /// Execute one item at `position` and apply its control flow.

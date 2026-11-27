@@ -515,15 +515,15 @@ pub enum ExpressionType {
 /// `CASE expr OF` must be the last statement of its line.
 pub fn parse_line(line: &TokenizedLine) -> Result<Vec<Statement>> {
     let line_number = line.line_number;
-    let (marker, rest) = match line.tokens.split_first() {
-        Some((Token::Keyword(0x8B), rest)) => (Statement::BlockElse, rest),
-        Some((Token::ExtendedKeyword(0xC8, 0xA5), rest)) => (Statement::EndIf, rest),
-        Some((Token::ExtendedKeyword(0xC8, 0xA9), rest)) => (Statement::Otherwise, rest),
-        Some((Token::ExtendedKeyword(0xC8, 0xA6), rest)) => {
+    let (marker, rest) = match (line.tokens.split_first(), case_word(&line.tokens)) {
+        (Some((Token::Keyword(0x8B), rest)), _) => (Statement::BlockElse, rest),
+        (Some((Token::ExtendedKeyword(0xC8, 0xA5), rest)), _) => (Statement::EndIf, rest),
+        (Some((_, rest)), Some("OTHERWISE")) => (Statement::Otherwise, rest),
+        (Some((_, rest)), Some("ENDCASE")) => {
             expect_colon_after("ENDCASE", rest, line_number)?;
             (Statement::EndCase, rest)
         }
-        Some((Token::ExtendedKeyword(0xC8, 0xA8), rest)) => {
+        (Some((_, rest)), Some(_)) => {
             let end = rest
                 .iter()
                 .position(|t| matches!(t, Token::Separator(':')))
@@ -546,11 +546,54 @@ pub fn parse_line(line: &TokenizedLine) -> Result<Vec<Statement>> {
     Ok(statements)
 }
 
+/// The word WHEN, OTHERWISE or ENDCASE if it starts the tokens as a word of
+/// a CASE structure. The tokenizer gives these words as names. Before `=`,
+/// or before brackets and `=`, the word is a variable or an array, so that
+/// an old program with a variable of that name still works.
+fn case_word(tokens: &[Token]) -> Option<&'static str> {
+    let word = match tokens.first() {
+        Some(Token::Identifier(name)) => ["WHEN", "OTHERWISE", "ENDCASE"]
+            .into_iter()
+            .find(|word| name == word)?,
+        _ => return None,
+    };
+    (!is_assignment_target(tokens)).then_some(word)
+}
+
+/// True if `=` follows the name at the start of the tokens, or follows the
+/// brackets after the name, as in `WHEN = 5` and `WHEN(3) = 5`.
+fn is_assignment_target(tokens: &[Token]) -> bool {
+    match tokens.get(1) {
+        Some(Token::Operator('=')) => true,
+        Some(Token::Separator('(')) => {
+            let mut depth = 0;
+            for (index, token) in tokens.iter().enumerate().skip(1) {
+                match token {
+                    Token::Separator('(') => depth += 1,
+                    Token::Separator(')') => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return matches!(tokens.get(index + 1), Some(Token::Operator('=')));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 /// A `CASE expr OF` must be the last statement of its line, because the
-/// WHEN lines of the structure follow the line.
+/// WHEN lines of the structure follow the line. An empty statement or a REM
+/// can follow it.
 fn check_case_is_last(statements: &[Statement], line_number: Option<u16>) -> Result<()> {
-    let before_last = &statements[..statements.len().saturating_sub(1)];
-    if before_last
+    let end = statements
+        .iter()
+        .rposition(|s| !matches!(s, Statement::Empty | Statement::Rem { .. }))
+        .unwrap_or(0);
+    if statements[..end]
         .iter()
         .any(|s| matches!(s, Statement::Case { .. }))
     {
@@ -607,13 +650,22 @@ fn parse_when_values(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<E
     }
 }
 
-/// Parse `CASE expr OF`. The tokens are the tokens after CASE.
+/// Parse `CASE expr OF`. The tokens are the tokens after CASE. The last word
+/// is OF, or the word before a REM. The tokenizer gives OF as a name, so a
+/// variable named OF still works.
 fn parse_case_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    let Some((Token::ExtendedKeyword(0xC8, 0xA7), expression)) = tokens.split_last() else {
-        return Err(BBCBasicError::SyntaxError {
-            message: "Expected OF after CASE expression".to_string(),
-            line: line_number,
-        });
+    let end = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0xF4)))
+        .unwrap_or(tokens.len());
+    let expression = match tokens[..end].split_last() {
+        Some((Token::Identifier(word), expression)) if word == "OF" => expression,
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected OF after CASE expression".to_string(),
+                line: line_number,
+            })
+        }
     };
     Ok(Statement::Case {
         value: parse_expression(expression)?,
@@ -697,6 +749,23 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             ),
             line: line.line_number,
         });
+    }
+
+    // A word of a CASE structure that is not at the start of a line. An
+    // ENDCASE does nothing there, and the CASE scan does not count it.
+    // WHEN and OTHERWISE are only at the start of a line (parse_line).
+    match case_word(tokens) {
+        Some("ENDCASE") => {
+            expect_colon_after("ENDCASE", &tokens[1..], line.line_number)?;
+            return Ok(Statement::EndCase);
+        }
+        Some(word) => {
+            return Err(BBCBasicError::SyntaxError {
+                message: format!("{} must be the first statement of a line", word),
+                line: line.line_number,
+            })
+        }
+        None => {}
     }
 
     // Check first token to determine statement type
@@ -930,20 +999,6 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0xA5 => Ok(Statement::EndIf),
             // CASE expr OF
             0x8E => parse_case_statement(&tokens[1..], line.line_number),
-            // ENDCASE that is not at the start of a line: it does nothing,
-            // and the CASE scan does not count it
-            0xA6 => {
-                expect_colon_after("ENDCASE", &tokens[1..], line.line_number)?;
-                Ok(Statement::EndCase)
-            }
-            // WHEN and OTHERWISE are only at the start of a line (parse_line)
-            0xA8 | 0xA9 => Err(BBCBasicError::SyntaxError {
-                message: format!(
-                    "{} must be the first statement of a line",
-                    tokens_text(&tokens[..1])
-                ),
-                line: line.line_number,
-            }),
             // CIRCLE statement
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             // FILL statement
@@ -2972,7 +3027,7 @@ fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Sta
                 .any(|s| matches!(s, Statement::Case { .. }))
             {
                 return Err(BBCBasicError::SyntaxError {
-                    message: "CASE must be the last statement of a line".to_string(),
+                    message: "CASE cannot be in an IF branch".to_string(),
                     line: line_number,
                 });
             }
@@ -4966,7 +5021,69 @@ mod tests {
         );
         assert_eq!(
             syntax_message(line_statements("20 IF A THEN CASE X OF")),
-            "CASE must be the last statement of a line"
+            "CASE cannot be in an IF branch"
+        );
+        assert_eq!(
+            syntax_message(line_statements("20 IF A THEN PRINT 1 ELSE CASE X OF")),
+            "CASE cannot be in an IF branch"
+        );
+        assert_eq!(
+            syntax_message(line_statements("20 CASE X OF PRINT 1")),
+            "Expected OF after CASE expression"
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_statement_and_rem_after_of() {
+        let case_x = Statement::Case {
+            value: Expression::Variable("X".to_string()),
+        };
+        assert_eq!(
+            line_statements("20 CASE X OF :"),
+            Ok(vec![case_x.clone(), Statement::Empty])
+        );
+        assert_eq!(
+            line_statements("20 CASE X OF REM pick"),
+            Ok(vec![case_x.clone()])
+        );
+        assert!(matches!(
+            line_statements("20 CASE X OF : REM pick").as_deref(),
+            Ok([Statement::Case { .. }, Statement::Rem { .. }])
+        ));
+    }
+
+    #[test]
+    fn test_parse_upper_case_words_before_equals_are_assignments() {
+        for word in ["WHEN", "OTHERWISE", "ENDCASE", "OF"] {
+            let source = format!("10 {}=5", word);
+            assert_eq!(
+                line_statements(&source),
+                Ok(vec![Statement::Assignment {
+                    target: word.to_string(),
+                    expression: Expression::Integer(5),
+                }]),
+                "{}",
+                source
+            );
+            let source = format!("10 {}(3)=5", word);
+            assert!(
+                matches!(
+                    line_statements(&source).as_deref(),
+                    Ok([Statement::ArrayAssignment { .. }])
+                ),
+                "{}",
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_case_value_can_be_a_variable_named_of() {
+        assert_eq!(
+            line_statements("20 CASE OF OF"),
+            Ok(vec![Statement::Case {
+                value: Expression::Variable("OF".to_string()),
+            }])
         );
     }
 

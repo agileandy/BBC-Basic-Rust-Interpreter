@@ -170,7 +170,7 @@ fn test_string_and_number_pair_is_type_mismatch() {
         "30 ENDCASE",
     ]);
 
-    assert_eq!(result, Err("Type mismatch at line 10".to_string()));
+    assert_eq!(result, Err("Type mismatch at line 20".to_string()));
     assert_eq!(output, "");
 }
 
@@ -185,7 +185,7 @@ fn test_type_mismatch_goes_to_the_error_handler() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "error 6 at 20\n");
+    assert_eq!(output, "error 6 at 30\n");
 }
 
 #[test]
@@ -525,4 +525,225 @@ fn test_binary_lists_and_runs_a_case() {
         "RUN output: {}",
         output
     );
+}
+
+// Review finding K1: an error in a WHEN value has the line of the WHEN.
+
+#[test]
+fn test_error_in_a_when_value_has_the_line_of_the_when() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 X = 1",
+        "30 CASE X OF",
+        "40 WHEN 2 : PRINT \"two\"",
+        "50 WHEN 1 / 0 : PRINT \"bad\"",
+        "60 ENDCASE",
+        "70 END",
+        "100 PRINT \"err at \"; ERL",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "err at 50\n");
+}
+
+#[test]
+fn test_error_in_a_when_value_with_no_handler_has_the_line_of_the_when() {
+    let (result, output) = run(&[
+        "30 CASE 1 OF",
+        "40 WHEN 2 : PRINT \"two\"",
+        "50 WHEN 1 / 0 : PRINT \"bad\"",
+        "60 ENDCASE",
+    ]);
+
+    assert_eq!(result, Err("Division by zero at line 50".to_string()));
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_error_in_a_function_body_of_a_when_value_has_the_line_of_the_body() {
+    let (result, _) = run(&[
+        "30 CASE 1 OF",
+        "40 WHEN FNbad : PRINT \"bad\"",
+        "50 ENDCASE",
+        "60 END",
+        "70 DEF FNbad",
+        "80 = 1 / 0",
+    ]);
+
+    assert_eq!(result, Err("Division by zero at line 80".to_string()));
+}
+
+// Review finding K2: a stored CASE line with a syntax error must not block a
+// typed command.
+
+#[test]
+fn test_typed_command_runs_when_a_stored_case_line_is_invalid() {
+    let (result, output) = typed(
+        &[
+            "10 X = 1",
+            "20 CASE X+ OF",
+            "30 WHEN 1 : PRINT \"one\"",
+            "50 ENDCASE",
+        ],
+        "PRINT 1",
+    );
+
+    assert_eq!(result, Ok(RunOutcome::Ended));
+    assert_eq!(output, "1\n");
+}
+
+#[test]
+fn test_typed_command_runs_when_a_stored_endcase_is_missing() {
+    let (result, output) = typed(&["10 CASE 1 OF", "20 WHEN 1 : PRINT \"one\""], "PRINT 2");
+
+    assert_eq!(result, Ok(RunOutcome::Ended));
+    assert_eq!(output, "2\n");
+}
+
+#[test]
+fn test_typed_goto_to_a_case_with_no_endcase_is_an_error() {
+    let (result, output) = typed(&["10 CASE 1 OF", "20 WHEN 1 : PRINT \"one\""], "GOTO 10");
+
+    assert_eq!(
+        result,
+        Err("CASE without matching ENDCASE at line 10".to_string())
+    );
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_run_shows_the_syntax_error_of_an_invalid_case_line() {
+    let (result, output) = run(&[
+        "10 X = 1",
+        "20 CASE X+ OF",
+        "30 WHEN 1 : PRINT \"one\"",
+        "50 ENDCASE",
+    ]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 20: Unexpected end of expression".to_string())
+    );
+    assert_eq!(output, "");
+}
+
+// Review finding K3: upper-case names OF, WHEN, OTHERWISE and ENDCASE are
+// still variables and arrays before `=` (rule 15).
+
+#[test]
+fn test_upper_case_names_are_variables_and_arrays() {
+    let (result, output) = run(&[
+        "10 WHEN=5",
+        "20 OF=2",
+        "30 OTHERWISE=1 : ENDCASE=3",
+        "40 PRINT WHEN+OF+OTHERWISE+ENDCASE",
+        "50 DIM WHEN(3), OTHERWISE(2), ENDCASE(2), OF(2)",
+        "60 WHEN(3)=7 : OTHERWISE(1)=4",
+        "70 ENDCASE(2)=1 : OF(1)=2",
+        "80 PRINT WHEN(3)+OTHERWISE(1)+ENDCASE(2)+OF(1)",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "11\n14\n");
+}
+
+#[test]
+fn test_upper_case_variables_in_a_case_structure() {
+    let (result, output) = run(&[
+        "10 WHEN=2 : OF=2",
+        "20 CASE OF OF",
+        "30 WHEN WHEN : PRINT \"match\"",
+        "40 OTHERWISE PRINT \"no match\"",
+        "50 ENDCASE",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "match\n");
+}
+
+#[test]
+fn test_when_value_can_be_a_comparison() {
+    let (result, output) = run(&[
+        "10 A = 3",
+        "20 CASE TRUE OF",
+        "30 WHEN A = 1 : PRINT \"one\"",
+        "40 WHEN A > 2 : PRINT \"big\"",
+        "50 ENDCASE",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "big\n");
+}
+
+// Review finding K5: an empty statement or a REM can follow OF.
+
+#[test]
+fn test_empty_statement_and_rem_after_of() {
+    for line_20 in [
+        "20 CASE X OF :",
+        "20 CASE X OF REM pick",
+        "20 CASE X OF : REM pick",
+    ] {
+        let (result, output) = run(&[
+            "10 X = 2",
+            line_20,
+            "30 WHEN 1 : PRINT \"one\"",
+            "40 WHEN 2 : PRINT \"two\"",
+            "50 ENDCASE",
+        ]);
+
+        assert_eq!(result, Ok(()), "{}", line_20);
+        assert_eq!(output, "two\n", "{}", line_20);
+    }
+}
+
+#[test]
+fn test_nested_case_line_with_rem_after_of() {
+    let (result, output) = run(&[
+        "10 CASE 1 OF",
+        "20 WHEN 1 : CASE 2 OF REM inner",
+        "30 WHEN 2 : PRINT \"two\"",
+        "40 ENDCASE",
+        "50 WHEN 3 : PRINT \"three\"",
+        "60 ENDCASE",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "two\n");
+}
+
+// Review finding K4: LIST shows a space before OF after a bracket.
+
+#[test]
+fn test_binary_lists_a_space_before_of_after_a_bracket() {
+    let output = run_binary(concat!(
+        "10 CASE LEN(\"ab\") OF\n",
+        "20 WHEN 2\n",
+        "30 PRINT \"two\"\n",
+        "40 ENDCASE\n",
+        "LIST\n",
+        "RUN\n",
+        "EXIT\n",
+    ));
+
+    assert!(
+        output.contains("10 CASE LEN(\"ab\") OF\n"),
+        "LIST output: {}",
+        output
+    );
+    assert!(output.contains("two\n"), "RUN output: {}", output);
+}
+
+#[test]
+fn test_case_on_the_endcase_line_of_the_case_before() {
+    let (result, output) = run(&[
+        "10 CASE 1 OF",
+        "20 WHEN 1 : PRINT \"first\"",
+        "30 ENDCASE : CASE 2 OF",
+        "40 WHEN 2 : PRINT \"second\"",
+        "50 ENDCASE",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "first\nsecond\n");
 }
