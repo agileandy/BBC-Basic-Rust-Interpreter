@@ -432,6 +432,16 @@ impl Executor {
                 self.execute_input_file(handle, variables)
             }
             Statement::CloseFile { handle } => self.execute_close_file(handle),
+            Statement::Bput { handle, value } => {
+                let handle = self.eval_integer(handle)?;
+                let value = self.eval_integer(value)?;
+                self.bput(handle, value)
+            }
+            Statement::SetPtr { handle, position } => {
+                let handle = self.eval_integer(handle)?;
+                let position = self.eval_integer(position)?;
+                self.set_ptr(handle, position)
+            }
             _ => {
                 // Other statements not implemented yet
                 Ok(())
@@ -2919,6 +2929,11 @@ impl Executor {
             .open_files
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
+
+        // A file has no position before its start
+        if position < 0 {
+            return Err(BBCBasicError::IllegalFunction);
+        }
 
         // Seek to the specified position
         let pos = position as u64;

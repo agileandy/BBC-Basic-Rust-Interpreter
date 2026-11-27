@@ -202,6 +202,16 @@ pub enum Statement {
     },
     /// CLOSE# statement - close file
     CloseFile { handle: Expression },
+    /// BPUT# statement - write one byte to file
+    Bput {
+        handle: Expression,
+        value: Expression,
+    },
+    /// PTR# assignment - set the position in a file
+    SetPtr {
+        handle: Expression,
+        position: Expression,
+    },
     /// PLOT statement - general plotting with mode code
     Plot {
         mode: Expression,
@@ -517,6 +527,16 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                     line: line.line_number,
                 })
             }
+        }
+
+        // BPUT# statement (file I/O)
+        Token::Keyword(0xD5) if matches!(tokens.get(1), Some(Token::Operator('#'))) => {
+            parse_bput_statement(&tokens[2..], line.line_number)
+        }
+
+        // PTR# assignment (file I/O). The tokenizer gives PTR as 0x8F.
+        Token::Keyword(0x8F | 0xCF) if matches!(tokens.get(1), Some(Token::Operator('#'))) => {
+            parse_set_ptr_statement(&tokens[2..], line.line_number)
         }
 
         // Graphics statements
@@ -1175,6 +1195,40 @@ fn parse_close_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     let handle = parse_expression(tokens)?;
 
     Ok(Statement::CloseFile { handle })
+}
+
+/// Parse BPUT# statement (file I/O)
+fn parse_bput_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Format: BPUT# handle, value
+    let comma_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Separator(',')))
+        .ok_or_else(|| BBCBasicError::SyntaxError {
+            message: "Expected comma after file handle in BPUT#".to_string(),
+            line: line_number,
+        })?;
+
+    let handle = parse_expression(&tokens[..comma_pos])?;
+    let value = parse_expression(&tokens[comma_pos + 1..])?;
+
+    Ok(Statement::Bput { handle, value })
+}
+
+/// Parse PTR# assignment (file I/O)
+fn parse_set_ptr_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // Format: PTR# handle = position
+    let equals_pos = tokens
+        .iter()
+        .position(|t| matches!(t, Token::Operator('=')))
+        .ok_or_else(|| BBCBasicError::SyntaxError {
+            message: "Expected = after file handle in PTR#".to_string(),
+            line: line_number,
+        })?;
+
+    let handle = parse_expression(&tokens[..equals_pos])?;
+    let position = parse_expression(&tokens[equals_pos + 1..])?;
+
+    Ok(Statement::SetPtr { handle, position })
 }
 
 /// Parse PLOT statement: PLOT mode, x, y
@@ -3435,6 +3489,50 @@ mod tests {
             }
             _ => panic!("Expected CloseFile statement, got {:?}", stmt),
         }
+    }
+
+    #[test]
+    fn test_parse_bput_statement() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("20 BPUT#F%, 65").unwrap();
+
+        assert_eq!(
+            parse_statement(&line).unwrap(),
+            Statement::Bput {
+                handle: Expression::Variable("F%".to_string()),
+                value: Expression::Integer(65),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_bput_without_comma_is_error() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("20 BPUT#F%").unwrap();
+
+        assert!(parse_statement(&line).is_err());
+    }
+
+    #[test]
+    fn test_parse_ptr_assignment() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("30 PTR#F% = 1").unwrap();
+
+        assert_eq!(
+            parse_statement(&line).unwrap(),
+            Statement::SetPtr {
+                handle: Expression::Variable("F%".to_string()),
+                position: Expression::Integer(1),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_ptr_without_equals_is_error() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("30 PTR#F%").unwrap();
+
+        assert!(parse_statement(&line).is_err());
     }
 
     /// Parse `X% = <expression>` and return the expression.
