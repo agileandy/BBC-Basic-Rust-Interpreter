@@ -3320,9 +3320,9 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
 /// The built-in functions of one value. With no bracket, each one takes the
 /// next factor as its value: `SIN X + 1` is `(SIN X) + 1` (issue 143).
 const ONE_VALUE_FUNCTIONS: &[&str] = &[
-    "ABS", "ACS", "ADVAL", "ASC", "ASN", "ATN", "CHR$", "COS", "DEG", "EXP", "INKEY", "INKEY$",
-    "INT", "LEN", "LN", "LOG", "OPENIN", "OPENOUT", "OPENUP", "RAD", "SGN", "SIN", "SQR", "STR$",
-    "STR$~", "TAN", "VAL",
+    "ABS", "ACS", "ADVAL", "ASC", "ASN", "ATN", "CHR$", "COS", "DEG", "EVAL", "EXP", "INKEY",
+    "INKEY$", "INT", "LEN", "LN", "LOG", "OPENIN", "OPENOUT", "OPENUP", "RAD", "SGN", "SIN", "SQR",
+    "STR$", "STR$~", "TAN", "VAL",
 ];
 
 /// The built-in functions of 2 or more values. Each one needs a bracket.
