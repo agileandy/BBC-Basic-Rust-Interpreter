@@ -2696,9 +2696,14 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                     name: keyword,
                     args,
                 })
-            } else if is_user_function || matches!(keyword.as_str(), "TRUE" | "FALSE") {
-                // A user-defined function with no parameters, or a constant
-                // keyword that the executor evaluates as a function
+            } else if is_user_function
+                || matches!(
+                    keyword.as_str(),
+                    "TRUE" | "FALSE" | "RND" | "COUNT" | "POS" | "VPOS"
+                )
+            {
+                // A user-defined function with no parameters, or a keyword
+                // that gives a value with no bracket
                 Ok(Expression::FunctionCall {
                     name: keyword,
                     args: Vec::new(),
@@ -2836,6 +2841,39 @@ mod tests {
 
         assert_eq!(true_expr, constant("TRUE"));
         assert_eq!(false_expr, constant("FALSE"));
+    }
+
+    #[test]
+    fn test_parse_rnd_count_pos_vpos_without_bracket() {
+        // RND 0xB3, COUNT 0x9C, POS 0xB1, VPOS 0xBC
+        for (byte, name) in [
+            (0xB3, "RND"),
+            (0x9C, "COUNT"),
+            (0xB1, "POS"),
+            (0xBC, "VPOS"),
+        ] {
+            let expr = parse_expression(&[Token::Keyword(byte)]).unwrap();
+            assert_eq!(expr, constant(name), "{name} with no bracket");
+        }
+    }
+
+    #[test]
+    fn test_parse_rnd_with_bracket_keeps_argument() {
+        let tokens = [
+            Token::Keyword(0xB3),
+            Token::Separator('('),
+            Token::Integer(1),
+            Token::Separator(')'),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::FunctionCall {
+                name: "RND".to_string(),
+                args: vec![Expression::Integer(1)],
+            }
+        );
     }
 
     #[test]
