@@ -140,6 +140,15 @@ fn main() {
             continue;
         }
 
+        // AUTO [start[, step]]. Stop at end of input in AUTO mode.
+        if let Some(arguments) = auto_arguments(input) {
+            if !auto_mode(&stdin, &mut program, arguments) {
+                println!();
+                break;
+            }
+            continue;
+        }
+
         // *CAT command (catalog files)
         if let Some(directory) = cat_directory(input) {
             if let Err(e) = catalog_files(directory) {
@@ -366,6 +375,74 @@ fn renumber_program(program: &mut ProgramStore, arguments: Result<(u16, u16), St
     }
 }
 
+/// Match `AUTO`, `AUTO start` or `AUTO start, step` (any case).
+/// Return the start and the step (default 10 and 10), or an error for bad arguments.
+fn auto_arguments(input: &str) -> Option<Result<(u32, u32), String>> {
+    if !input.get(..4)?.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+    let rest = &input[4..];
+    if !rest.is_empty() && !rest.starts_with(|c: char| c.is_whitespace() || c.is_ascii_digit()) {
+        return None;
+    }
+    let parts: Vec<&str> = rest.split(',').map(str::trim).collect();
+    if parts.len() > 2 || (parts.len() == 2 && parts.contains(&"")) {
+        return Some(Err("Syntax error".to_string()));
+    }
+    let mut numbers = [10, 10];
+    for (number, part) in numbers.iter_mut().zip(&parts) {
+        if !part.is_empty() {
+            match part.parse() {
+                Ok(value) => *number = value,
+                Err(_) => return Some(Err("Syntax error".to_string())),
+            }
+        }
+    }
+    match numbers {
+        [_, 0] => Some(Err("Silly".to_string())),
+        [start, step] => Some(Ok((start, step))),
+    }
+}
+
+/// Prompt with the next line number and store each typed line with that number.
+/// End the mode for an empty line or a number above 65535.
+/// Return false if the input ended.
+fn auto_mode(
+    stdin: &io::Stdin,
+    program: &mut ProgramStore,
+    arguments: Result<(u32, u32), String>,
+) -> bool {
+    let (mut number, step) = match arguments {
+        Ok(arguments) => arguments,
+        Err(e) => {
+            println!("Error: {}", e);
+            return true;
+        }
+    };
+    let mut line_buffer = String::new();
+    while number <= u32::from(u16::MAX) {
+        print!("{} ", number);
+        io::stdout().flush().unwrap();
+        line_buffer.clear();
+        if matches!(stdin.read_line(&mut line_buffer), Ok(0) | Err(_)) {
+            return false;
+        }
+        let text = line_buffer.trim();
+        if text.is_empty() {
+            return true;
+        }
+        match tokenize(&format!("{} {}", number, text)) {
+            Ok(tokenized) => {
+                program.store_line(tokenized);
+                number = number.saturating_add(step);
+            }
+            Err(e) => println!("Error: Tokenization error: {:?}", e),
+        }
+    }
+    println!("Error: Too big");
+    true
+}
+
 /// Match `*CAT` or `*CAT <directory>` (any case). Return the directory, or "" for none.
 fn cat_directory(input: &str) -> Option<&str> {
     let input = input.trim();
@@ -468,6 +545,7 @@ fn print_help() {
     println!("  NEW                      - Clear the program");
     println!("  DELETE 20, 40            - Delete lines 20 to 40");
     println!("  RENUMBER [start[,step]]  - Renumber the lines (default 10,10)");
+    println!("  AUTO [start[,step]]      - Number each typed line (empty line ends)");
     println!("  SAVE \"filename\"          - Save program to filename.bbas");
     println!("  LOAD \"filename\"          - Load program from filename.bbas");
     println!("  CHAIN \"filename\"         - Load and run program");
