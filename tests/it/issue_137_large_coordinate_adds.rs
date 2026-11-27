@@ -161,9 +161,9 @@ fn test_a_relative_plot_with_normal_values_draws_the_same_pixels() {
 
 #[test]
 fn test_a_rectangle_with_normal_values_draws_the_same_pixels() {
-    // RECTANGLE draws a filled rectangle from x, y to x + width, y + height.
+    // RECTANGLE FILL draws a filled rectangle from x, y to x + width, y + height.
     let (result, output) = run_in_10_seconds(&[
-        "10 MODE 1 : RECTANGLE 10,10,20,30",
+        "10 MODE 1 : RECTANGLE FILL 10,10,20,30",
         "20 PRINT POINT(10,10); POINT(30,40); POINT(30,10); POINT(20,20); POINT(31,40); POINT(10,41)",
     ]);
 

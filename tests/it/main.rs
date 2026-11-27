@@ -131,3 +131,4 @@ mod issue_139_lists;
 mod issue_149_list_spaces_after_bracket;
 mod issue_147_eval;
 mod issue_146_number_in_string_context;
+mod issue_148_shape_fill_word;

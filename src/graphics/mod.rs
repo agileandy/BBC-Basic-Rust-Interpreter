@@ -389,6 +389,14 @@ impl GraphicsSystem {
         self.plot(145, radius, 0);
     }
 
+    /// CIRCLE FILL x, y, r. The BBC BASIC for Windows manual gives the rule:
+    /// "CIRCLE FILL x,y,r is equivalent to MOVE x,y : PLOT 153,r,0"
+    /// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html).
+    pub fn draw_filled_circle(&mut self, center_x: i32, center_y: i32, radius: i32) {
+        self.move_to(center_x, center_y);
+        self.plot(153, radius, 0);
+    }
+
     /// Fill a circle with a horizontal line for each row. Only the rows and
     /// the columns on the canvas are visited, so a large radius is fast. The
     /// half width is an exact integer square root, thus a radius larger than
@@ -465,6 +473,15 @@ impl GraphicsSystem {
         self.move_to(center_x, center_y);
         self.plot(0, rx, 0);
         self.plot(193, 0, ry);
+    }
+
+    /// ELLIPSE FILL x, y, a, b. The BBC BASIC for Windows manual gives the
+    /// rule: "ELLIPSE FILL x,y,a,b is equivalent to MOVE x,y : PLOT 0,a,0 :
+    /// PLOT 201,0,b" (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html).
+    pub fn draw_filled_ellipse(&mut self, center_x: i32, center_y: i32, rx: i32, ry: i32) {
+        self.move_to(center_x, center_y);
+        self.plot(0, rx, 0);
+        self.plot(201, 0, ry);
     }
 
     /// Fill an ellipse with a horizontal line for each row. Only the rows and
@@ -588,8 +605,9 @@ impl GraphicsSystem {
         }
     }
 
-    /// Draw a filled rectangle. Only the rows and the columns on the canvas
-    /// are visited, so a large rectangle is fast.
+    /// Draw a rectangle outline or a filled rectangle from x1, y1 to x2, y2.
+    /// Only the rows and the columns on the canvas are visited, so a large
+    /// rectangle is fast.
     pub fn draw_rectangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, filled: bool) {
         let min_x = i64::from(x1.min(x2));
         let max_x = i64::from(x1.max(x2));
@@ -619,8 +637,19 @@ impl GraphicsSystem {
             }
         }
 
-        // Update current position
-        self.current_pos = Point { x: x2, y: y2 };
+        // The BBC BASIC manual does not give the last point. BBCSDL
+        // (https://github.com/rtrussell/BBCSDL, src/bbexec.c, case TRECT)
+        // draws RECTANGLE x,y,w,h as MOVE x,y : PLOT 9,w,0 : PLOT 9,0,h :
+        // PLOT 9,-w,0 : PLOT 9,0,-h, and RECTANGLE FILL x,y,w,h as MOVE x,y :
+        // PLOT 97,w,h. Thus an outline ends at x1, y1 with x1, y2 before it,
+        // and a filled rectangle ends at x2, y2 with x1, y1 before it.
+        if filled {
+            self.move_to(x1, y1);
+            self.set_last_point(x2, y2);
+        } else {
+            self.move_to(x1, y2);
+            self.set_last_point(x1, y1);
+        }
     }
 
     /// Draw a triangle
