@@ -24,6 +24,11 @@ fn install_closed_output_hook() {
     }));
 }
 
+/// The native stack size of the interpreter thread. A nested FN call can use
+/// about 25 KiB of it in a debug build. The main thread has 8 MiB, which
+/// overflows before the FN depth limit (issue 151).
+const INTERPRETER_STACK_SIZE: usize = 64 * 1024 * 1024;
+
 fn main() {
     install_closed_output_hook();
 
@@ -37,6 +42,19 @@ fn main() {
         }
     }
 
+    let interpreter = std::thread::Builder::new()
+        .name("interpreter".to_string())
+        .stack_size(INTERPRETER_STACK_SIZE)
+        .spawn(run_interpreter)
+        .expect("the interpreter thread starts");
+    if let Err(panic) = interpreter.join() {
+        // The hook showed the panic: end with the panic status
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Read and run lines until EXIT, QUIT or the end of input
+fn run_interpreter() {
     println!("BBC BASIC Interpreter v0.1.0");
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
 

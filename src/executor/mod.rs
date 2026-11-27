@@ -363,6 +363,24 @@ pub enum ErrorHandler {
 /// The number of files that a program can open at one time.
 const DEFAULT_OPEN_FILE_LIMIT: usize = 255;
 
+/// The maximum depth of nested FN and EVAL calls. Each call uses the native
+/// stack, so the limit stops a stack overflow (issue 151). On the 64 MiB
+/// interpreter thread of `main`, a debug build overflows at a depth of 2617
+/// or more. A 2 MiB test thread overflows before this limit.
+const FUNCTION_DEPTH_LIMIT: usize = 1000;
+
+/// The maximum number of entries on the return stack, on each loop stack
+/// and on the LOCAL scope stack (issue 151)
+const STACK_ENTRY_LIMIT: usize = 10_000;
+
+/// Give No room if a stack with `len` entries cannot take one more
+fn check_room(len: usize) -> Result<()> {
+    if len >= STACK_ENTRY_LIMIT {
+        return Err(BBCBasicError::NoRoom);
+    }
+    Ok(())
+}
+
 /// The statement that put an entry on the return stack
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReturnKind {
@@ -434,6 +452,8 @@ pub struct Executor {
     function_error_line: Option<u32>,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
+    // The number of FN and EVAL calls that are open now
+    function_depth: usize,
     // Error handler: where the run continues on error (None = no handler)
     error_handler: Option<ErrorHandler>,
     // TRACE: the run prints each stored line number below this limit (None = off)
@@ -501,6 +521,7 @@ impl Executor {
             function_body_runner: BodyRunnerSlot::default(),
             function_error_line: None,
             local_stack: Vec::new(),
+            function_depth: 0,
             error_handler: None,
             trace_limit: None,
             last_error: None,
@@ -973,8 +994,10 @@ impl Executor {
             // The type of an EVAL result is known only after the parse of its
             // text. Parse the text one time and format the result by its type.
             Expression::FunctionCall { name, args } if name == "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                self.format_expression(&parsed)
+                self.nested_call(|executor| {
+                    let parsed = executor.parse_eval_text(args)?;
+                    executor.format_expression(&parsed)
+                })
             }
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
@@ -1127,6 +1150,7 @@ impl Executor {
         };
 
         // The run loop sets the FOR position (set_for_loop_line)
+        check_room(self.for_loops.len())?;
         self.for_loops.push(ForLoop {
             variable: variable.to_string(),
             kind: ForKind::Count {
@@ -2768,13 +2792,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_integer(&parsed)
-            }
+                executor.eval_integer(&parsed)
+            }),
             "ABS" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -3050,13 +3074,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_real(&parsed)
-            }
+                executor.eval_real(&parsed)
+            }),
             "SIN" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -3288,13 +3312,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if !self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if !executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_string(&parsed)
-            }
+                executor.eval_string(&parsed)
+            }),
             // GET$ waits for one key and gives it. At the end of input it gives "".
             "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
             // INKEY$(n) waits for a maximum of n centiseconds for a key and
@@ -3682,8 +3706,10 @@ impl Executor {
     }
 
     /// Push a REPEAT position onto the repeat stack
-    pub fn push_repeat(&mut self, position: Position) {
+    pub fn push_repeat(&mut self, position: Position) -> Result<()> {
+        check_room(self.repeat_stack.len())?;
         self.repeat_stack.push(position);
+        Ok(())
     }
 
     /// Evaluate UNTIL condition and return the REPEAT position if we should loop back
@@ -3720,6 +3746,7 @@ impl Executor {
 
         if result != 0 {
             // Condition is true - enter loop body
+            check_room(self.while_stack.len())?;
             self.while_stack.push(position);
             Ok(Some(position))
         } else {
@@ -3750,8 +3777,10 @@ impl Executor {
     }
 
     /// Push a return address onto the GOSUB stack
-    pub fn push_gosub_return(&mut self, position: Position) {
+    pub fn push_gosub_return(&mut self, position: Position) -> Result<()> {
+        check_room(self.return_stack.len())?;
         self.return_stack.push((ReturnKind::Gosub, position));
+        Ok(())
     }
 
     /// Pop a return address from the GOSUB stack. With a PROC call on top,
@@ -3773,9 +3802,11 @@ impl Executor {
 
     /// Push the position of a PROC call onto the return stack, with the
     /// loop depths of the caller
-    pub fn push_proc_return(&mut self, position: Position) {
+    pub fn push_proc_return(&mut self, position: Position) -> Result<()> {
+        check_room(self.return_stack.len())?;
         let depths = self.loop_depths();
         self.return_stack.push((ReturnKind::Proc(depths), position));
+        Ok(())
     }
 
     /// Pop the newest PROC call, and the GOSUBs and loops that this PROC left
@@ -3822,8 +3853,10 @@ impl Executor {
     }
 
     /// Enter a new local scope (called on PROC/FN entry)
-    pub fn enter_local_scope(&mut self) {
+    pub fn enter_local_scope(&mut self) -> Result<()> {
+        check_room(self.local_stack.len())?;
         self.local_stack.push(LocalFrame::new());
+        Ok(())
     }
 
     /// Declare a local variable (called on LOCAL statement)
@@ -4131,8 +4164,31 @@ impl Executor {
         Ok(())
     }
 
+    /// Run `call` as one more nested FN or EVAL call. At the depth limit,
+    /// give No room and do not run it. The depth goes back down on each exit,
+    /// also after an error.
+    fn nested_call<T>(&mut self, call: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.function_depth >= FUNCTION_DEPTH_LIMIT {
+            return Err(BBCBasicError::NoRoom);
+        }
+        self.function_depth += 1;
+        let result = call(self);
+        self.function_depth -= 1;
+        result
+    }
+
     /// Call a user-defined function and evaluate its result with `eval`.
     fn call_function<T>(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+        eval: fn(&mut Self, &Expression) -> Result<T>,
+    ) -> Result<T> {
+        self.nested_call(|executor| executor.call_function_body(name, args, eval))
+    }
+
+    /// The body of `call_function`, inside the depth count
+    fn call_function_body<T>(
         &mut self,
         name: &str,
         args: &[Expression],
@@ -4156,7 +4212,7 @@ impl Executor {
         let loop_depths = self.loop_depths();
 
         // Enter local scope for function
-        self.enter_local_scope();
+        self.enter_local_scope()?;
         let result = self.run_function(&func, values, eval);
 
         // Exit local scope (restore variables), also after an error in the
@@ -6411,7 +6467,7 @@ mod tests {
         executor.execute_statement(&init_stmt).unwrap();
 
         // REPEAT at line 20
-        executor.push_repeat(Position::line_start(20));
+        executor.push_repeat(Position::line_start(20)).unwrap();
 
         // Loop several times
         for expected in 1..=5 {
@@ -6480,7 +6536,9 @@ mod tests {
         // 110 RETURN      (should return to line AFTER 20, which is 30)
 
         // Push return address for line 20
-        executor.push_gosub_return(Position::line_start(20));
+        executor
+            .push_gosub_return(Position::line_start(20))
+            .unwrap();
 
         // Verify return address was saved
         assert_eq!(executor.return_stack.len(), 1);
@@ -6511,8 +6569,12 @@ mod tests {
         // 110 RETURN
         // 200 RETURN
 
-        executor.push_gosub_return(Position::line_start(10));
-        executor.push_gosub_return(Position::line_start(100));
+        executor
+            .push_gosub_return(Position::line_start(10))
+            .unwrap();
+        executor
+            .push_gosub_return(Position::line_start(100))
+            .unwrap();
 
         // First RETURN should go back to 100
         assert_eq!(
@@ -6610,7 +6672,7 @@ mod tests {
         assert_eq!(executor.get_variable_int("X").unwrap(), 10);
 
         // Simulate PROC entry - enter local scope
-        executor.enter_local_scope();
+        executor.enter_local_scope().unwrap();
 
         // Simulate LOCAL X declaration inside PROC
         // This should save the old value and create a new local binding

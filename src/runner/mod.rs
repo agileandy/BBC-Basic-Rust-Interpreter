@@ -1074,7 +1074,7 @@ fn step(
             }
             // Push the current position so RETURN can come back here. A
             // trapped error must not leave a return position.
-            executor.push_gosub_return(position);
+            executor.push_gosub_return(position)?;
             Ok(Flow::Jumped)
         }
         Statement::GotoExpression { target } => {
@@ -1089,7 +1089,7 @@ fn step(
             if !goto_calculated_line(program, target) {
                 return Err(BBCBasicError::NoSuchLine(target).into());
             }
-            executor.push_gosub_return(position);
+            executor.push_gosub_return(position)?;
             Ok(Flow::Jumped)
         }
         Statement::OnGoto {
@@ -1123,7 +1123,7 @@ fn step(
                 if !program.goto_line(target) {
                     return Err(BBCBasicError::NoSuchLine(target.into()).into());
                 }
-                executor.push_gosub_return(position);
+                executor.push_gosub_return(position)?;
                 return Ok(Flow::Jumped);
             }
             program.goto_after_next_else(position)?;
@@ -1161,15 +1161,16 @@ fn step(
 
             // Each parameter is local to the PROC: ENDPROC restores the
             // caller variable of the same name
-            executor.enter_local_scope();
-            if let Err(error) = executor.bind_parameters(&params, values) {
+            executor.enter_local_scope()?;
+            let started = executor
+                .bind_parameters(&params, values)
+                .and_then(|()| executor.push_proc_return(position));
+            if let Err(error) = started {
                 // The PROC did not start: close its scope, so that the
                 // ON ERROR handler runs in the scope of the caller
                 executor.exit_local_scope()?;
                 return Err(error.into());
             }
-
-            executor.push_proc_return(position);
 
             // Continue with the statement after DEF PROC
             program.goto(proc_position);
@@ -1215,7 +1216,7 @@ fn step(
         }
         Statement::Repeat => {
             // Push this position for UNTIL to loop back to
-            executor.push_repeat(position);
+            executor.push_repeat(position)?;
             Ok(Flow::Next)
         }
         Statement::Until { condition } => {
