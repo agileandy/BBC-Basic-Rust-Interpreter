@@ -136,3 +136,4 @@ mod issue_150_comma_in_brackets;
 mod issue_140_maps;
 mod issue_152_root_and_log_errors;
 mod issue_155_empty_argument;
+mod issue_154_input_file_array_element;
