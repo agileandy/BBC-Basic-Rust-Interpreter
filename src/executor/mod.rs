@@ -26,6 +26,44 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
+/// Remove the line end (`\n` or `\r\n`) of a reply, if there is one
+fn without_line_end(reply: &str) -> &str {
+    reply
+        .strip_suffix('\n')
+        .map(|r| r.strip_suffix('\r').unwrap_or(r))
+        .unwrap_or(reply)
+}
+
+/// Split a reply of plain INPUT into its values at the commas.
+/// Leading spaces of a value are removed and trailing spaces are kept.
+/// A value that starts with a double quote is read to the closing quote,
+/// with its commas and spaces kept, and the quotes are removed. The text
+/// after the closing quote, to the next comma, is ignored.
+fn split_input_reply(reply: &str) -> VecDeque<String> {
+    let mut values = VecDeque::new();
+    let mut rest = without_line_end(reply);
+    loop {
+        rest = rest.trim_start();
+        let (value, after) = match rest.strip_prefix('"') {
+            Some(quoted) => {
+                let close = quoted.find('"').unwrap_or(quoted.len());
+                let after = &quoted[close..];
+                let comma = after.find(',').unwrap_or(after.len());
+                (&quoted[..close], &after[comma..])
+            }
+            None => {
+                let comma = rest.find(',').unwrap_or(rest.len());
+                (&rest[..comma], &rest[comma..])
+            }
+        };
+        values.push_back(value.to_string());
+        match after.strip_prefix(',') {
+            Some(next) => rest = next,
+            None => return values,
+        }
+    }
+}
+
 /// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
 /// VAL, INPUT and READ of a DATA text item use it.
 /// The number has an optional sign, digits with one optional decimal point, and an
@@ -793,7 +831,7 @@ impl Executor {
         let mut question_mark = true;
 
         for item in items {
-            let var = match item {
+            let (var, indices) = match item {
                 InputItem::Prompt {
                     text,
                     question_mark: shows,
@@ -802,27 +840,53 @@ impl Executor {
                     question_mark = *shows;
                     continue;
                 }
-                InputItem::Variable(var) => var,
+                InputItem::Variable(var) => (var, None),
+                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
             };
             if values.is_empty() {
                 let reply = self.read_input_reply(question_mark);
-                values = reply.split(',').map(str::to_string).collect();
+                values = split_input_reply(&reply);
             }
             question_mark = true;
-            let value = values.pop_front().unwrap_or_default();
-            let reply = value.trim();
+            let reply = values.pop_front().unwrap_or_default();
 
             // A reply that is not a number gives 0, as on a BBC Micro
-            if var.ends_with('%') {
-                let val = real_to_integer(parse_leading_number(reply))?;
-                self.variables.set_integer_var(var.clone(), val);
+            let value = if var.ends_with('%') {
+                Variable::Integer(real_to_integer(parse_leading_number(&reply))?)
             } else if var.ends_with('$') {
-                self.variables
-                    .set_string_var(var.clone(), reply.to_string())?;
+                Variable::String(reply)
             } else {
-                let val = parse_leading_number(reply);
-                self.variables.set_real_var(var.clone(), val);
+                Variable::Real(parse_leading_number(&reply))
+            };
+            self.store_input_value(var, indices.map(Vec::as_slice), value)?;
+        }
+        Ok(())
+    }
+
+    /// Store an INPUT value in a variable, or in an array element if `indices`
+    /// is given. The indices are evaluated now.
+    fn store_input_value(
+        &mut self,
+        name: &str,
+        indices: Option<&[Expression]>,
+        value: Variable,
+    ) -> Result<()> {
+        if let Some(indices) = indices {
+            let mut index_values = Vec::with_capacity(indices.len());
+            for index_expr in indices {
+                let idx = self.eval_integer(index_expr)?;
+                if idx < 0 {
+                    return Err(BBCBasicError::SubscriptOutOfRange);
+                }
+                index_values.push(idx as usize);
             }
+            return self.variables.set_array_element(name, &index_values, value);
+        }
+        match value {
+            Variable::Integer(val) => self.variables.set_integer_var(name.to_string(), val),
+            Variable::String(val) => self.variables.set_string_var(name.to_string(), val)?,
+            Variable::Real(val) => self.variables.set_real_var(name.to_string(), val),
+            _ => return Err(BBCBasicError::TypeMismatch),
         }
         Ok(())
     }
@@ -834,7 +898,7 @@ impl Executor {
         let mut question_mark = true;
 
         for item in items {
-            let var = match item {
+            let (var, indices) = match item {
                 InputItem::Prompt {
                     text,
                     question_mark: shows,
@@ -843,19 +907,20 @@ impl Executor {
                     question_mark = *shows;
                     continue;
                 }
-                InputItem::Variable(var) => var,
+                InputItem::Variable(var) => (var, None),
+                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
             };
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
             }
             let reply = self.read_input_reply(question_mark);
             question_mark = true;
-            let reply = reply
-                .strip_suffix('\n')
-                .map(|r| r.strip_suffix('\r').unwrap_or(r))
-                .unwrap_or(&reply);
-            self.variables
-                .set_string_var(var.clone(), reply.to_string())?;
+            let reply = without_line_end(&reply);
+            self.store_input_value(
+                var,
+                indices.map(Vec::as_slice),
+                Variable::String(reply.to_string()),
+            )?;
         }
         Ok(())
     }
