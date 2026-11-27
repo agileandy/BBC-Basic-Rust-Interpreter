@@ -309,6 +309,8 @@ pub enum Statement {
     Gcol { mode: Expression, color: Expression },
     /// CLG statement - clear graphics screen
     Clg,
+    /// MODE statement - select a screen mode from 0 to 7
+    Mode { mode: Expression },
     /// ELLIPSE statement - draw an ellipse
     Ellipse {
         x: Expression,
@@ -692,6 +694,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // CLG statement
         Token::Keyword(0xDA) => Ok(Statement::Clg),
+
+        // MODE statement
+        Token::Keyword(0xEB) => parse_mode_statement(&tokens[1..], line.line_number),
 
         // Extended statements (0xC8 prefix)
         Token::ExtendedKeyword(0xC8, extended_token) => match extended_token {
@@ -1999,6 +2004,20 @@ fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     // Parse the condition expression
     let condition = parse_expression(tokens)?;
     Ok(Statement::Until { condition })
+}
+
+/// Parse MODE statement
+/// Supports: MODE n, where n is an expression
+fn parse_mode_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "MODE requires a mode number".to_string(),
+            line: line_number,
+        });
+    }
+
+    let mode = parse_expression(tokens)?;
+    Ok(Statement::Mode { mode })
 }
 
 /// Parse TRACE statement
@@ -4704,6 +4723,35 @@ mod tests {
     #[test]
     fn test_parse_trace_with_no_operand_gives_error() {
         assert!(parse_trace("TRACE").is_err());
+    }
+
+    #[test]
+    fn test_parse_mode_number() {
+        assert_eq!(
+            parse_trace("MODE 1").unwrap(),
+            Statement::Mode {
+                mode: Expression::Integer(1)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_mode_expression() {
+        assert_eq!(
+            parse_trace("MODE X% + 1").unwrap(),
+            Statement::Mode {
+                mode: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Integer(1)),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_mode_with_no_operand_gives_error() {
+        assert!(parse_trace("MODE").is_err());
     }
 
     /// Tokenize the text and parse it as one expression.

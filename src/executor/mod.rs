@@ -3,7 +3,7 @@
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
 use crate::error::{BBCBasicError, Result};
-use crate::graphics::GraphicsSystem;
+use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
@@ -307,6 +307,9 @@ pub struct Executor {
     output: String,
     // Column of the print position: 0 after a newline, updated by print_output
     column: usize,
+    // Current screen mode (MODE). A BBC Micro starts in mode 7, but the
+    // executor starts in mode 0 so that graphics work with no MODE statement.
+    screen_mode: ScreenMode,
 }
 
 impl Executor {
@@ -340,6 +343,7 @@ impl Executor {
             input_queue: VecDeque::new(),
             output: String::new(),
             column: 0,
+            screen_mode: ScreenMode::from_number(0).expect("mode 0 is in the mode table"),
         }
     }
 
@@ -435,6 +439,7 @@ impl Executor {
             Statement::Circle { x, y, radius } => self.execute_circle(x, y, radius),
             Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
             Statement::Clg => self.execute_clg(),
+            Statement::Mode { mode } => self.execute_mode(mode),
             Statement::Ellipse { x, y, major, minor } => self.execute_ellipse(x, y, major, minor),
             Statement::Rectangle {
                 x1,
@@ -1232,13 +1237,27 @@ impl Executor {
         Ok(())
     }
 
+    /// Execute MODE statement - select a screen mode, clear the text screen
+    /// and reset the graphics. A number that is not 0 to 7 gives Bad MODE.
+    fn execute_mode(&mut self, mode: &Expression) -> Result<()> {
+        let number = self.eval_integer(mode)?;
+        let screen_mode = ScreenMode::from_number(number).ok_or(BBCBasicError::BadMode)?;
+
+        self.screen_mode = screen_mode;
+        self.graphics.reset_for_mode(&screen_mode);
+        self.execute_cls()
+    }
+
     /// Execute PLOT statement - plot with mode code
     fn execute_plot(&mut self, mode: &Expression, x: &Expression, y: &Expression) -> Result<()> {
         let mode_val = self.eval_integer(mode)?;
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
 
-        self.graphics.plot(mode_val as u8, x_val, y_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics.plot(mode_val as u8, x_val, y_val);
+        }
         Ok(())
     }
 
@@ -1247,7 +1266,10 @@ impl Executor {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
 
-        self.graphics.move_to(x_val, y_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics.move_to(x_val, y_val);
+        }
         Ok(())
     }
 
@@ -1256,7 +1278,10 @@ impl Executor {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
 
-        self.graphics.draw_line_to(x_val, y_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics.draw_line_to(x_val, y_val);
+        }
         Ok(())
     }
 

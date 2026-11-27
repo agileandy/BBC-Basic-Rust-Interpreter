@@ -9,6 +9,73 @@ const DEFAULT_WIDTH: usize = 1280;
 /// Default canvas height (1024 pixels matching BBC Micro MODE 0)
 const DEFAULT_HEIGHT: usize = 1024;
 
+/// The properties of one BBC Micro screen mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenMode {
+    /// Width of the screen in pixels (0 in a text-only mode)
+    pub pixel_width: usize,
+    /// Height of the screen in pixels (0 in a text-only mode)
+    pub pixel_height: usize,
+    /// Number of logical colours
+    pub colours: u8,
+    /// Number of text columns
+    pub text_columns: usize,
+    /// Number of text rows
+    pub text_rows: usize,
+    /// True if PLOT, MOVE and DRAW have an effect in this mode
+    pub has_graphics: bool,
+}
+
+/// The BBC Micro screen modes 0 to 7, in mode number order
+const SCREEN_MODES: [ScreenMode; 8] = [
+    ScreenMode::graphics(640, 256, 2, 80, 32),
+    ScreenMode::graphics(320, 256, 4, 40, 32),
+    ScreenMode::graphics(160, 256, 16, 20, 32),
+    ScreenMode::text_only(2, 80, 25),
+    ScreenMode::graphics(320, 256, 2, 40, 32),
+    ScreenMode::graphics(160, 256, 4, 20, 32),
+    ScreenMode::text_only(2, 40, 25),
+    ScreenMode::text_only(8, 40, 25),
+];
+
+impl ScreenMode {
+    const fn graphics(
+        pixel_width: usize,
+        pixel_height: usize,
+        colours: u8,
+        text_columns: usize,
+        text_rows: usize,
+    ) -> Self {
+        Self {
+            pixel_width,
+            pixel_height,
+            colours,
+            text_columns,
+            text_rows,
+            has_graphics: true,
+        }
+    }
+
+    const fn text_only(colours: u8, text_columns: usize, text_rows: usize) -> Self {
+        Self {
+            pixel_width: 0,
+            pixel_height: 0,
+            colours,
+            text_columns,
+            text_rows,
+            has_graphics: false,
+        }
+    }
+
+    /// The screen mode with the given number, or None if the number is not 0 to 7
+    pub fn from_number(number: i32) -> Option<Self> {
+        usize::try_from(number)
+            .ok()
+            .and_then(|index| SCREEN_MODES.get(index))
+            .copied()
+    }
+}
+
 /// Graphics system coordinate and state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Point {
@@ -62,6 +129,17 @@ impl GraphicsSystem {
         for row in &mut self.canvas {
             row.fill(false);
         }
+    }
+
+    /// Reset the graphics for a new screen mode (MODE): clear the canvas,
+    /// move the cursor and the origin to 0, 0 and set the default colours
+    pub fn reset_for_mode(&mut self, mode: &ScreenMode) {
+        self.clear();
+        self.current_pos = Point { x: 0, y: 0 };
+        self.origin = Point { x: 0, y: 0 };
+        self.foreground_color = mode.colours - 1;
+        self.color_mode = 0;
+        self.triangle_corner = None;
     }
 
     /// Set graphics color mode (GCOL)
