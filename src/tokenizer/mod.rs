@@ -3,7 +3,7 @@
 //! Converts BBC BASIC source code into internal token representation compatible
 //! with the original BBC Micro tokenized format.
 
-use crate::error::Result;
+use crate::error::{BBCBasicError, Result};
 use std::collections::HashMap;
 
 /// Represents a single token in BBC BASIC
@@ -231,15 +231,21 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 }
             }
 
-            // Parse the number
+            // Parse the number. A real number that is not finite, such as 1E400, is too big.
             if is_real {
                 if let Ok(val) = num_str.parse::<f64>() {
+                    if !val.is_finite() {
+                        return Err(BBCBasicError::TooBig);
+                    }
                     tokens.push(Token::Real(val));
                 }
             } else if let Ok(val) = num_str.parse::<i32>() {
                 tokens.push(Token::Integer(val));
             } else if let Ok(val) = num_str.parse::<f64>() {
                 // An integer that does not fit in an i32 is a real
+                if !val.is_finite() {
+                    return Err(BBCBasicError::TooBig);
+                }
                 tokens.push(Token::Real(val));
             }
             continue;
