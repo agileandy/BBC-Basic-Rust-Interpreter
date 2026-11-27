@@ -99,3 +99,4 @@ mod issue_97_second_dim;
 mod issue_98_run_resets_error_handler;
 mod issue_99_plot_absolute_bit;
 mod program_run_tests;
+mod issue_121_tab_and_spc_one_run;
