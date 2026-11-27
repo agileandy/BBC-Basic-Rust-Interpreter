@@ -165,9 +165,10 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             continue;
         }
 
-        // Numbers (integer or real, including negative)
+        // Numbers (integer or real, including negative). A real number
+        // can start with a decimal point, such as .5
         if ch.is_ascii_digit()
-            || (ch == '-'
+            || ((ch == '-' || ch == '.')
                 && chars
                     .clone()
                     .nth(1)
@@ -319,7 +320,8 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                                                    // Consume rest of line (don't tokenize comment text)
                 while chars.next().is_some() {}
             }
-            '+' | '*' | '/' | '^' | '<' | '>' | '=' => {
+            // # starts the channel of a file statement, such as PRINT#
+            '+' | '*' | '/' | '^' | '<' | '>' | '=' | '#' => {
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
@@ -333,7 +335,18 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 tokens.push(Token::Separator(ch));
             }
             _ => {
-                // Unknown character, skip it
+                // A REM or DATA statement uses the rest of the line, so the
+                // tokenizer skips a character that it does not know there.
+                // In other text, the character is an error.
+                if !tokens
+                    .iter()
+                    .any(|t| matches!(t, Token::Keyword(0xF4 | 0xDC)))
+                {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: format!("Unknown character '{}'", ch),
+                        line: line_number,
+                    });
+                }
                 chars.next();
             }
         }
@@ -1014,5 +1027,86 @@ mod tests {
         assert!(matches!(line.tokens[0], Token::Keyword(0xF1))); // PRINT
         assert!(matches!(line.tokens[1], Token::Integer(42)));
         assert!(matches!(line.tokens[2], Token::Keyword(0xF4))); // REM
+    }
+
+    /// The characters that the tokenizer does not know (issue 62).
+    const UNKNOWN_CHARACTERS: [char; 11] = ['~', '?', '!', '@', '|', '\\', '[', ']', '{', '}', '`'];
+
+    #[test]
+    fn test_unknown_character_in_statement_gives_syntax_error() {
+        for ch in UNKNOWN_CHARACTERS {
+            let source = format!("10 PRINT {}5", ch);
+            match tokenize(&source) {
+                Err(BBCBasicError::SyntaxError { message, line }) => {
+                    assert_eq!(message, format!("Unknown character '{}'", ch));
+                    assert_eq!(line, Some(10));
+                }
+                other => panic!("{:?} gave {:?}", source, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_unknown_character_in_string_is_kept() {
+        for ch in UNKNOWN_CHARACTERS {
+            let source = format!("10 PRINT \"A{}B\"", ch);
+            let line = tokenize(&source).expect("string tokenizes");
+            assert_eq!(line.tokens[1], Token::String(format!("A{}B", ch)));
+        }
+    }
+
+    #[test]
+    fn test_unknown_character_after_rem_gives_no_error() {
+        for ch in UNKNOWN_CHARACTERS {
+            let source = format!("10 X = 1 : REM a {} b", ch);
+            assert!(tokenize(&source).is_ok(), "{:?} gave an error", source);
+        }
+    }
+
+    #[test]
+    fn test_unknown_character_in_data_line_gives_no_error() {
+        for ch in UNKNOWN_CHARACTERS {
+            let source = format!("10 DATA 1, {}2", ch);
+            assert!(tokenize(&source).is_ok(), "{:?} gave an error", source);
+        }
+    }
+
+    #[test]
+    fn test_hash_is_an_operator_for_file_statements() {
+        let line = tokenize("10 PRINT#F%, 42").unwrap();
+        assert_eq!(line.tokens[1], Token::Operator('#'));
+    }
+
+    #[test]
+    fn test_tab_is_white_space() {
+        let line = tokenize("10 PRINT\t5").unwrap();
+        assert_eq!(line.tokens, vec![Token::Keyword(0xF1), Token::Integer(5)]);
+    }
+
+    #[test]
+    fn test_number_can_start_with_decimal_point() {
+        assert_eq!(tokenize("PRINT .5").unwrap().tokens[1], Token::Real(0.5));
+        assert_eq!(
+            tokenize("PRINT .25E2").unwrap().tokens[1],
+            Token::Real(25.0)
+        );
+        assert_eq!(
+            tokenize("X = .5 + .5").unwrap().tokens,
+            vec![
+                Token::Identifier("X".to_string()),
+                Token::Operator('='),
+                Token::Real(0.5),
+                Token::Operator('+'),
+                Token::Real(0.5),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_decimal_point_before_a_letter_is_not_a_number() {
+        assert!(matches!(
+            tokenize("10 PRINT A.B"),
+            Err(BBCBasicError::SyntaxError { message, .. }) if message == "Unknown character '.'"
+        ));
     }
 }
