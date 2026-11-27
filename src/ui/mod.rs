@@ -196,10 +196,23 @@ impl App {
         self.context.document.set_changed(changed);
     }
 
-    /// Put pasted text in the editor. Other modes ignore a paste.
+    /// Put pasted text in the editor, or type it in the run mode. The files
+    /// mode ignores a paste.
     pub fn paste(&mut self, text: &str) {
-        if self.mode == Mode::Edit {
-            self.editor.paste(text, &mut self.context);
+        match self.mode {
+            Mode::Edit => self.editor.paste(text, &mut self.context),
+            // The run mode takes the text as typed keys, with a line end as
+            // Enter (issue #171)
+            Mode::Run => {
+                for c in text.replace("\r\n", "\n").chars() {
+                    let code = match c {
+                        '\n' | '\r' => KeyCode::Enter,
+                        c => KeyCode::Char(c),
+                    };
+                    self.key(KeyEvent::new(code, KeyModifiers::NONE));
+                }
+            }
+            Mode::Files => {}
         }
     }
 
@@ -262,10 +275,7 @@ impl App {
                     Mode::Files => self.files.key(key, ctx),
                 };
                 self.files_request();
-                if let Some(row) = self.run.take_edit_request() {
-                    self.set_mode(Mode::Edit);
-                    self.editor.go_to_line(&self.context.document, row);
-                }
+                self.run_request();
             }
         }
     }
@@ -333,13 +343,26 @@ impl App {
     /// Take the text and the state messages of the run for a short time.
     /// The event loop calls it before each draw. Give true if a message came.
     pub fn tick(&mut self) -> bool {
-        self.run.tick(&mut self.context)
+        let changed = self.run.tick(&mut self.context);
+        self.run_request();
+        changed
+    }
+
+    /// Show the document line that the run mode asks for in the edit mode:
+    /// the line of an error, or a fault of the text.
+    fn run_request(&mut self) {
+        if let Some(row) = self.run.take_edit_request() {
+            self.set_mode(Mode::Edit);
+            self.editor.go_to_line(&self.context.document, row);
+        }
     }
 
     /// Take the messages of the run until it ends, for a maximum of `limit`.
     /// Give true if no program runs. For tests: no fixed wait.
     pub fn wait_for_run(&mut self, limit: Duration) -> bool {
-        self.run.wait_for_run(&mut self.context, limit)
+        let ended = self.run.wait_for_run(&mut self.context, limit);
+        self.run_request();
+        ended
     }
 
     /// Stop the worker of the run mode and wait for its end, for a maximum

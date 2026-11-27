@@ -7,10 +7,16 @@
 //! to the worker, and the worker edits the typed line and shows its echo, as
 //! the line editor of a BBC Micro does. The Escape flag and the Quit flag
 //! go to the stop check of the run loop.
+//!
+//! A typed line does not run at once. The worker sends it to the pane and
+//! waits for the answer, because only the pane knows the editor text: the
+//! pane can refuse the line, or give the program of the editor text. Thus
+//! a line that the user typed during a run also gets this check.
 
 use crate::commands::run_command;
 use crate::executor::{Console, Executor, Interrupt};
 use crate::program::ProgramStore;
+use crate::tokenizer::expand_short_form;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -32,10 +38,18 @@ pub(super) enum ToWorker {
     Key(char),
     /// Ctrl-R: run this program
     Run(ProgramStore),
-    /// The editor text changed: the program for the next typed line
-    Program(ProgramStore),
+    /// The answer for the typed line that the worker sent
+    Answer(Answer),
     /// The flags changed: stop a wait for a key
     Wake,
+}
+
+/// The answer of the pane for a typed line.
+pub(super) enum Answer {
+    /// Run the line, first with this program if the editor text changed
+    Run(Option<ProgramStore>),
+    /// Do not run the line: show the prompt again
+    Skip,
 }
 
 /// A message from the worker to the pane.
@@ -44,12 +58,15 @@ pub(super) enum FromWorker {
     Text(String),
     /// Clear the screen (CLS)
     Clear,
+    /// A typed line, with no line end. The worker waits for the answer.
+    Line(String),
     /// A command or a run starts
     Busy,
-    /// The command ended, and the prompt shows. `error` is the text of its
-    /// error. `changed` is true if the command changed the program.
+    /// The command ended, and the prompt shows. `error_line` is the line
+    /// number of an error of the editor program (a run with Ctrl-R, or a
+    /// typed RUN). `changed` is true if the command changed the program.
     Ready {
-        error: Option<String>,
+        error_line: Option<u16>,
         changed: bool,
     },
 }
@@ -78,8 +95,8 @@ pub(super) struct Link {
     keys: VecDeque<char>,
     /// A run request that came during a command
     run: Option<ProgramStore>,
-    /// The program of the editor text, for the next command
-    program: Option<ProgramStore>,
+    /// The answer for the last typed line
+    answer: Option<Answer>,
     /// True if the pane closed its end of a channel
     closed: bool,
     /// True if the cursor is at the start of a line
@@ -98,7 +115,7 @@ impl Link {
             flags,
             keys: VecDeque::new(),
             run: None,
-            program: None,
+            answer: None,
             closed: false,
             at_line_start: true,
         }
@@ -139,6 +156,16 @@ impl Link {
             }
     }
 
+    /// Keep a message of the pane for later use.
+    fn keep(&mut self, message: ToWorker) {
+        match message {
+            ToWorker::Key(key) => self.keys.push_back(key),
+            ToWorker::Run(program) => self.run = Some(program),
+            ToWorker::Answer(answer) => self.answer = Some(answer),
+            ToWorker::Wake => {}
+        }
+    }
+
     /// Wait for the next key, for a maximum of `limit` if there is a limit.
     fn next_key(&mut self, limit: Option<Duration>, at_prompt: bool) -> KeyWait {
         let deadline = limit.map(|limit| Instant::now() + limit);
@@ -159,12 +186,26 @@ impl Link {
                     .recv_timeout(deadline.saturating_duration_since(Instant::now())),
             };
             match message {
-                Ok(ToWorker::Key(key)) => self.keys.push_back(key),
-                Ok(ToWorker::Run(program)) => self.run = Some(program),
-                Ok(ToWorker::Program(program)) => self.program = Some(program),
-                Ok(ToWorker::Wake) => {}
+                Ok(message) => self.keep(message),
                 Err(RecvTimeoutError::Timeout) => return KeyWait::TimeOut,
                 Err(RecvTimeoutError::Disconnected) => self.closed = true,
+            }
+        }
+    }
+
+    /// Wait for the answer of the pane for a typed line. None if the pane
+    /// closes.
+    fn wait_for_answer(&mut self) -> Option<Answer> {
+        loop {
+            if let Some(answer) = self.answer.take() {
+                return Some(answer);
+            }
+            if self.is_quit() {
+                return None;
+            }
+            match self.input.recv() {
+                Ok(message) => self.keep(message),
+                Err(_) => self.closed = true,
             }
         }
     }
@@ -241,6 +282,46 @@ impl Console for WorkerConsole {
     }
 }
 
+/// A command for the worker: the text, and true if it is a run request of
+/// the pane (Ctrl-R).
+struct Command {
+    line: String,
+    run_request: bool,
+}
+
+/// Read the next command: a run request, or a typed line that the pane
+/// accepts. None if the pane closes.
+fn next_command(link: &mut Link, program: &mut ProgramStore) -> Option<Command> {
+    loop {
+        let line = link.read_line(true);
+        if let Some(run) = link.run.take() {
+            *program = run;
+            link.write("RUN\n");
+            return Some(Command {
+                line: "RUN".to_string(),
+                run_request: true,
+            });
+        }
+        let line = line?;
+        link.send(FromWorker::Line(line.clone()));
+        match link.wait_for_answer()? {
+            Answer::Run(editor_program) => {
+                if let Some(editor_program) = editor_program {
+                    *program = editor_program;
+                }
+                return Some(Command {
+                    line,
+                    run_request: false,
+                });
+            }
+            Answer::Skip => {
+                link.new_line();
+                link.write(PROMPT);
+            }
+        }
+    }
+}
+
 /// The loop of the worker thread: the prompt, then a typed line or a run
 /// request, until the pane closes.
 pub(super) fn run_worker(link: Link) {
@@ -251,26 +332,13 @@ pub(super) fn run_worker(link: Link) {
     link.borrow_mut().write(PROMPT);
 
     loop {
-        let line = {
-            let mut link = link.borrow_mut();
-            let line = link.read_line(true);
-            if let Some(editor_program) = link.program.take() {
-                program = editor_program;
-            }
-            match (link.run.take(), line) {
-                (Some(run), _) => {
-                    program = run;
-                    link.write("RUN\n");
-                    "RUN".to_string()
-                }
-                (None, Some(line)) => line,
-                (None, None) => return,
-            }
+        let Some(command) = next_command(&mut link.borrow_mut(), &mut program) else {
+            return;
         };
 
         link.borrow_mut().send(FromWorker::Busy);
         let before = program.clone();
-        let result = run_command(&mut executor, &mut program, line.trim());
+        let result = run_command(&mut executor, &mut program, command.line.trim());
         let changed = before.list() != program.list();
 
         let mut link = link.borrow_mut();
@@ -282,8 +350,47 @@ pub(super) fn run_worker(link: Link) {
         if link.is_quit() {
             return;
         }
+        // Only an error of the editor program has a line of the editor
+        let editor_run = !changed && (command.run_request || is_run(&command.line));
+        let error_line = error.as_deref().filter(|_| editor_run).and_then(error_line);
         link.new_line();
         link.write(PROMPT);
-        link.send(FromWorker::Ready { error, changed });
+        link.send(FromWorker::Ready {
+            error_line,
+            changed,
+        });
+    }
+}
+
+/// True if the typed line is the command RUN, also as a short form.
+fn is_run(line: &str) -> bool {
+    expand_short_form(line.trim()).eq_ignore_ascii_case("run")
+}
+
+/// The line number in the text of an error: "... at line N".
+fn error_line(message: &str) -> Option<u16> {
+    const AT_LINE: &str = " at line ";
+    let rest = &message[message.find(AT_LINE)? + AT_LINE.len()..];
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_error_line_comes_from_the_text_of_the_error() {
+        assert_eq!(error_line("Division by zero at line 20"), Some(20));
+        assert_eq!(error_line("Syntax error at line 10: x"), Some(10));
+        assert_eq!(error_line("Escape"), None);
+    }
+
+    #[test]
+    fn run_is_the_run_command_also_as_a_short_form() {
+        assert!(is_run(" RUN "));
+        assert!(is_run("run"));
+        assert!(!is_run("RUN 10"));
+        assert!(!is_run("LIST"));
     }
 }

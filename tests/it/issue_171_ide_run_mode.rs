@@ -245,6 +245,8 @@ fn an_error_shows_its_text_and_enter_goes_to_its_line_in_edit() {
         ["> RUN", "1", "Error: Division by zero at line 20", ">"]
     );
     app.key(press(KeyCode::Enter));
+    // The worker says that the line is empty: a short wait
+    assert!(app.wait_for_run(LIMIT));
     assert_eq!(app.mode(), Mode::Edit);
     assert_eq!(app.cursor(), (1, 0));
 }
@@ -303,11 +305,154 @@ fn new_at_the_prompt_of_the_pane_does_not_change_the_document() {
         app.message(),
         "The RUN program changed. The editor text is the source"
     );
+    // K3: the next typed line uses the editor text again
     type_text(&mut app, "LIST");
     app.key(press(KeyCode::Enter));
     assert!(app.wait_for_run(LIMIT));
-    assert_eq!(pane_rows(&app).last().map(String::as_str), Some(">"));
-    assert!(pane_rows(&app).contains(&"No program".to_string()));
+    let rows = pane_rows(&app);
+    assert_eq!(rows[rows.len() - 3..], ["> LIST", "10 PRINT \"A\"", ">"]);
+}
+
+#[test]
+fn a_typed_program_line_does_not_stay_after_the_next_typed_line() {
+    // K3: the editor text is the source for each typed line
+    let mut app = app_with("10 PRINT \"A\"");
+    run(&mut app);
+    type_text(&mut app, "20 PRINT \"B\"");
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    assert_eq!(
+        app.message(),
+        "The RUN program changed. The editor text is the source"
+    );
+    type_text(&mut app, "RUN");
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    let rows = pane_rows(&app);
+    assert_eq!(rows[rows.len() - 3..], ["> RUN", "A", ">"]);
+}
+
+#[test]
+fn a_typed_line_with_a_fault_in_the_text_is_refused_and_goes_to_the_fault() {
+    // K1: a typed line must not run or list a part of the program
+    for typed in ["RUN", "LIST", "GOTO 30", "PRINT 2"] {
+        let mut app = app_with("10 PRINT 1\n20 PRNT 2 +\n30 PRINT 3");
+        app.key(press(KeyCode::Tab));
+        type_text(&mut app, typed);
+        app.key(press(KeyCode::Enter));
+        assert!(app.wait_for_run(LIMIT), "{typed}");
+        assert_eq!(app.mode(), Mode::Edit, "{typed}");
+        assert_eq!(app.cursor(), (1, 0), "{typed}");
+        assert_eq!(app.message(), app.marks()[0].message, "{typed}");
+        app.key(press(KeyCode::Tab));
+        let rows = pane_rows(&app);
+        assert!(!rows.iter().any(|row| row == "1" || row == "3"), "{rows:?}");
+    }
+}
+
+#[test]
+fn enter_after_an_error_runs_a_line_typed_during_the_run() {
+    // K4: LIST typed during the run is not an empty line
+    let mut app = app_with("10 A$ = GET$\n20 X = 1 / 0");
+    app.key(ctrl('r'));
+    type_text(&mut app, "xLIST");
+    assert!(app.wait_for_run(LIMIT));
+    wait_for_row(&mut app, "> LIST");
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    assert_eq!(app.mode(), Mode::Run);
+    let rows = pane_rows(&app);
+    assert_eq!(
+        rows[rows.len() - 4..],
+        ["> LIST", "10 A$ = GET$", "20 X = 1 / 0", ">"]
+    );
+}
+
+#[test]
+fn enter_after_an_error_of_another_program_stays_in_run() {
+    // K4: the error of a CHAIN is at a line of the file, not of the editor
+    let path = std::env::temp_dir().join(format!("issue_171_chain_{}.bbas", std::process::id()));
+    std::fs::write(&path, "10 PRINT \"C\"\n20 X = 1 / 0\n").expect("write the file");
+    let mut app = app_with("10 PRINT \"A\"\n20 PRINT \"B\"");
+    app.key(press(KeyCode::Tab));
+    type_text(&mut app, &format!("CHAIN \"{}\"", path.display()));
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        pane_rows(&app).contains(&"Error: Division by zero at line 20".to_string()),
+        "{:?}",
+        pane_rows(&app)
+    );
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    assert_eq!(app.mode(), Mode::Run);
+}
+
+#[test]
+fn a_paste_in_the_run_mode_types_the_text() {
+    // K5
+    let mut app = App::new(None);
+    app.key(press(KeyCode::Tab));
+    app.paste("PRINT 3\nPRINT 4\n");
+    assert!(app.wait_for_run(LIMIT));
+    wait_for_row(&mut app, "4");
+    assert!(app.wait_for_run(LIMIT));
+    assert_eq!(pane_rows(&app), ["> PRINT 3", "3", "> PRINT 4", "4", ">"]);
+}
+
+#[test]
+fn backspace_goes_back_over_the_wrap_of_a_long_line() {
+    // K6: the prompt and 85 characters wrap at column 80
+    let mut app = App::new(None);
+    app.key(press(KeyCode::Tab));
+    let _ = pane_rows(&app);
+    type_text(&mut app, &"a".repeat(85));
+    for _ in 0..10 {
+        app.key(press(KeyCode::Backspace));
+    }
+    type_text(&mut app, "b");
+    let deadline = Instant::now() + LIMIT;
+    loop {
+        let rows = pane_rows(&app);
+        let text: String = rows.concat();
+        if text.contains('b') {
+            assert_eq!(text.matches('a').count(), 75, "{rows:?}");
+            assert_eq!(rows[0], format!("> {}", "a".repeat(75)) + "b");
+            break;
+        }
+        assert!(Instant::now() < deadline, "{rows:?}");
+        app.wait_for_run(Duration::from_millis(10));
+        app.tick();
+    }
+}
+
+#[test]
+fn escape_stops_a_run_that_started_from_a_line_typed_during_the_run() {
+    // K2: A% stays after RUN, so the second run is the loop with no end
+    let mut app = app_with("10 IF A% = 0 THEN A% = 1: END\n20 REPEAT: UNTIL FALSE");
+    app.key(ctrl('r'));
+    type_text(&mut app, "RUN");
+    app.key(press(KeyCode::Enter));
+    let deadline = Instant::now() + LIMIT;
+    while pane_rows(&app).iter().filter(|row| *row == "> RUN").count() < 2 || !app.is_running() {
+        assert!(Instant::now() < deadline, "{:?}", pane_rows(&app));
+        app.wait_for_run(Duration::from_millis(10));
+    }
+    app.key(press(KeyCode::Esc));
+    assert!(app.wait_for_run(LIMIT));
+    let rows = pane_rows(&app);
+    assert_eq!(rows[rows.len() - 2..], ["Error: Escape at line 20", ">"]);
+}
+
+#[test]
+fn a_short_form_at_the_prompt_of_the_pane_is_the_full_keyword() {
+    let mut app = app_with("10 PRINT 1");
+    app.key(press(KeyCode::Tab));
+    type_text(&mut app, "L.");
+    app.key(press(KeyCode::Enter));
+    assert!(app.wait_for_run(LIMIT));
+    assert_eq!(pane_rows(&app), ["> L.", "10 PRINT 1", ">"]);
 }
 
 #[test]
