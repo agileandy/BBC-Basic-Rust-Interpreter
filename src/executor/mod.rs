@@ -363,6 +363,32 @@ pub enum ErrorHandler {
 /// The number of files that a program can open at one time.
 const DEFAULT_OPEN_FILE_LIMIT: usize = 255;
 
+/// The maximum number of open evaluation levels: evaluators, function
+/// evaluators, FN calls and EVAL calls. Each level uses the native stack, so
+/// the limit stops a stack overflow (issue 151).
+///
+/// On the 64 MiB interpreter thread of `main`, a debug build overflows at
+/// 2880 levels on the worst path that was measured (a PRINT of a FN call in
+/// a multi-line FN body). This limit gives a margin of 2.4. A simple
+/// recursive FN uses about 4 levels for each call.
+///
+/// A library caller on a thread with a smaller stack (2 MiB for a spawned
+/// thread) can overflow before this limit. Tests of deep recursion run the
+/// binary for this reason.
+const EVALUATION_DEPTH_LIMIT: usize = 1200;
+
+/// The maximum number of entries on the return stack, on each loop stack
+/// and on the LOCAL scope stack (issue 151)
+const STACK_ENTRY_LIMIT: usize = 10_000;
+
+/// Give No room if a stack with `len` entries cannot take one more
+fn check_room(len: usize) -> Result<()> {
+    if len >= STACK_ENTRY_LIMIT {
+        return Err(BBCBasicError::NoRoom);
+    }
+    Ok(())
+}
+
 /// The statement that put an entry on the return stack
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReturnKind {
@@ -373,7 +399,7 @@ enum ReturnKind {
 }
 
 /// The depths of the FOR, REPEAT and WHILE stacks at a call
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct LoopDepths {
     for_depth: usize,
     repeat_depth: usize,
@@ -434,6 +460,10 @@ pub struct Executor {
     function_error_line: Option<u32>,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
+    // The number of evaluation levels (evaluators, FN and EVAL calls) open now
+    evaluation_depth: usize,
+    // The loop depths at the start of the newest FN call
+    function_loop_floor: LoopDepths,
     // Error handler: where the run continues on error (None = no handler)
     error_handler: Option<ErrorHandler>,
     // TRACE: the run prints each stored line number below this limit (None = off)
@@ -501,6 +531,8 @@ impl Executor {
             function_body_runner: BodyRunnerSlot::default(),
             function_error_line: None,
             local_stack: Vec::new(),
+            evaluation_depth: 0,
+            function_loop_floor: LoopDepths::default(),
             error_handler: None,
             trace_limit: None,
             last_error: None,
@@ -973,8 +1005,10 @@ impl Executor {
             // The type of an EVAL result is known only after the parse of its
             // text. Parse the text one time and format the result by its type.
             Expression::FunctionCall { name, args } if name == "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                self.format_expression(&parsed)
+                self.nested_call(|executor| {
+                    let parsed = executor.parse_eval_text(args)?;
+                    executor.format_expression(&parsed)
+                })
             }
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
@@ -1105,16 +1139,19 @@ impl Executor {
     ) -> Result<()> {
         // A `%` loop variable is an integer loop: the values are truncated.
         // Any other loop variable is a real loop: the values keep their fraction parts.
-        let (end_val, step_val) = if variable.ends_with('%') {
+        let integer_loop = variable.ends_with('%');
+        let (start_val, end_val, step_val) = if integer_loop {
             let start_val = self.eval_integer(start)?;
             let end_val = self.eval_integer(end)?;
             let step_val = match step {
                 Some(step_expr) => self.eval_integer(step_expr)?,
                 None => 1,
             };
-            self.variables
-                .set_integer_var(variable.to_string(), start_val);
-            (f64::from(end_val), f64::from(step_val))
+            (
+                f64::from(start_val),
+                f64::from(end_val),
+                f64::from(step_val),
+            )
         } else {
             let start_val = self.eval_number(start)?;
             let end_val = self.eval_number(end)?;
@@ -1122,9 +1159,18 @@ impl Executor {
                 Some(step_expr) => self.eval_number(step_expr)?,
                 None => 1.0,
             };
-            self.variables.set_real_var(variable.to_string(), start_val);
-            (end_val, step_val)
+            (start_val, end_val, step_val)
         };
+
+        // Make room first, so that a FOR that fails changes nothing
+        self.open_for_loop(variable)?;
+        if integer_loop {
+            // The value came from an i32, so the conversion has no loss
+            self.variables
+                .set_integer_var(variable.to_string(), start_val as i32);
+        } else {
+            self.variables.set_real_var(variable.to_string(), start_val);
+        }
 
         // The run loop sets the FOR position (set_for_loop_line)
         self.for_loops.push(ForLoop {
@@ -1145,6 +1191,8 @@ impl Executor {
     /// collection is empty: the run loop then skips to the matching NEXT.
     fn execute_for_each(&mut self, variable: &str, collection: &Expression) -> Result<()> {
         let handle = self.eval_integer(collection)?;
+        // Make room first, as FOR does (issue 151)
+        self.open_for_loop(variable)?;
         self.set_each_variable(variable, handle, 0)?;
         // The run loop sets the FOR position (set_for_loop_line)
         self.for_loops.push(ForLoop {
@@ -2038,8 +2086,8 @@ impl Executor {
         self.memory.get_page() as i32 + self.program_size as i32
     }
 
-    /// Evaluate an expression to an integer value
-    pub fn eval_integer(&mut self, expr: &Expression) -> Result<i32> {
+    /// The body of `eval_integer`, inside one evaluation level
+    fn eval_integer_level(&mut self, expr: &Expression) -> Result<i32> {
         // An operation that can give a fraction part, such as `/`, uses real
         // arithmetic. Only the result is truncated, as in BBC BASIC.
         if matches!(
@@ -2271,8 +2319,8 @@ impl Executor {
         }
     }
 
-    /// Evaluate an expression to a real value
-    fn eval_real(&mut self, expr: &Expression) -> Result<f64> {
+    /// The body of `eval_real`, inside one evaluation level
+    fn eval_real_level(&mut self, expr: &Expression) -> Result<f64> {
         match expr {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
@@ -2539,8 +2587,8 @@ impl Executor {
         }
     }
 
-    /// Evaluate an expression to a string value
-    fn eval_string(&mut self, expr: &Expression) -> Result<String> {
+    /// The body of `eval_string`, inside one evaluation level
+    fn eval_string_level(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::String(val) => Ok(val.clone()),
             // TIME$ is the date and time in UTC. TIME$ is from the BBC Master, not the Model B.
@@ -2760,7 +2808,8 @@ impl Executor {
         crate::parser::parse_expression(&tokens)
     }
 
-    fn eval_function_int(&mut self, name: &str, args: &[Expression]) -> Result<i32> {
+    /// The body of `eval_function_int`, inside one evaluation level
+    fn eval_function_int_level(&mut self, name: &str, args: &[Expression]) -> Result<i32> {
         // Check if this is a user-defined function first
         if self.functions.contains_key(name) {
             return self.call_function_int(name, args);
@@ -2768,13 +2817,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_integer(&parsed)
-            }
+                executor.eval_integer(&parsed)
+            }),
             "ABS" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -3041,8 +3090,8 @@ impl Executor {
         }
     }
 
-    /// Evaluate a function call returning a real number
-    fn eval_function_real(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
+    /// The body of `eval_function_real`, inside one evaluation level
+    fn eval_function_real_level(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
         // Check if this is a user-defined function first
         if self.functions.contains_key(name) {
             return self.call_function_real(name, args);
@@ -3050,13 +3099,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_real(&parsed)
-            }
+                executor.eval_real(&parsed)
+            }),
             "SIN" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -3279,8 +3328,8 @@ impl Executor {
         }
     }
 
-    /// Evaluate a function call returning a string
-    fn eval_function_string(&mut self, name: &str, args: &[Expression]) -> Result<String> {
+    /// The body of `eval_function_string`, inside one evaluation level
+    fn eval_function_string_level(&mut self, name: &str, args: &[Expression]) -> Result<String> {
         // Check if this is a user-defined function first
         if self.functions.contains_key(name) {
             return self.call_function_string(name, args);
@@ -3288,13 +3337,13 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
-            "EVAL" => {
-                let parsed = self.parse_eval_text(args)?;
-                if !self.is_string_expr(&parsed) {
+            "EVAL" => self.nested_call(|executor| {
+                let parsed = executor.parse_eval_text(args)?;
+                if !executor.is_string_expr(&parsed) {
                     return Err(BBCBasicError::TypeMismatch);
                 }
-                self.eval_string(&parsed)
-            }
+                executor.eval_string(&parsed)
+            }),
             // GET$ waits for one key and gives it. At the end of input it gives "".
             "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
             // INKEY$(n) waits for a maximum of n centiseconds for a key and
@@ -3399,21 +3448,20 @@ impl Executor {
                 match &args[0] {
                     Expression::Real(val) => Ok(format_number(*val)),
                     Expression::Integer(val) => Ok(val.to_string()),
-                    _ => {
-                        // Try to evaluate - prefer real if it works
-                        if let Ok(real_val) = self.eval_real(&args[0]) {
-                            // Check if it's actually an integer value
-                            if real_val.fract() == 0.0 {
-                                Ok((real_val as i32).to_string())
-                            } else {
-                                Ok(format_number(real_val))
-                            }
-                        } else if let Ok(int_val) = self.eval_integer(&args[0]) {
-                            Ok(int_val.to_string())
+                    // Select the evaluator one time, as PRINT does. A second
+                    // try after an error runs the argument again, and a
+                    // recursive function then doubles its calls at each
+                    // level (issue 151).
+                    argument if self.is_real_expr(argument) => {
+                        let real_val = self.eval_real(argument)?;
+                        // Check if it's actually an integer value
+                        if real_val.fract() == 0.0 {
+                            Ok((real_val as i32).to_string())
                         } else {
-                            Err(BBCBasicError::TypeMismatch)
+                            Ok(format_number(real_val))
                         }
                     }
+                    argument => Ok(self.eval_integer(argument)?.to_string()),
                 }
             }
             _ => {
@@ -3681,9 +3729,17 @@ impl Executor {
         }
     }
 
-    /// Push a REPEAT position onto the repeat stack
-    pub fn push_repeat(&mut self, position: Position) {
+    /// Push a REPEAT position onto the repeat stack. If a GOTO starts the
+    /// same REPEAT again in the current call, use its entry again.
+    pub fn push_repeat(&mut self, position: Position) -> Result<()> {
+        let floor = self.loop_floor().repeat_depth;
+        if let Some(index) = Self::loop_entry(&self.repeat_stack, floor, position) {
+            self.repeat_stack.truncate(index + 1);
+            return Ok(());
+        }
+        check_room(self.repeat_stack.len())?;
         self.repeat_stack.push(position);
+        Ok(())
     }
 
     /// Evaluate UNTIL condition and return the REPEAT position if we should loop back
@@ -3718,12 +3774,26 @@ impl Executor {
         // Evaluate the condition
         let result = self.eval_integer(condition)?;
 
+        // A GOTO can start the same WHILE again in the current call: use its
+        // entry again, or close it when the condition is false
+        let floor = self.loop_floor().while_depth;
+        let entry = Self::loop_entry(&self.while_stack, floor, position);
+
         if result != 0 {
             // Condition is true - enter loop body
-            self.while_stack.push(position);
+            match entry {
+                Some(index) => self.while_stack.truncate(index + 1),
+                None => {
+                    check_room(self.while_stack.len())?;
+                    self.while_stack.push(position);
+                }
+            }
             Ok(Some(position))
         } else {
             // Condition is false - skip loop body
+            if let Some(index) = entry {
+                self.while_stack.truncate(index);
+            }
             Ok(None)
         }
     }
@@ -3750,8 +3820,10 @@ impl Executor {
     }
 
     /// Push a return address onto the GOSUB stack
-    pub fn push_gosub_return(&mut self, position: Position) {
+    pub fn push_gosub_return(&mut self, position: Position) -> Result<()> {
+        check_room(self.return_stack.len())?;
         self.return_stack.push((ReturnKind::Gosub, position));
+        Ok(())
     }
 
     /// Pop a return address from the GOSUB stack. With a PROC call on top,
@@ -3773,9 +3845,11 @@ impl Executor {
 
     /// Push the position of a PROC call onto the return stack, with the
     /// loop depths of the caller
-    pub fn push_proc_return(&mut self, position: Position) {
+    pub fn push_proc_return(&mut self, position: Position) -> Result<()> {
+        check_room(self.return_stack.len())?;
         let depths = self.loop_depths();
         self.return_stack.push((ReturnKind::Proc(depths), position));
+        Ok(())
     }
 
     /// Pop the newest PROC call, and the GOSUBs and loops that this PROC left
@@ -3803,6 +3877,57 @@ impl Executor {
         }
     }
 
+    /// The loop depths at the start of the current PROC or FN call. A loop
+    /// below these depths belongs to a caller (issue 134).
+    fn loop_floor(&self) -> LoopDepths {
+        let proc_floor = self
+            .return_stack
+            .iter()
+            .rev()
+            .find_map(|&(kind, _)| match kind {
+                ReturnKind::Proc(depths) => Some(depths),
+                ReturnKind::Gosub => None,
+            })
+            .unwrap_or_default();
+        let function_floor = self.function_loop_floor;
+        LoopDepths {
+            for_depth: proc_floor.for_depth.max(function_floor.for_depth),
+            repeat_depth: proc_floor.repeat_depth.max(function_floor.repeat_depth),
+            while_depth: proc_floor.while_depth.max(function_floor.while_depth),
+        }
+    }
+
+    /// Make room for a new FOR loop of `variable`. As in BBC BASIC, an open
+    /// loop of the same variable in the current call closes, with each loop
+    /// above it. Otherwise give No room at the stack limit.
+    fn open_for_loop(&mut self, variable: &str) -> Result<()> {
+        let floor = self.loop_floor().for_depth.min(self.for_loops.len());
+        if let Some(index) = self.for_loops[floor..]
+            .iter()
+            .rposition(|open| open.variable == variable)
+        {
+            self.for_loops.truncate(floor + index);
+        }
+        check_room(self.for_loops.len())
+    }
+
+    /// The index of `position` on a loop stack, above the floor of the
+    /// current call
+    fn loop_entry(stack: &[Position], floor: usize, position: Position) -> Option<usize> {
+        let floor = floor.min(stack.len());
+        stack[floor..]
+            .iter()
+            .rposition(|&entry| entry == position)
+            .map(|index| floor + index)
+    }
+
+    /// The number of entries on the FOR, REPEAT and WHILE stacks, in that
+    /// order (for tests)
+    pub fn loop_stack_depths(&self) -> (usize, usize, usize) {
+        let depths = self.loop_depths();
+        (depths.for_depth, depths.repeat_depth, depths.while_depth)
+    }
+
     /// Close the FOR, REPEAT and WHILE loops above the depths
     fn close_loops(&mut self, depths: LoopDepths) {
         self.for_loops.truncate(depths.for_depth);
@@ -3822,8 +3947,10 @@ impl Executor {
     }
 
     /// Enter a new local scope (called on PROC/FN entry)
-    pub fn enter_local_scope(&mut self) {
+    pub fn enter_local_scope(&mut self) -> Result<()> {
+        check_room(self.local_stack.len())?;
         self.local_stack.push(LocalFrame::new());
+        Ok(())
     }
 
     /// Declare a local variable (called on LOCAL statement)
@@ -3948,6 +4075,7 @@ impl Executor {
         self.for_loops.clear();
         self.repeat_stack.clear();
         self.while_stack.clear();
+        self.function_loop_floor = LoopDepths::default();
         self.next_loop_line = None;
     }
 
@@ -4131,8 +4259,61 @@ impl Executor {
         Ok(())
     }
 
+    /// Run `call` as one more level of evaluation: an evaluator, a FN call
+    /// or an EVAL call. At the depth limit, give No room and do not run it.
+    /// The depth goes back down on each exit, also after an error.
+    fn nested_call<T>(&mut self, call: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.evaluation_depth >= EVALUATION_DEPTH_LIMIT {
+            return Err(BBCBasicError::NoRoom);
+        }
+        self.evaluation_depth += 1;
+        let result = call(self);
+        self.evaluation_depth -= 1;
+        result
+    }
+
+    /// Evaluate an expression to an integer value
+    pub fn eval_integer(&mut self, expr: &Expression) -> Result<i32> {
+        self.nested_call(|executor| executor.eval_integer_level(expr))
+    }
+
+    /// Evaluate an expression to a real value
+    fn eval_real(&mut self, expr: &Expression) -> Result<f64> {
+        self.nested_call(|executor| executor.eval_real_level(expr))
+    }
+
+    /// Evaluate an expression to a string value
+    fn eval_string(&mut self, expr: &Expression) -> Result<String> {
+        self.nested_call(|executor| executor.eval_string_level(expr))
+    }
+
+    /// Evaluate a function call returning an integer
+    fn eval_function_int(&mut self, name: &str, args: &[Expression]) -> Result<i32> {
+        self.nested_call(|executor| executor.eval_function_int_level(name, args))
+    }
+
+    /// Evaluate a function call returning a real number
+    fn eval_function_real(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
+        self.nested_call(|executor| executor.eval_function_real_level(name, args))
+    }
+
+    /// Evaluate a function call returning a string
+    fn eval_function_string(&mut self, name: &str, args: &[Expression]) -> Result<String> {
+        self.nested_call(|executor| executor.eval_function_string_level(name, args))
+    }
+
     /// Call a user-defined function and evaluate its result with `eval`.
     fn call_function<T>(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+        eval: fn(&mut Self, &Expression) -> Result<T>,
+    ) -> Result<T> {
+        self.nested_call(|executor| executor.call_function_body(name, args, eval))
+    }
+
+    /// The body of `call_function`, inside the depth count
+    fn call_function_body<T>(
         &mut self,
         name: &str,
         args: &[Expression],
@@ -4156,8 +4337,10 @@ impl Executor {
         let loop_depths = self.loop_depths();
 
         // Enter local scope for function
-        self.enter_local_scope();
+        self.enter_local_scope()?;
+        let caller_floor = std::mem::replace(&mut self.function_loop_floor, loop_depths);
         let result = self.run_function(&func, values, eval);
+        self.function_loop_floor = caller_floor;
 
         // Exit local scope (restore variables), also after an error in the
         // function. Scopes, returns and loops that the body did not close go
@@ -6411,7 +6594,7 @@ mod tests {
         executor.execute_statement(&init_stmt).unwrap();
 
         // REPEAT at line 20
-        executor.push_repeat(Position::line_start(20));
+        executor.push_repeat(Position::line_start(20)).unwrap();
 
         // Loop several times
         for expected in 1..=5 {
@@ -6480,7 +6663,9 @@ mod tests {
         // 110 RETURN      (should return to line AFTER 20, which is 30)
 
         // Push return address for line 20
-        executor.push_gosub_return(Position::line_start(20));
+        executor
+            .push_gosub_return(Position::line_start(20))
+            .unwrap();
 
         // Verify return address was saved
         assert_eq!(executor.return_stack.len(), 1);
@@ -6511,8 +6696,12 @@ mod tests {
         // 110 RETURN
         // 200 RETURN
 
-        executor.push_gosub_return(Position::line_start(10));
-        executor.push_gosub_return(Position::line_start(100));
+        executor
+            .push_gosub_return(Position::line_start(10))
+            .unwrap();
+        executor
+            .push_gosub_return(Position::line_start(100))
+            .unwrap();
 
         // First RETURN should go back to 100
         assert_eq!(
@@ -6610,7 +6799,7 @@ mod tests {
         assert_eq!(executor.get_variable_int("X").unwrap(), 10);
 
         // Simulate PROC entry - enter local scope
-        executor.enter_local_scope();
+        executor.enter_local_scope().unwrap();
 
         // Simulate LOCAL X declaration inside PROC
         // This should save the old value and create a new local binding
