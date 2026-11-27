@@ -13,10 +13,10 @@ fn test_each_mode_from_0_to_7_runs_with_no_error() {
 }
 
 #[test]
-fn test_mode_8_gives_error() {
-    let (result, output) = run(&["10 MODE 8", "20 PRINT \"NOT HERE\""]);
+fn test_mode_256_gives_error() {
+    let (result, output) = run(&["10 MODE 256", "20 PRINT \"NOT HERE\""]);
 
-    let message = result.expect_err("MODE 8 must give an error");
+    let message = result.expect_err("MODE 256 must give an error");
     assert!(message.contains("at line 10"), "message: {}", message);
     assert_eq!(output, "");
 }
@@ -32,7 +32,7 @@ fn test_negative_mode_gives_error() {
 fn test_mode_error_number_is_25() {
     let (result, output) = run(&[
         "10 ON ERROR GOTO 100",
-        "20 MODE 9",
+        "20 MODE 256",
         "30 END",
         "100 PRINT ERR",
     ]);

@@ -100,3 +100,4 @@ mod issue_98_run_resets_error_handler;
 mod issue_99_plot_absolute_bit;
 mod program_run_tests;
 mod issue_113_file_not_found_err;
+mod issue_118_mode_above_7;
