@@ -107,6 +107,8 @@ pub enum Statement {
     Print { items: Vec<PrintItem> },
     /// INPUT statement
     Input { variables: Vec<String> },
+    /// INPUT LINE statement: each variable gets one full reply line
+    InputLine { variables: Vec<String> },
     /// FOR loop
     For {
         variable: String,
@@ -436,6 +438,11 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             // Check if it's INPUT# (file I/O) or regular INPUT
             if tokens.len() > 1 && matches!(tokens[1], Token::Operator('#')) {
                 parse_input_file_statement(&tokens[2..], line.line_number)
+            } else if tokens.len() > 1 && matches!(tokens[1], Token::Keyword(0x86)) {
+                // INPUT LINE: 0x86 is the LINE token
+                Ok(Statement::InputLine {
+                    variables: parse_input_variables(&tokens[2..]),
+                })
             } else {
                 parse_input_statement(&tokens[1..])
             }
@@ -1045,6 +1052,13 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 
 /// Parse INPUT statement
 fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
+    Ok(Statement::Input {
+        variables: parse_input_variables(tokens),
+    })
+}
+
+/// Parse the variable list of INPUT or INPUT LINE
+fn parse_input_variables(tokens: &[Token]) -> Vec<String> {
     let mut variables = Vec::new();
     let mut pos = 0;
 
@@ -1062,7 +1076,7 @@ fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Input { variables })
+    variables
 }
 
 /// Parse PRINT# statement (file I/O)
@@ -3009,6 +3023,34 @@ mod tests {
             stmt,
             Statement::Input {
                 variables: vec!["A%".to_string(), "B$".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_line_one_variable() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("INPUT LINE A$").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::InputLine {
+                variables: vec!["A$".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_line_two_variables() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("INPUT LINE A$, B$").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::InputLine {
+                variables: vec!["A$".to_string(), "B$".to_string()],
             }
         );
     }

@@ -351,6 +351,7 @@ impl Executor {
             } => self.execute_for(variable, start, end, step.as_ref()),
             Statement::Next { variables } => self.execute_next(variables),
             Statement::Input { variables } => self.execute_input(variables),
+            Statement::InputLine { variables } => self.execute_input_line(variables),
             Statement::Dim { arrays } => self.execute_dim(arrays),
             Statement::If {
                 condition,
@@ -754,6 +755,24 @@ impl Executor {
                 let val = parse_leading_number(reply);
                 self.variables.set_real_var(var.clone(), val);
             }
+        }
+        Ok(())
+    }
+
+    /// Execute INPUT LINE statement. Each string variable gets one full reply.
+    /// Only the line end is removed. A numeric variable gives a type mismatch.
+    fn execute_input_line(&mut self, variables: &[String]) -> Result<()> {
+        for var in variables {
+            if !var.ends_with('$') {
+                return Err(BBCBasicError::TypeMismatch);
+            }
+            let reply = self.next_input_reply();
+            let reply = reply
+                .strip_suffix('\n')
+                .map(|r| r.strip_suffix('\r').unwrap_or(r))
+                .unwrap_or(&reply);
+            self.variables
+                .set_string_var(var.clone(), reply.to_string())?;
         }
         Ok(())
     }
