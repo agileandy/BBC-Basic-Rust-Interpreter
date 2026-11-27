@@ -365,6 +365,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (_, Token::Separator(',')) => false,
                 (_, Token::Separator(';')) => false,
                 (_, Token::Separator(':')) => false,
+                // The shift operators << and >> list as typed
+                (Token::Operator('<'), Token::Operator('<')) => false,
+                (Token::Operator('>'), Token::Operator('>')) => false,
                 // Need space between most tokens
                 _ => true,
             };
