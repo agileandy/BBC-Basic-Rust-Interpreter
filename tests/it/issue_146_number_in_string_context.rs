@@ -95,7 +95,7 @@ fn test_numeric_variable_with_no_value_keeps_its_error() {
 fn test_error_in_numeric_function_argument_comes_first() {
     let (result, _) = run(&["10 A$ = SQR(-1)", "20 END"]);
 
-    assert_eq!(result, Err("Illegal function at line 10".to_string()));
+    assert_eq!(result, Err("-ve root at line 10".to_string()));
 }
 
 #[test]

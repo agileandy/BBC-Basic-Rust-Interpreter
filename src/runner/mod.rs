@@ -1294,6 +1294,9 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::Array => 14,
         BBCBasicError::SyntaxError { .. } => 16,
         BBCBasicError::BadProgram => 254,
+        BBCBasicError::NegativeRoot => 21,
+        BBCBasicError::LogRange => 22,
+        BBCBasicError::ExpRange => 24,
         BBCBasicError::IllegalFunction => 31,
         BBCBasicError::BadMode => 25,
         // Not a BBC BASIC error: BBC BASIC does not use 150 (issue #102)

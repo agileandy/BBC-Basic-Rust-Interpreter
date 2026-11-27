@@ -2759,7 +2759,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if val < 0.0 {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::NegativeRoot);
                 }
                 Ok(val.sqrt())
             }
@@ -2781,7 +2781,12 @@ impl Executor {
                     });
                 }
                 let val = self.eval_real(&args[0])?;
-                Ok(val.exp())
+                let result = val.exp();
+                // A result that is too large for a real number is Exp range.
+                if result.is_infinite() {
+                    return Err(BBCBasicError::ExpRange);
+                }
+                Ok(result)
             }
             "LN" => {
                 if args.len() != 1 {
@@ -2792,7 +2797,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if val <= 0.0 {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::LogRange);
                 }
                 Ok(val.ln())
             }
@@ -2805,7 +2810,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if val <= 0.0 {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::LogRange);
                 }
                 Ok(val.log10())
             }
@@ -2887,7 +2892,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if val < 0.0 {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::NegativeRoot);
                 }
                 Ok(val.sqrt())
             }
@@ -2901,7 +2906,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if !(-1.0..=1.0).contains(&val) {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::NegativeRoot);
                 }
                 Ok(val.acos())
             }
@@ -2915,7 +2920,7 @@ impl Executor {
                 }
                 let val = self.eval_real(&args[0])?;
                 if !(-1.0..=1.0).contains(&val) {
-                    return Err(BBCBasicError::IllegalFunction);
+                    return Err(BBCBasicError::NegativeRoot);
                 }
                 Ok(val.asin())
             }

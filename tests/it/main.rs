@@ -134,3 +134,4 @@ mod issue_146_number_in_string_context;
 mod issue_148_shape_fill_word;
 mod issue_150_comma_in_brackets;
 mod issue_140_maps;
+mod issue_152_root_and_log_errors;

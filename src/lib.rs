@@ -95,6 +95,11 @@ pub mod error {
         // RMDIR of a directory that is not empty. A modern extension.
         BadDirectory,
 
+        // Math errors (issue #152)
+        NegativeRoot,
+        LogRange,
+        ExpRange,
+
         // System errors
         IllegalFunction,
         BadCall,
@@ -153,6 +158,9 @@ pub mod error {
                 BBCBasicError::ChannelNotOpen(_) => write!(f, "Channel"),
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::BadDirectory => write!(f, "Bad directory"),
+                BBCBasicError::NegativeRoot => write!(f, "-ve root"),
+                BBCBasicError::LogRange => write!(f, "Log range"),
+                BBCBasicError::ExpRange => write!(f, "Exp range"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),
                 BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
