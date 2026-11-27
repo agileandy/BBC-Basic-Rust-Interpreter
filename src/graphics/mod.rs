@@ -102,8 +102,6 @@ pub struct GraphicsSystem {
     foreground_color: u8,
     /// Graphics color mode (0 = set, 1 = OR, 2 = AND, 3 = XOR, 4 = invert)
     color_mode: u8,
-    /// Triangle corner for PLOT 128-191 modes (stored vertex for filled triangles)
-    triangle_corner: Option<Point>,
 }
 
 impl GraphicsSystem {
@@ -123,7 +121,6 @@ impl GraphicsSystem {
             origin: Point { x: 0, y: 0 },
             foreground_color: 255, // White
             color_mode: 0,         // Set mode
-            triangle_corner: None, // No triangle corner stored initially
         }
     }
 
@@ -143,7 +140,6 @@ impl GraphicsSystem {
         self.origin = Point { x: 0, y: 0 };
         self.foreground_color = mode.colours - 1;
         self.color_mode = 0;
-        self.triangle_corner = None;
     }
 
     /// Set graphics color mode (GCOL)
@@ -260,8 +256,14 @@ impl GraphicsSystem {
         // and clear is relative to the last point. The low 2 bits select the
         // action: 0 moves, 1 draws in the foreground colour, 2 and 3 draw in
         // the inverse and background colours. Those 2 colours are not
-        // modelled, so the line and triangle groups only move for 2 and 3.
-        // The point group (64-71) sets the point for each of its 8 modes.
+        // modelled, so the line, triangle and circle groups only move for 2
+        // and 3. The point group (64-71) sets the point for 2 and 3 also.
+        //
+        // These codes from 128 to 191 are not supported. They draw nothing,
+        // give no error and move the last point:
+        // - 128-143: flood fill
+        // - 160-167: arc, 168-175: segment, 176-183: sector
+        // - 184-191: move or copy a rectangle
         let absolute = (mode & 0x04) != 0;
         let (target_x, target_y) = if absolute {
             (x, y)
@@ -275,8 +277,8 @@ impl GraphicsSystem {
             0x00 if draws => {
                 self.draw_line(self.current_pos.x, self.current_pos.y, target_x, target_y);
             }
-            // 64-71: Plot point
-            0x40 => {
+            // 64-71: Plot point. Low bits 0 (64, 68) only move
+            0x40 if (mode & 0x03) != 0 => {
                 self.set_pixel(target_x, target_y);
             }
             // 80-87: Filled triangle with the 2 last points and the target
@@ -290,26 +292,17 @@ impl GraphicsSystem {
                     target_y,
                 );
             }
-            // 128-191: Filled triangle
-            _ if (128..=191).contains(&mode) => {
-                // Triangle modes work in pairs:
-                // - First PLOT stores current position as triangle corner
-                // - Second PLOT draws triangle from corner -> current -> target
-                if let Some(corner) = self.triangle_corner {
-                    // Second PLOT: draw the triangle
-                    self.fill_triangle(
-                        corner.x,
-                        corner.y,
-                        self.current_pos.x,
-                        self.current_pos.y,
-                        target_x,
-                        target_y,
-                    );
-                    // Reset triangle corner after drawing
-                    self.triangle_corner = None;
+            // 144-151: Circle outline. 152-159: Filled circle. The centre is
+            // the last point and the target is a point on the circle
+            0x90 | 0x98 if draws => {
+                let centre = self.current_pos;
+                let dx = i64::from(target_x - centre.x);
+                let dy = i64::from(target_y - centre.y);
+                let radius = ((dx * dx + dy * dy) as f64).sqrt().round() as i32;
+                if mode & 0xF8 == 0x90 {
+                    self.circle_outline(centre.x, centre.y, radius);
                 } else {
-                    // First PLOT: store current position as triangle corner
-                    self.triangle_corner = Some(self.current_pos);
+                    self.fill_circle(centre.x, centre.y, radius);
                 }
             }
             // Default: just move cursor
@@ -318,8 +311,34 @@ impl GraphicsSystem {
         self.set_last_point(target_x, target_y);
     }
 
-    /// Draw a circle using midpoint circle algorithm
+    /// CIRCLE x, y, r. The BBC BASIC for Windows manual gives the rule:
+    /// "CIRCLE x,y,r is equivalent to MOVE x,y : PLOT 145,r,0"
+    /// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html). Thus the point
+    /// before the last point is the centre, and the last point is (x + r, y).
     pub fn draw_circle(&mut self, center_x: i32, center_y: i32, radius: i32) {
+        self.move_to(center_x, center_y);
+        self.plot(145, radius, 0);
+    }
+
+    /// Fill a circle with a horizontal line for each row. Only the rows and
+    /// the columns on the canvas are visited, so a large radius is fast.
+    fn fill_circle(&mut self, center_x: i32, center_y: i32, radius: i32) {
+        let (cx, cy, r) = (i64::from(center_x), i64::from(center_y), i64::from(radius));
+        let min_x = -i64::from(self.origin.x);
+        let max_x = self.width as i64 - 1 - i64::from(self.origin.x);
+        let min_y = -i64::from(self.origin.y);
+        let max_y = self.height as i64 - 1 - i64::from(self.origin.y);
+        for y in (cy - r).max(min_y)..=(cy + r).min(max_y) {
+            let dy = y - cy;
+            let half = ((r * r - dy * dy) as f64).sqrt() as i64;
+            for x in (cx - half).max(min_x)..=(cx + half).min(max_x) {
+                self.set_pixel(x as i32, y as i32);
+            }
+        }
+    }
+
+    /// Draw a circle outline using midpoint circle algorithm
+    fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i32) {
         if radius <= 0 {
             return;
         }
@@ -347,12 +366,6 @@ impl GraphicsSystem {
                 err += 2 * (y - x) + 1;
             }
         }
-
-        // Update current position to circle center
-        self.current_pos = Point {
-            x: center_x,
-            y: center_y,
-        };
     }
 
     /// Draw an ellipse using midpoint ellipse algorithm
