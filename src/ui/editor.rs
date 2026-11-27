@@ -5,11 +5,10 @@
 //! The line number of each line shows in its own dim column, but it stays
 //! part of the line text.
 
-use super::{Context, Document, LineCache, LineMark, Outcome};
+use super::{theme, Context, Document, LineCache, LineMark, Outcome};
 use crate::program::ProgramStore;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -238,9 +237,9 @@ impl EditorPane {
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, ctx: &Context) {
-        let plain = Style::new().fg(Color::White).bg(Color::Black);
-        let dim = Style::new().fg(Color::DarkGray).bg(Color::Black);
-        let red = Style::new().fg(Color::Red).bg(Color::Black);
+        let plain = theme::text();
+        let dim = theme::dim();
+        let red = theme::fault();
         frame.render_widget(Paragraph::new("").style(plain), area);
         let lines = ctx.document.lines();
         let height = usize::from(area.height).max(1);
@@ -294,7 +293,10 @@ impl EditorPane {
                 let text = format!("◀ {}", mark.message);
                 let width = (text.chars().count() as u16).min(area.width);
                 let mark_area = Rect::new(area.right() - width, y, width, 1);
-                frame.render_widget(Paragraph::new(text).style(red), mark_area);
+                // The line of the cursor is in work: its mark is dim, so
+                // that it does not look like a fault (issue #174)
+                let style = if index == self.row { dim } else { red };
+                frame.render_widget(Paragraph::new(text).style(style), mark_area);
             }
         }
         let cursor_x = (cursor_x as u16).min(area.width.saturating_sub(1));

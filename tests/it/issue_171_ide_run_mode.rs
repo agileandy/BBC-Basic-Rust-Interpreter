@@ -48,13 +48,20 @@ fn row_text(buffer: &Buffer, row: u16) -> String {
         .collect()
 }
 
+/// The start text of the pane (issue #174), before the first prompt.
+const BANNER: [&str; 4] = ["BBC Computer 32K", "", "BASIC", ""];
+
 /// The rows of the pane (the screen with no tab bar and no status line),
-/// with no spaces at the end, and with no empty rows at the end.
+/// with no spaces at the end, and with no empty rows at the end. The banner
+/// at the top is left out.
 fn pane_rows(app: &App) -> Vec<String> {
     let buffer = draw(app);
     let mut rows: Vec<String> = (1..buffer.area.height - 1)
         .map(|row| row_text(&buffer, row).trim_end().to_string())
         .collect();
+    if rows.starts_with(&BANNER.map(String::from)) {
+        rows.drain(..BANNER.len());
+    }
     while rows.last().is_some_and(String::is_empty) {
         rows.pop();
     }

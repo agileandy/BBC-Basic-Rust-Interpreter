@@ -8,7 +8,9 @@ mod document;
 mod editor;
 mod files;
 mod frame;
+mod help;
 mod run;
+mod theme;
 
 pub use document::{Document, LineCache, LineMark};
 
@@ -133,6 +135,8 @@ pub struct App {
     mode: Mode,
     quit_asked: bool,
     quit: bool,
+    /// True while the help screen shows (issue #174)
+    help: bool,
     editor: editor::EditorPane,
     run: run::RunPane,
     files: files::FilesPane,
@@ -147,6 +151,7 @@ impl App {
             mode: Mode::Edit,
             quit_asked: false,
             quit: false,
+            help: false,
             editor: editor::EditorPane::new(&document),
             run: run::RunPane::default(),
             files: files::FilesPane::new(document.file_name()),
@@ -249,13 +254,22 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
+        // The status message shows until the next key. The quit question
+        // is the only question in the status line: Ctrl-Q sets it again.
+        self.context.message.clear();
+        if self.help {
+            // Each key closes the help, and does nothing else
+            self.help = false;
+            return;
+        }
         let is_quit = is_ctrl(key, 'q');
         if !is_quit && self.quit_asked {
             // Any other key cancels the question.
             self.quit_asked = false;
-            self.context.message.clear();
         }
         match key.code {
+            KeyCode::F(1) => self.help = true,
+            _ if is_ctrl(key, 'h') => self.help = true,
             // Tab never goes to a pane, so it never puts a tab in the text.
             // Some terminals give Shift-Tab as Tab with Shift.
             KeyCode::BackTab => self.set_mode(self.mode.previous()),
@@ -386,19 +400,18 @@ impl App {
         .areas(area);
         frame::draw_tabs(frame, tabs, self.mode);
         let ctx = &self.context;
+        // The help screen is in place of the pane, so that the cursor of
+        // the pane does not show in it
+        match (self.help, self.mode) {
+            (true, _) => help::draw(frame, pane),
+            (false, Mode::Edit) => self.editor.draw(frame, pane, ctx),
+            (false, Mode::Run) => self.run.draw(frame, pane, ctx),
+            (false, Mode::Files) => self.files.draw(frame, pane, ctx),
+        }
         let detail = match self.mode {
-            Mode::Edit => {
-                self.editor.draw(frame, pane, ctx);
-                self.editor.status(&ctx.document)
-            }
-            Mode::Run => {
-                self.run.draw(frame, pane, ctx);
-                self.run.status()
-            }
-            Mode::Files => {
-                self.files.draw(frame, pane, ctx);
-                String::new()
-            }
+            Mode::Edit => self.editor.status(&ctx.document),
+            Mode::Run => self.run.status(),
+            Mode::Files => String::new(),
         };
         frame::draw_status(
             frame,

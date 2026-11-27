@@ -15,6 +15,7 @@
 
 use crate::commands::run_command;
 use crate::executor::{Console, Executor, Interrupt};
+use crate::graphics::ScreenMode;
 use crate::program::ProgramStore;
 use crate::tokenizer::expand_short_form;
 use std::cell::RefCell;
@@ -27,6 +28,8 @@ use std::time::{Duration, Instant};
 
 /// The prompt of the pane.
 const PROMPT: &str = "> ";
+/// The start text of a BBC Micro, before the first prompt (issue #174).
+const BANNER: &str = "BBC Computer 32K\n\nBASIC\n\n";
 /// The key code of Enter.
 pub(super) const ENTER: char = '\r';
 /// The key code of the Delete key of a BBC Micro (Backspace).
@@ -58,6 +61,10 @@ pub(super) enum FromWorker {
     Text(String),
     /// Clear the screen (CLS)
     Clear,
+    /// MODE selected this screen mode. A Clear comes after it.
+    Mode(ScreenMode),
+    /// The logical text colours: the foreground and the background
+    Colours(u8, u8),
     /// A typed line, with no line end. The worker waits for the answer.
     Line(String),
     /// A command or a run starts
@@ -280,6 +287,16 @@ impl Console for WorkerConsole {
         }
         None
     }
+
+    fn screen_mode(&mut self, mode: ScreenMode) {
+        self.0.borrow_mut().send(FromWorker::Mode(mode));
+    }
+
+    fn text_colours(&mut self, foreground: u8, background: u8) {
+        self.0
+            .borrow_mut()
+            .send(FromWorker::Colours(foreground, background));
+    }
 }
 
 /// A command for the worker: the text, and true if it is a run request of
@@ -329,6 +346,7 @@ pub(super) fn run_worker(link: Link) {
     let mut executor = Executor::new();
     executor.set_console(Box::new(WorkerConsole(Rc::clone(&link))));
     let mut program = ProgramStore::new();
+    link.borrow_mut().write(BANNER);
     link.borrow_mut().write(PROMPT);
 
     loop {
