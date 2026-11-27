@@ -2,7 +2,7 @@ use bbc_basic_interpreter::{
     executor::Executor,
     program::{parse_list_range, ProgramStore},
     runner::{run_program_with_outcome, run_typed_line, RunOutcome},
-    tokenizer::{detokenize, tokenize},
+    tokenizer::{detokenize, expand_short_form, tokenize},
     ui,
 };
 use std::io::{self, Write};
@@ -87,7 +87,9 @@ fn run_interpreter() {
             break;
         }
 
-        let input = line_buffer.trim();
+        // A short form at the start, such as L., is the full keyword (issue 167)
+        let expanded = expand_short_form(line_buffer.trim());
+        let input = expanded.as_str();
 
         // Check for commands
         if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
