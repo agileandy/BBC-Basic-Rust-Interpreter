@@ -781,9 +781,16 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
                 }
 
                 if end_pos > start_pos {
-                    let expr = parse_expression(&tokens[start_pos..end_pos])?;
+                    let item_tokens = &tokens[start_pos..end_pos];
+                    let mut used = 0;
+                    let expr = parse_expr_precedence(item_tokens, &mut used, 0)?;
                     items.push(PrintItem::Expression(expr));
-                    pos = end_pos;
+                    // A new value with no separator before it is the next item (BBC rule)
+                    pos = if used < item_tokens.len() && starts_print_item(&item_tokens[used]) {
+                        start_pos + used
+                    } else {
+                        end_pos
+                    };
                 } else {
                     break;
                 }
@@ -792,6 +799,22 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
     }
 
     Ok(Statement::Print { items })
+}
+
+/// True if this token can start a PRINT item after a complete expression.
+/// Binary operator keywords (AND, DIV, EOR, MOD, OR) continue the expression.
+fn starts_print_item(token: &Token) -> bool {
+    match token {
+        Token::Integer(_)
+        | Token::Real(_)
+        | Token::String(_)
+        | Token::Identifier(_)
+        | Token::ExtendedKeyword(_, _)
+        | Token::Separator('(')
+        | Token::Operator('~') => true,
+        Token::Keyword(code) => get_keyword_precedence(*code).is_none(),
+        _ => false,
+    }
 }
 
 /// Parse assignment statement (A% = 42 or LET A% = 42, or array assignment like arr(i) = 5)
@@ -3274,6 +3297,84 @@ mod tests {
                     PrintItem::Expression(Expression::Integer(5)),
                 ],
             }
+        );
+    }
+
+    fn parse_print_text(source: &str) -> Vec<PrintItem> {
+        use crate::tokenizer::tokenize;
+        match parse_statement(&tokenize(source).unwrap()).unwrap() {
+            Statement::Print { items } => items,
+            other => panic!("expected PRINT, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_print_two_numbers_with_no_separator_gives_two_items() {
+        assert_eq!(
+            parse_print_text("PRINT 10 58"),
+            vec![
+                PrintItem::Expression(Expression::Integer(10)),
+                PrintItem::Expression(Expression::Integer(58)),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_two_strings_with_no_separator_gives_two_items() {
+        assert_eq!(
+            parse_print_text("PRINT \"A\" \"B\""),
+            vec![
+                PrintItem::Expression(Expression::String("A".to_string())),
+                PrintItem::Expression(Expression::String("B".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_two_variables_with_no_separator_gives_two_items() {
+        assert_eq!(
+            parse_print_text("PRINT A$ B$"),
+            vec![
+                PrintItem::Expression(Expression::Variable("A$".to_string())),
+                PrintItem::Expression(Expression::Variable("B$".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_subtract_is_one_item() {
+        assert_eq!(
+            parse_print_text("PRINT 1 - 2"),
+            vec![PrintItem::Expression(Expression::BinaryOp {
+                left: Box::new(Expression::Integer(1)),
+                op: BinaryOperator::Subtract,
+                right: Box::new(Expression::Integer(2)),
+            })]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_hex_then_two_items_with_no_separator() {
+        assert_eq!(
+            parse_print_text("PRINT ~10 58,58"),
+            vec![
+                PrintItem::Hex,
+                PrintItem::Expression(Expression::Integer(10)),
+                PrintItem::Expression(Expression::Integer(58)),
+                PrintItem::Comma,
+                PrintItem::Expression(Expression::Integer(58)),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_tab_then_string_with_no_separator() {
+        assert_eq!(
+            parse_print_text("PRINT TAB(5) \"X\""),
+            vec![
+                PrintItem::Tab(Expression::Integer(5)),
+                PrintItem::Expression(Expression::String("X".to_string())),
+            ]
         );
     }
 
