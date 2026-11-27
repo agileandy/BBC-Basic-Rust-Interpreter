@@ -1545,7 +1545,9 @@ impl Executor {
                 }
                 match name.as_str() {
                     "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP"
-                    | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "RND" | "VAL" => true,
+                    | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "VAL" => true,
+                    // RND with no bracket gives an integer
+                    "RND" => !args.is_empty(),
                     "ABS" => args.first().is_some_and(|arg| self.is_real_expr(arg)),
                     _ => false,
                 }
@@ -1840,6 +1842,14 @@ impl Executor {
                     0
                 })
             }
+            // RND with no bracket: a random integer over the full 32-bit range
+            "RND" if args.is_empty() => Ok(self.rng.borrow_mut().gen::<i32>()),
+            // POS gives the print column. COUNT gives the characters printed
+            // since the last new line. This build has one column counter, so
+            // the two values are the same number.
+            "POS" | "COUNT" if args.is_empty() => Ok(self.column as i32),
+            // VPOS gives the print row. There is no screen model yet, so it gives 0.
+            "VPOS" if args.is_empty() => Ok(0),
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
