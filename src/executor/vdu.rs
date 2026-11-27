@@ -2,7 +2,7 @@
 //! waits for its parameter bytes, then runs. The queue stays between VDU
 //! statements, so `VDU 22` and then `VDU 4` is the same as `VDU 22, 4`.
 
-use super::Executor;
+use super::{CursorMove, Executor};
 use crate::error::Result;
 use crate::parser::{Expression, VduItem};
 
@@ -54,11 +54,21 @@ impl Executor {
         let integer = |index: usize| Expression::Integer(parameters[index] as i32);
         match code {
             8 => {
-                self.print_control("\x08");
                 self.column = self.column.saturating_sub(1);
+                if !self.move_console_cursor(CursorMove::Left) {
+                    self.print_control("\x08");
+                }
             }
-            9 => self.column += 1,
-            10 => self.print_output("\n"),
+            9 => {
+                self.column += 1;
+                self.move_console_cursor(CursorMove::Right);
+            }
+            // The guard moves the cursor of a console. With no console, a
+            // line feed goes to the output
+            10 if !self.move_console_cursor(CursorMove::Down) => self.print_output("\n"),
+            11 => {
+                self.move_console_cursor(CursorMove::Up);
+            }
             12 => self.execute_cls()?,
             13 => {
                 self.print_control("\r");
@@ -77,7 +87,10 @@ impl Executor {
                 &word(parameters[0], parameters[1]),
                 &word(parameters[2], parameters[3]),
             )?,
-            30 => self.column = 0,
+            30 => {
+                self.column = 0;
+                self.move_console_cursor(CursorMove::Home);
+            }
             31 => self.move_text_cursor(parameters[0], parameters[1]),
             32..=126 => self.print_output(&char::from(code).to_string()),
             // 7 (bell), 127 (delete), the
@@ -88,11 +101,27 @@ impl Executor {
     }
 
     /// Move the text cursor to column `x` and row `y` (VDU 31 and TAB(x, y)).
-    /// The executor keeps only a print column, so `y` has no effect. No
-    /// cursor code goes to the output buffer or to standard output, as for
-    /// colour (issue #101).
-    pub(super) fn move_text_cursor(&mut self, x: u8, _y: u8) {
+    /// With no console, the executor keeps only a print column, so `y` has
+    /// no effect. No cursor code goes to the output buffer or to standard
+    /// output, as for colour (issue #101).
+    pub(super) fn move_text_cursor(&mut self, x: u8, y: u8) {
         self.column = x as usize;
+        self.move_console_cursor(CursorMove::To(x, y));
+    }
+
+    /// Give a cursor move to the console, if there is one (issue #200). If
+    /// the console has a text screen with rows, the print column is then
+    /// the column of the console: a move can wrap to another row, or have
+    /// no effect at the edge. Give false if there is no console.
+    fn move_console_cursor(&mut self, movement: CursorMove) -> bool {
+        let Some(console) = self.console.0.as_mut() else {
+            return false;
+        };
+        console.move_cursor(movement);
+        if let Some((column, _)) = console.cursor() {
+            self.column = column;
+        }
+        true
     }
 
     /// Send a control character to the display. It does not change the

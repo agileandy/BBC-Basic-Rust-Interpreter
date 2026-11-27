@@ -18,6 +18,23 @@ pub enum Interrupt {
     Quit,
 }
 
+/// A move of the text cursor (issue #200).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorMove {
+    /// VDU 31 and TAB(x, y): to column x of row y
+    To(u8, u8),
+    /// VDU 8: one column left
+    Left,
+    /// VDU 9: one column right
+    Right,
+    /// VDU 10: one row down, in the same column
+    Down,
+    /// VDU 11: one row up
+    Up,
+    /// VDU 30: to the top left
+    Home,
+}
+
 /// The screen and the keyboard of a front end.
 pub trait Console {
     /// Show program text. A line feed starts a new line, a carriage return
@@ -46,6 +63,16 @@ pub trait Console {
     /// The text colours changed (COLOUR, VDU 17 or MODE): the logical
     /// foreground and background colours. The default does nothing.
     fn text_colours(&mut self, _foreground: u8, _background: u8) {}
+
+    /// Move the text cursor. The default does nothing, as in the prompt
+    /// mode (issue #200).
+    fn move_cursor(&mut self, _movement: CursorMove) {}
+
+    /// The text cursor: the column and the row, if the console has a text
+    /// screen with rows. The default gives None.
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        None
+    }
 
     /// See the graphics canvas and the screen mode at the stop check, before
     /// each statement. A front end that shows the canvas reads it here

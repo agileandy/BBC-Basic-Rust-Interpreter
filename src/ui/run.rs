@@ -16,6 +16,7 @@ mod worker;
 
 use super::canvas::{self, Picture};
 use super::{theme, Context, Outcome};
+use crate::executor::CursorMove;
 use crate::graphics::ScreenMode;
 use crate::program::ProgramStore;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -67,21 +68,33 @@ struct Glyph {
 }
 
 /// One row of the screen.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Row {
     glyphs: Vec<Glyph>,
     /// True if the row continues the row above it: the text wrapped
     continued: bool,
 }
 
-/// A grid of text that scrolls up at the last line. A line feed goes to
-/// column 0 of the next row, a carriage return goes to column 0, and a
-/// backspace goes back one column. A backspace at column 0 of a wrapped row
-/// goes to the last column of the row above it.
-#[derive(Debug, Default)]
+/// The text screen: a grid of rows and columns with a cursor (issue #200).
+/// A line feed goes to column 0 of the next row, a carriage return goes to
+/// column 0, and a backspace goes back one column. A backspace at column 0
+/// of a wrapped row goes to the last column of the row above it. A print
+/// after the last column continues on the next row. A line feed at the last
+/// row scrolls the grid up one row, and the top row goes to the history.
+///
+/// The pane and the worker each keep a screen, and they apply the same
+/// changes in the same sequence. Thus VPOS on the worker gives the row that
+/// the pane shows, and the pane shows the text in the sequence of the other
+/// messages of the worker.
+#[derive(Debug, Clone)]
 struct Screen {
-    rows: VecDeque<Row>,
-    /// The cursor: the row index and the column
+    /// The rows that scrolled off the top, for Page Up
+    history: VecDeque<Row>,
+    /// The rows of the grid, from the top
+    grid: Vec<Row>,
+    /// The count of columns of the grid
+    width: usize,
+    /// The cursor: the row of the grid and the column
     row: usize,
     col: usize,
     /// The text colours for the next print. The default style shows the
@@ -90,25 +103,76 @@ struct Screen {
     /// The colours of a cell with no text: the text colours at the last
     /// clear, as CLS does on a BBC Micro
     paper: Style,
+    /// The screen mode of the last MODE. None before the first MODE: the
+    /// grid then has the size of the pane and 2 colours, as mode 0.
+    mode: Option<ScreenMode>,
+}
+
+impl Default for Screen {
+    fn default() -> Self {
+        Self::new(DEFAULT_WIDTH, DEFAULT_PAGE)
+    }
+}
+
+/// A change of the text screen. The worker applies it to its screen, then
+/// sends it to the pane.
+#[derive(Debug, Clone, PartialEq)]
+enum ScreenChange {
+    /// Text to print
+    Text(String),
+    /// Clear the screen (CLS)
+    Clear,
+    /// MODE selected this screen mode. A Clear comes after it.
+    Mode(ScreenMode),
+    /// The logical text colours: the foreground and the background
+    Colours(u8, u8),
+    /// A move of the cursor
+    Move(CursorMove),
+    /// The pane has this count of columns and rows
+    Fit(usize, usize),
 }
 
 impl Screen {
-    fn write(&mut self, text: &str, width: usize) {
-        if self.rows.is_empty() {
-            self.rows.push_back(Row::default());
+    fn apply(&mut self, change: &ScreenChange) {
+        match change {
+            ScreenChange::Text(text) => self.write(text),
+            ScreenChange::Clear => self.clear(),
+            ScreenChange::Mode(mode) => self.set_mode(*mode),
+            ScreenChange::Colours(foreground, background) => {
+                self.set_colours(*foreground, *background)
+            }
+            ScreenChange::Move(movement) => self.move_cursor(*movement),
+            ScreenChange::Fit(width, height) => self.fit_pane(*width, *height),
         }
+    }
+
+    /// An empty screen of `width` columns and `height` rows.
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            history: VecDeque::new(),
+            grid: vec![Row::default(); height.max(1)],
+            width: width.max(1),
+            row: 0,
+            col: 0,
+            style: Style::default(),
+            paper: Style::default(),
+            mode: None,
+        }
+    }
+
+    fn write(&mut self, text: &str) {
         for c in text.chars() {
             match c {
                 '\n' => self.next_row(false),
                 '\r' => self.col = 0,
                 '\x08' if self.col > 0 => self.col -= 1,
-                '\x08' if self.rows[self.row].continued && self.row > 0 => {
+                '\x08' if self.grid[self.row].continued && self.row > 0 => {
                     self.row -= 1;
-                    self.col = width - 1;
+                    self.col = self.width - 1;
                 }
                 c if c.is_control() => {}
                 c => {
-                    if self.col >= width {
+                    if self.col >= self.width {
                         self.next_row(true);
                     }
                     let col = self.col;
@@ -120,7 +184,7 @@ impl Screen {
                         c: ' ',
                         style: self.paper,
                     };
-                    let glyphs = &mut self.rows[self.row].glyphs;
+                    let glyphs = &mut self.grid[self.row].glyphs;
                     if col < glyphs.len() {
                         glyphs[col] = glyph;
                     } else {
@@ -133,32 +197,144 @@ impl Screen {
         }
     }
 
-    /// Go to column 0 of the next row. Add a row at the end if there is none.
+    /// Go to column 0 of the next row. `continued` is true for a wrap.
     fn next_row(&mut self, continued: bool) {
-        if self.row + 1 < self.rows.len() {
-            self.row += 1;
-        } else {
-            self.rows.push_back(Row::default());
-            self.row = self.rows.len() - 1;
-            while self.rows.len() > HISTORY {
-                self.rows.pop_front();
-                self.row -= 1;
-            }
-        }
-        self.rows[self.row].continued = continued;
+        self.line_feed();
+        self.grid[self.row].continued = continued;
         self.col = 0;
     }
 
+    /// Go one row down, in the same column. At the last row, scroll the
+    /// grid up one row: the top row goes to the history.
+    fn line_feed(&mut self) {
+        if self.row + 1 < self.grid.len() {
+            self.row += 1;
+            return;
+        }
+        let top = self.grid.remove(0);
+        self.grid.push(Row::default());
+        self.history.push_back(top);
+        if self.history.len() > HISTORY {
+            self.history.pop_front();
+        }
+    }
+
+    /// Move the cursor for VDU 31, TAB(x, y) and the cursor codes. A move
+    /// to a place outside the grid does nothing, as on a BBC Micro. Left at
+    /// column 0 goes to the last column of the row above, and right at the
+    /// last column goes to the start of the next row.
+    fn move_cursor(&mut self, movement: CursorMove) {
+        match movement {
+            CursorMove::To(x, y) => {
+                let (x, y) = (usize::from(x), usize::from(y));
+                if x < self.width && y < self.grid.len() {
+                    self.col = x;
+                    self.row = y;
+                }
+            }
+            CursorMove::Left if self.col > 0 => self.col = self.col.min(self.width) - 1,
+            CursorMove::Left if self.row > 0 => {
+                self.row -= 1;
+                self.col = self.width - 1;
+            }
+            CursorMove::Left => {}
+            CursorMove::Right if self.col + 1 < self.width => self.col += 1,
+            CursorMove::Right => {
+                self.line_feed();
+                self.col = 0;
+            }
+            CursorMove::Down => self.line_feed(),
+            CursorMove::Up => self.row = self.row.saturating_sub(1),
+            CursorMove::Home => {
+                self.row = 0;
+                self.col = 0;
+            }
+        }
+    }
+
+    /// Clear the grid and the history, and go to the top left.
     fn clear(&mut self) {
-        self.rows.clear();
+        self.history.clear();
+        self.grid.fill(Row::default());
         self.row = 0;
         self.col = 0;
         self.paper = self.style;
     }
 
-    /// The count of rows, with the row of the cursor.
-    fn len(&self) -> usize {
-        self.rows.len().max(1)
+    /// MODE selected a screen mode: the grid gets its columns and rows. A
+    /// clear comes after this.
+    fn set_mode(&mut self, mode: ScreenMode) {
+        self.mode = Some(mode);
+        self.width = mode.text_columns.max(1);
+        self.grid = vec![Row::default(); mode.text_rows.max(1)];
+        self.row = 0;
+        self.col = 0;
+    }
+
+    /// The logical text colours changed: show them with the palette of the
+    /// mode.
+    fn set_colours(&mut self, foreground: u8, background: u8) {
+        let colours = self.mode.map_or(2, |mode| mode.colours);
+        self.style = theme::screen(foreground, background, colours);
+    }
+
+    /// A new executor starts in mode 0 with the default colours.
+    fn reset_mode(&mut self) {
+        self.mode = None;
+        self.style = Style::default();
+    }
+
+    /// Before the first MODE, the grid has the size of the pane. A smaller
+    /// pane removes the empty rows below the cursor first, then moves the
+    /// top rows to the history. A larger pane takes rows back from the
+    /// history.
+    fn fit_pane(&mut self, width: usize, height: usize) {
+        if self.mode.is_some() || width == 0 || height == 0 {
+            return;
+        }
+        self.width = width;
+        while self.grid.len() > height {
+            if self.row + 1 < self.grid.len() {
+                self.grid.pop();
+            } else {
+                let top = self.grid.remove(0);
+                self.history.push_back(top);
+                self.row -= 1;
+            }
+        }
+        while self.history.len() > HISTORY {
+            self.history.pop_front();
+        }
+        while self.grid.len() < height {
+            match self.history.pop_back() {
+                Some(row) => {
+                    self.grid.insert(0, row);
+                    self.row += 1;
+                }
+                None => self.grid.push(Row::default()),
+            }
+        }
+    }
+
+    /// The index in the history and the grid of the top row that a pane of
+    /// `height` rows shows with no scroll. A pane that has fewer rows than
+    /// the grid shows the top of the grid, or the rows to the cursor if the
+    /// cursor is below them. A pane that has more rows than the grid (before
+    /// the fit to a new pane size) also shows the last rows of the history.
+    fn view_start(&self, height: usize) -> usize {
+        let total = self.history.len() + self.grid.len();
+        if height >= self.grid.len() {
+            return total.saturating_sub(height);
+        }
+        self.history.len() + (self.row + 1).saturating_sub(height)
+    }
+
+    /// The row at an index in the history and the grid.
+    fn line(&self, index: usize) -> Option<&Row> {
+        match index.checked_sub(self.history.len()) {
+            Some(index) => self.grid.get(index),
+            None => self.history.get(index),
+        }
     }
 }
 
@@ -173,6 +349,7 @@ struct Worker {
 /// The state of the RUN pane.
 #[derive(Default)]
 pub struct RunPane {
+    /// The text screen. The worker gives each change of it.
     screen: Screen,
     worker: Option<Worker>,
     /// Worker threads that a stop asked to end, which did not end in time
@@ -191,12 +368,8 @@ pub struct RunPane {
     synced: Option<ProgramStore>,
     /// The count of rows above the last page of the screen
     scroll: usize,
-    /// The width and the height of the pane at the last draw
-    width: Cell<usize>,
+    /// The count of rows of the text screen at the last draw
     page: Cell<usize>,
-    /// The screen mode of the last MODE. None before the first MODE: the
-    /// screen then has the width of the pane and 2 colours, as mode 0.
-    mode: Option<ScreenMode>,
     /// The count of columns that the last draw showed, if the pane was
     /// narrower than the screen of the mode
     cut: Cell<Option<usize>>,
@@ -207,6 +380,8 @@ pub struct RunPane {
     /// The width and the height in cells of the picture area at the last
     /// draw
     picture_area: Cell<(u16, u16)>,
+    /// The width and the height in cells of the pane at the last draw
+    pane_size: Cell<(u16, u16)>,
 }
 
 impl RunPane {
@@ -222,7 +397,7 @@ impl RunPane {
         } else {
             "ready"
         };
-        match (self.cut.get(), self.mode) {
+        match (self.cut.get(), self.screen.mode) {
             (Some(shown), Some(mode)) => {
                 format!("{}  left {} of {} columns", state, shown, mode.text_columns)
             }
@@ -271,7 +446,16 @@ impl RunPane {
         let (worker_output, output) = mpsc::sync_channel(QUEUE);
         let flags = Arc::new(Flags::default());
         flags.size.store(self.size_flag(), Ordering::Relaxed);
-        let link = Link::new(worker_input, worker_output, Arc::clone(&flags));
+        flags.text.store(self.text_flag(), Ordering::Relaxed);
+        // A new executor starts in mode 0 with the default colours. The
+        // worker starts with a copy of the screen of the pane.
+        self.screen.reset_mode();
+        let link = Link::new(
+            worker_input,
+            worker_output,
+            Arc::clone(&flags),
+            self.screen.clone(),
+        );
         let spawned = thread::Builder::new()
             .name(WORKER_NAME.to_string())
             .stack_size(STACK_SIZE)
@@ -285,10 +469,7 @@ impl RunPane {
                     thread,
                 });
                 self.synced = None;
-                // A new executor starts in mode 0 with the default colours,
-                // and its canvas is clear
-                self.mode = None;
-                self.screen.style = Style::default();
+                // The canvas of a new executor is clear
                 self.picture = None;
                 true
             }
@@ -319,12 +500,29 @@ impl RunPane {
         pack_size(columns, rows)
     }
 
-    /// If the picture area changed, give the new size to the worker, and
-    /// wake it if it waits at the prompt: it sends a new picture.
+    /// The frame gives the area of the pane at each draw, in each mode.
+    pub fn see_pane(&self, pane: Rect) {
+        self.pane_size.set((pane.width, pane.height));
+    }
+
+    /// The text size flag for the worker: the pane at the last draw of the
+    /// frame. Before the first draw it is 0, and the screen keeps its
+    /// default size.
+    fn text_flag(&self) -> u32 {
+        let (columns, rows) = self.pane_size.get();
+        pack_size(columns, rows)
+    }
+
+    /// If the picture area or the pane changed, give the new size to the
+    /// worker, and wake it if it waits at the prompt: it sends a new
+    /// picture, and a new size for the text screen before the first MODE.
     fn send_size(&self) {
         let size = self.size_flag();
+        let text = self.text_flag();
         if let Some(worker) = &self.worker {
-            if worker.flags.size.swap(size, Ordering::Relaxed) != size {
+            let picture_changed = worker.flags.size.swap(size, Ordering::Relaxed) != size;
+            let text_changed = worker.flags.text.swap(text, Ordering::Relaxed) != text;
+            if picture_changed || text_changed {
                 let _ = worker.input.send(ToWorker::Wake);
             }
         }
@@ -342,7 +540,7 @@ impl RunPane {
         let idle = !self.is_running();
         match key.code {
             KeyCode::PageUp if idle => {
-                let max = self.screen.len().saturating_sub(self.page());
+                let max = self.screen.view_start(self.page());
                 self.scroll = (self.scroll + self.page()).min(max);
                 return Outcome::Used;
             }
@@ -463,15 +661,11 @@ impl RunPane {
     fn apply(&mut self, message: FromWorker, ctx: &mut Context) {
         self.changed = true;
         match message {
-            FromWorker::Text(text) => self.screen.write(&text, self.width()),
-            FromWorker::Clear => self.screen.clear(),
-            FromWorker::Mode(mode) => {
-                self.mode = Some(mode);
-                self.scroll = 0;
-            }
-            FromWorker::Colours(foreground, background) => {
-                let colours = self.mode.map_or(2, |mode| mode.colours);
-                self.screen.style = theme::screen(foreground, background, colours);
+            FromWorker::Screen(change) => {
+                if matches!(change, ScreenChange::Mode(_)) {
+                    self.scroll = 0;
+                }
+                self.screen.apply(&change);
             }
             FromWorker::Picture(picture) => self.picture = picture,
             FromWorker::Line(line) => {
@@ -539,7 +733,7 @@ impl RunPane {
         ctx.message = format!("The interpreter stopped: {}", detail);
         self.reset_run();
         if self.screen.col > 0 {
-            self.screen.write("\n", self.width());
+            self.screen.write("\n");
         }
         self.changed = true;
     }
@@ -571,35 +765,26 @@ impl RunPane {
         true
     }
 
-    /// The count of columns of the text screen: the columns of the mode
-    /// after a MODE, or the width of the pane.
-    fn width(&self) -> usize {
-        if let Some(mode) = self.mode {
-            return mode.text_columns;
-        }
-        match self.width.get() {
-            0 => DEFAULT_WIDTH,
-            width => width,
-        }
-    }
-
     /// The part of the pane for the text screen. A pane that is wider than
     /// the screen of the mode has the screen in the centre, with a dim
     /// border at each side if there is space. A pane that is narrower shows
-    /// the left part, and the status line says so.
-    fn screen_area(&self, frame: &mut Frame, area: Rect) -> Rect {
+    /// the left part, and the status line says so. A pane that is higher
+    /// than the screen of the mode has the screen at the top.
+    fn screen_area(&self, frame: &mut Frame, area: Rect, mode: Option<ScreenMode>) -> Rect {
         self.cut.set(None);
-        let Some(columns) = self.mode.map(|mode| mode.text_columns as u16) else {
+        let Some(mode) = mode else {
             return area;
         };
+        let columns = u16::try_from(mode.text_columns).unwrap_or(u16::MAX);
+        let rows = u16::try_from(mode.text_rows).map_or(area.height, |rows| rows.min(area.height));
         if columns > area.width {
             self.cut.set(Some(usize::from(area.width)));
-            return area;
+            return Rect::new(area.x, area.y, area.width, rows);
         }
         let x = area.x + (area.width - columns) / 2;
-        let screen = Rect::new(x, area.y, columns, area.height);
+        let screen = Rect::new(x, area.y, columns, rows);
         if area.width >= columns + 2 {
-            let border = Rect::new(x - 1, area.y, columns + 2, area.height);
+            let border = Rect::new(x - 1, area.y, columns + 2, rows);
             let block = Block::new()
                 .borders(Borders::LEFT | Borders::RIGHT)
                 .border_style(theme::dim());
@@ -618,23 +803,24 @@ impl RunPane {
     /// Draw the text screen, and the picture of the canvas under the text:
     /// a text cell that is not a space shows above the picture.
     pub fn draw(&self, frame: &mut Frame, area: Rect, _ctx: &Context) {
-        let picture_area = canvas::picture_area(area);
+        let screen = &self.screen;
+        frame.render_widget(Paragraph::new("").style(theme::text()), area);
+        let pane = area;
+        let area = self.screen_area(frame, pane, screen.mode);
+        // The picture and the text screen of the mode share one rectangle,
+        // if the picture stays readable (issue #200)
+        let picture_area = match screen.mode {
+            Some(mode) => canvas::text_picture_area(pane, area, mode.text_columns, mode.text_rows),
+            None => canvas::picture_area(pane),
+        };
         self.picture_area
             .set((picture_area.width, picture_area.height));
         let height = usize::from(area.height);
-        self.width.set(usize::from(area.width));
         self.page.set(height);
-        frame.render_widget(Paragraph::new("").style(theme::text()), area);
-        let area = self.screen_area(frame, area);
-        let total = self.screen.len();
-        let scroll = self.scroll.min(total.saturating_sub(height));
-        let start = total.saturating_sub(height + scroll);
-        let rows: Vec<Line> = self
-            .screen
-            .rows
-            .iter()
-            .skip(start)
-            .take(height)
+        let top = screen.view_start(height);
+        let start = top.saturating_sub(self.scroll);
+        let rows: Vec<Line> = (start..start + height)
+            .map_while(|index| screen.line(index))
             .map(|row| {
                 let spans: Vec<Span> = row
                     .glyphs
@@ -644,15 +830,16 @@ impl RunPane {
                 Line::from(spans)
             })
             .collect();
-        let paper = theme::text().patch(self.screen.paper);
+        let paper = theme::text().patch(screen.paper);
         frame.render_widget(Paragraph::new(rows).style(paper), area);
         if let Some(picture) = &self.picture {
             canvas::draw(frame.buffer_mut(), picture_area, picture, area);
         }
-        let on_page = (start..start + height).contains(&self.screen.row);
-        if scroll == 0 && on_page && area.width > 0 {
-            let x = self.screen.col.min(usize::from(area.width) - 1);
-            let y = self.screen.row - start;
+        let cursor = screen.history.len() + screen.row;
+        let on_page = (start..start + height).contains(&cursor);
+        if start == top && on_page && area.width > 0 {
+            let x = screen.col.min(usize::from(area.width) - 1);
+            let y = cursor - start;
             let position = Position::new(area.x + x as u16, area.y + y as u16);
             if let Some(cell) = frame.buffer_mut().cell_mut(position) {
                 cell.set_style(Style::new().add_modifier(Modifier::REVERSED));
@@ -710,10 +897,12 @@ mod tests {
         }
     }
 
+    /// The rows of the history and the grid, with no empty rows at the end.
     fn text(screen: &Screen) -> Vec<String> {
-        screen
-            .rows
+        let mut rows: Vec<String> = screen
+            .history
             .iter()
+            .chain(&screen.grid)
             .map(|row| {
                 row.glyphs
                     .iter()
@@ -722,7 +911,11 @@ mod tests {
                     .trim_end()
                     .to_string()
             })
-            .collect()
+            .collect();
+        while rows.last().is_some_and(String::is_empty) {
+            rows.pop();
+        }
+        rows
     }
 
     /// A worker whose thread runs `run`. The channels of the worker end
@@ -740,34 +933,55 @@ mod tests {
 
     #[test]
     fn the_screen_wraps_at_the_width_and_keeps_1000_lines() {
-        let mut screen = Screen::default();
-        screen.write("abcde", 3);
+        let mut screen = Screen::new(3, 20);
+        screen.write("abcde");
         assert_eq!(text(&screen), ["abc", "de"]);
-        for _ in 0..HISTORY + 5 {
-            screen.write("x\n", 3);
+        for _ in 0..HISTORY + 25 {
+            screen.write("x\n");
         }
-        assert_eq!(screen.rows.len(), HISTORY);
-        assert_eq!(screen.row, HISTORY - 1);
+        // The grid keeps 20 rows, and the history keeps the 1000 rows above
+        assert_eq!(screen.history.len(), HISTORY);
+        assert_eq!(screen.grid.len(), 20);
+        assert_eq!(screen.row, 19);
     }
 
     #[test]
     fn a_carriage_return_and_a_backspace_move_the_cursor_on_the_line() {
-        let mut screen = Screen::default();
-        screen.write("abc\rX\x08Y", 80);
+        let mut screen = Screen::new(80, 20);
+        screen.write("abc\rX\x08Y");
         assert_eq!(text(&screen), ["Ybc"]);
     }
 
     #[test]
     fn a_backspace_at_column_0_of_a_wrapped_row_goes_to_the_row_above() {
-        let mut screen = Screen::default();
-        screen.write("abcde", 3);
-        screen.write("\x08 \x08\x08 \x08\x08 \x08", 3);
+        let mut screen = Screen::new(3, 20);
+        screen.write("abcde");
+        screen.write("\x08 \x08\x08 \x08\x08 \x08");
         // 3 backspaces remove e, d and c
-        assert_eq!(text(&screen), ["ab", ""]);
+        assert_eq!(text(&screen), ["ab"]);
         assert_eq!((screen.row, screen.col), (0, 2));
         // No row above a row that did not wrap
-        screen.write("\n\x08Z", 3);
+        screen.write("\n\x08Z");
         assert_eq!(text(&screen), ["ab", "Z"]);
+    }
+
+    #[test]
+    fn before_the_first_mode_the_grid_follows_the_height_of_the_pane() {
+        let mut screen = Screen::new(80, 4);
+        screen.write("a\nb\nc\nd\ne");
+        // The grid has 4 rows: "a" is in the history
+        assert_eq!((screen.history.len(), screen.row), (1, 3));
+        // A smaller pane moves the top rows to the history
+        screen.fit_pane(80, 2);
+        assert_eq!((screen.history.len(), screen.row), (3, 1));
+        // A larger pane takes the rows back
+        screen.fit_pane(80, 6);
+        assert_eq!((screen.history.len(), screen.row), (0, 4));
+        assert_eq!(text(&screen), ["a", "b", "c", "d", "e"]);
+        // After a MODE, the grid has the rows of the mode
+        screen.set_mode(ScreenMode::from_number(7).expect("mode 7"));
+        screen.fit_pane(80, 6);
+        assert_eq!((screen.width, screen.grid.len()), (40, 25));
     }
 
     #[test]
@@ -824,7 +1038,7 @@ mod tests {
         pane.worker = Some(fake_worker(|| {}));
         pane.busy = true;
         pane.error_line = Some(10);
-        pane.screen.write("> PRI", 80);
+        pane.screen.write("> PRI");
         assert!(pane.wait_for_run(&mut ctx, LIMIT));
         assert!(!pane.is_running());
         assert_eq!(pane.error_line, None);

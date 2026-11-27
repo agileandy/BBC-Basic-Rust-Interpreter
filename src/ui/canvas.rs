@@ -121,6 +121,25 @@ pub(crate) fn picture_area(area: Rect) -> Rect {
     )
 }
 
+/// The picture area for the text screen `text` of a mode with `columns` by
+/// `rows` cells, in the pane `area` (issue #200). If the pane shows all of
+/// the text screen, and the aspect of the text screen is from 0.8 to 1.25
+/// times 4 to 3, the picture takes the text screen. Then a text cell and
+/// the graphics at the same place of a BBC screen are together. If not, the
+/// picture keeps the area of `picture_area`, so that it stays readable.
+pub(crate) fn text_picture_area(area: Rect, text: Rect, columns: usize, rows: usize) -> Rect {
+    let whole = usize::from(text.width) == columns && usize::from(text.height) == rows;
+    // The aspect over 4 to 3 is 3 * width / (8 * height), because a cell is
+    // 2 times as high as it is wide
+    let (width, height) = (u32::from(text.width), u32::from(text.height));
+    let near = 15 * width >= 32 * height && 3 * width <= 10 * height;
+    if whole && near {
+        text
+    } else {
+        picture_area(area)
+    }
+}
+
 /// Draw the picture in the area. A cell of the text screen `text` that is
 /// not a space keeps its text: the text of a BBC Micro shows above the
 /// graphics. Outside the text screen, the picture covers the border.
@@ -210,5 +229,24 @@ mod tests {
             Rect::new(0, 7, 16, 6)
         );
         assert_eq!(picture_area(Rect::new(0, 0, 0, 0)), Rect::new(0, 0, 0, 0));
+    }
+
+    #[test]
+    fn the_picture_takes_the_text_screen_only_if_it_shows_all_of_it_near_4_to_3() {
+        // Mode 0 (80 by 32) in a pane of 120 by 38: the text screen
+        let pane = Rect::new(0, 1, 120, 38);
+        let text = Rect::new(20, 1, 80, 32);
+        assert_eq!(text_picture_area(pane, text, 80, 32), text);
+        // Mode 0 in a pane of 80 by 22: only 22 of 32 rows show
+        let small = Rect::new(0, 1, 80, 22);
+        assert_eq!(
+            text_picture_area(small, Rect::new(0, 1, 80, 22), 80, 32),
+            picture_area(small)
+        );
+        // Mode 1 (40 by 32): the aspect is 0.47 times 4 to 3
+        assert_eq!(
+            text_picture_area(pane, Rect::new(40, 1, 40, 32), 40, 32),
+            picture_area(pane)
+        );
     }
 }
