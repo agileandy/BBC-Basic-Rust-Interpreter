@@ -685,10 +685,16 @@ impl Executor {
                 .variables
                 .get_integer_var(&var_name)
                 .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
-            // The step of an integer loop is a whole value
-            let next_val = current_val + step_val as i32;
-            self.variables.set_integer_var(var_name.clone(), next_val);
-            f64::from(next_val)
+            // The step of an integer loop is an i32 value (see execute_for).
+            // If the next value overflows, it is past the end value. The loop
+            // ends and the variable keeps its last value.
+            match current_val.checked_add(step_val as i32) {
+                Some(next_val) => {
+                    self.variables.set_integer_var(var_name.clone(), next_val);
+                    f64::from(next_val)
+                }
+                None => f64::from(current_val) + step_val,
+            }
         } else {
             let current_val = self
                 .variables
@@ -1181,18 +1187,41 @@ impl Executor {
                 let right_val = self.eval_integer(right)?;
 
                 match op {
-                    BinaryOperator::Add => Ok(left_val + right_val),
-                    BinaryOperator::Subtract => Ok(left_val - right_val),
-                    BinaryOperator::Multiply => Ok(left_val * right_val),
+                    // An integer overflow gives "Too big". BBC BASIC changes to
+                    // real arithmetic here, which this interpreter does not do.
+                    BinaryOperator::Add => {
+                        left_val.checked_add(right_val).ok_or(BBCBasicError::TooBig)
+                    }
+                    BinaryOperator::Subtract => {
+                        left_val.checked_sub(right_val).ok_or(BBCBasicError::TooBig)
+                    }
+                    BinaryOperator::Multiply => {
+                        left_val.checked_mul(right_val).ok_or(BBCBasicError::TooBig)
+                    }
                     BinaryOperator::IntegerDivide => {
                         if right_val == 0 {
                             Err(BBCBasicError::DivisionByZero)
                         } else {
-                            Ok(left_val / right_val)
+                            left_val.checked_div(right_val).ok_or(BBCBasicError::TooBig)
                         }
                     }
-                    BinaryOperator::Modulo => Ok(left_val % right_val),
-                    BinaryOperator::Power => Ok(left_val.pow(right_val as u32)),
+                    BinaryOperator::Modulo => {
+                        if right_val == 0 {
+                            Err(BBCBasicError::DivisionByZero)
+                        } else {
+                            // The smallest integer MOD -1 is 0, with no overflow.
+                            Ok(left_val.wrapping_rem(right_val))
+                        }
+                    }
+                    // A negative exponent or an overflow gives a real result,
+                    // which converts to an integer or gives "Too big".
+                    BinaryOperator::Power => match u32::try_from(right_val)
+                        .ok()
+                        .and_then(|exponent| left_val.checked_pow(exponent))
+                    {
+                        Some(value) => Ok(value),
+                        None => real_to_integer(f64::from(left_val).powf(f64::from(right_val))),
+                    },
                     // Logical operators
                     BinaryOperator::And => Ok(left_val & right_val),
                     BinaryOperator::Or => Ok(left_val | right_val),
@@ -1202,13 +1231,17 @@ impl Executor {
                         if right_val < 0 {
                             return Err(BBCBasicError::IllegalFunction);
                         }
-                        Ok(left_val << right_val)
+                        // A shift of 32 places or more moves out all bits.
+                        Ok(left_val.checked_shl(right_val as u32).unwrap_or(0))
                     }
                     BinaryOperator::RightShift => {
                         if right_val < 0 {
                             return Err(BBCBasicError::IllegalFunction);
                         }
-                        Ok(left_val >> right_val)
+                        // A shift of 32 places or more leaves only the sign fill.
+                        Ok(left_val
+                            .checked_shr(right_val as u32)
+                            .unwrap_or(if left_val < 0 { -1 } else { 0 }))
                     }
                     _ => Err(BBCBasicError::IllegalFunction),
                 }
@@ -1217,7 +1250,7 @@ impl Executor {
                 use crate::parser::UnaryOperator;
                 let val = self.eval_integer(operand)?;
                 match op {
-                    UnaryOperator::Minus => Ok(-val),
+                    UnaryOperator::Minus => val.checked_neg().ok_or(BBCBasicError::TooBig),
                     UnaryOperator::Plus => Ok(val),
                     UnaryOperator::Not => Ok(if val == 0 { -1 } else { 0 }),
                 }
@@ -1460,7 +1493,7 @@ impl Executor {
                     });
                 }
                 let val = self.eval_integer(&args[0])?;
-                Ok(val.abs())
+                val.checked_abs().ok_or(BBCBasicError::TooBig)
             }
             "INT" => {
                 if args.len() != 1 {
