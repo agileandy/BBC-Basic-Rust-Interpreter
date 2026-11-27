@@ -158,6 +158,11 @@ pub enum Statement {
     Goto { line_number: u16 },
     /// GOSUB statement
     Gosub { line_number: u16 },
+    /// GOTO with a calculated line number, such as `GOTO (100 + X)`. The
+    /// runner evaluates the target when the statement runs.
+    GotoExpression { target: Expression },
+    /// GOSUB with a calculated line number, such as `GOSUB X * 10`
+    GosubExpression { target: Expression },
     /// RETURN statement (optionally with value for functions)
     Return { value: Option<Expression> },
     /// DIM statement for array dimensioning
@@ -987,51 +992,62 @@ fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
     Ok(Statement::Next { variables })
 }
 
+/// The target of a GOTO or a GOSUB
+enum JumpTarget {
+    Line(u16),
+    Calculated(Expression),
+}
+
+/// Parse the target after GOTO or GOSUB. A number constant must be the
+/// only token. A target that starts with a different token is an
+/// expression, as in BBC BASIC: `GOTO (100 + X)` or `GOSUB X * 10`.
+fn parse_jump_target(
+    tokens: &[Token],
+    keyword: &str,
+    line_number: Option<u16>,
+) -> Result<JumpTarget> {
+    let syntax_error = |message: String| BBCBasicError::SyntaxError {
+        message,
+        line: line_number,
+    };
+    match tokens {
+        [] => Err(syntax_error(format!(
+            "Expected line number after {}",
+            keyword
+        ))),
+        [Token::Integer(n)] => Ok(JumpTarget::Line(*n as u16)),
+        [Token::Integer(_), ..] => Err(syntax_error(format!(
+            "Expected end of statement after {} line number",
+            keyword
+        ))),
+        _ => {
+            let mut pos = 0;
+            let target = parse_expr_precedence(tokens, &mut pos, 0)
+                .map_err(|_| syntax_error(format!("Expected line number after {}", keyword)))?;
+            if pos != tokens.len() {
+                return Err(syntax_error(format!(
+                    "Expected end of statement after {} target",
+                    keyword
+                )));
+            }
+            Ok(JumpTarget::Calculated(target))
+        }
+    }
+}
+
 /// Parse GOTO statement
 fn parse_goto_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    if tokens.is_empty() {
-        return Err(BBCBasicError::SyntaxError {
-            message: "Expected line number after GOTO".to_string(),
-            line: line_number,
-        });
-    }
-
-    let line_num = match &tokens[0] {
-        Token::Integer(n) => *n as u16,
-        _ => {
-            return Err(BBCBasicError::SyntaxError {
-                message: "Expected line number after GOTO".to_string(),
-                line: line_number,
-            })
-        }
-    };
-
-    Ok(Statement::Goto {
-        line_number: line_num,
+    Ok(match parse_jump_target(tokens, "GOTO", line_number)? {
+        JumpTarget::Line(line_number) => Statement::Goto { line_number },
+        JumpTarget::Calculated(target) => Statement::GotoExpression { target },
     })
 }
 
 /// Parse GOSUB statement
 fn parse_gosub_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    if tokens.is_empty() {
-        return Err(BBCBasicError::SyntaxError {
-            message: "Expected line number after GOSUB".to_string(),
-            line: line_number,
-        });
-    }
-
-    let line_num = match &tokens[0] {
-        Token::Integer(n) => *n as u16,
-        _ => {
-            return Err(BBCBasicError::SyntaxError {
-                message: "Expected line number after GOSUB".to_string(),
-                line: line_number,
-            })
-        }
-    };
-
-    Ok(Statement::Gosub {
-        line_number: line_num,
+    Ok(match parse_jump_target(tokens, "GOSUB", line_number)? {
+        JumpTarget::Line(line_number) => Statement::Gosub { line_number },
+        JumpTarget::Calculated(target) => Statement::GosubExpression { target },
     })
 }
 
@@ -3527,6 +3543,50 @@ mod tests {
         let stmt = parse_statement(&line).unwrap();
 
         assert_eq!(stmt, Statement::Gosub { line_number: 1000 });
+    }
+
+    #[test]
+    fn test_parse_goto_with_calculated_target_in_brackets() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("GOTO (100 + X)").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        let target = parse_expression(&line.tokens[1..]).unwrap();
+        assert_eq!(stmt, Statement::GotoExpression { target });
+    }
+
+    #[test]
+    fn test_parse_gosub_with_calculated_target() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("GOSUB X * 10").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        let target = parse_expression(&line.tokens[1..]).unwrap();
+        assert_eq!(stmt, Statement::GosubExpression { target });
+    }
+
+    #[test]
+    fn test_parse_goto_number_then_more_tokens_is_syntax_error() {
+        use crate::tokenizer::tokenize;
+        for source in ["10 GOTO 100 + X", "10 GOSUB 100 + X"] {
+            let line = tokenize(source).unwrap();
+            match parse_statement(&line) {
+                Err(BBCBasicError::SyntaxError { line, .. }) => {
+                    assert_eq!(line, Some(10), "{}", source)
+                }
+                other => panic!("{:?} gave {:?}", source, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_goto_expression_with_extra_tokens_is_syntax_error() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("10 GOTO (100) X").unwrap();
+        match parse_statement(&line) {
+            Err(BBCBasicError::SyntaxError { line, .. }) => assert_eq!(line, Some(10)),
+            other => panic!("gave {:?}", other),
+        }
     }
 
     #[test]
