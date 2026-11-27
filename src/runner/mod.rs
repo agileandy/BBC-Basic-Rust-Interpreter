@@ -22,6 +22,8 @@ enum Flow {
     Jumped,
     /// Stop the program
     Stop,
+    /// Stop the program and leave the interpreter
+    Quit,
     /// A `=expr` statement ended a multi-line function
     FnReturn(Expression),
 }
@@ -167,6 +169,8 @@ enum BodyAbort {
     Fatal(String),
     /// END or STOP in the function body
     Stop,
+    /// QUIT in the function body
+    Quit,
 }
 
 /// What a failed function body run tells the main run loop.
@@ -201,10 +205,27 @@ impl From<String> for StepError {
     }
 }
 
+/// How a program run ended without an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOutcome {
+    /// The program ended (END, STOP or past its last line)
+    Ended,
+    /// The program ran QUIT. The caller leaves the interpreter.
+    Quit,
+}
+
 /// Run the stored program from its first line.
 ///
 /// Each line is parsed one time before the run starts.
 pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Result<(), String> {
+    run_program_with_outcome(executor, program).map(|_| ())
+}
+
+/// Run the stored program from its first line and tell how it ended.
+pub fn run_program_with_outcome(
+    executor: &mut Executor,
+    program: &mut ProgramStore,
+) -> Result<RunOutcome, String> {
     if program.is_empty() {
         return Err("No program to run".to_string());
     }
@@ -302,6 +323,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
             }
             Ok(Flow::Jumped) => continue,
             Ok(Flow::Stop) => break,
+            Ok(Flow::Quit) => return Ok(RunOutcome::Quit),
             Ok(Flow::FnReturn(_)) => {
                 return Err(format!("= without FN call at line {}", line_number));
             }
@@ -314,6 +336,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
 
         match (body.abort, error) {
             (Some(BodyAbort::Stop), _) => break,
+            (Some(BodyAbort::Quit), _) => return Ok(RunOutcome::Quit),
             (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
                 return Err(message);
             }
@@ -336,7 +359,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
         }
     }
 
-    Ok(())
+    Ok(RunOutcome::Ended)
 }
 
 /// Run the body of a multi-line function, from the statement after its DEF
@@ -370,6 +393,7 @@ fn run_function_body(
             }
             Ok(Flow::Jumped) => continue,
             Ok(Flow::Stop) => return abort_program(failure, line_number, BodyAbort::Stop),
+            Ok(Flow::Quit) => return abort_program(failure, line_number, BodyAbort::Quit),
             Ok(Flow::FnReturn(value)) => evaluate(executor, &value).map_err(StepError::Runtime),
             Err(error) => Err(error),
         };
@@ -450,6 +474,7 @@ fn step(
 
     match statement {
         Statement::End | Statement::Stop => Ok(Flow::Stop),
+        Statement::Quit => Ok(Flow::Quit),
         Statement::Goto {
             line_number: target,
         } => {

@@ -2,7 +2,7 @@ use bbc_basic_interpreter::{
     executor::Executor,
     parser::parse_line,
     program::ProgramStore,
-    runner::run_program,
+    runner::{run_program_with_outcome, RunOutcome},
     tokenizer::{detokenize, tokenize},
 };
 use std::io::{self, Write};
@@ -48,8 +48,12 @@ fn main() {
 
         // Handle special commands
         if input.eq_ignore_ascii_case("run") {
-            match run_program(&mut executor, &mut program) {
-                Ok(()) => {}
+            match run_program_with_outcome(&mut executor, &mut program) {
+                Ok(RunOutcome::Ended) => {}
+                Ok(RunOutcome::Quit) => {
+                    println!("Goodbye!");
+                    break;
+                }
                 Err(e) => println!("Error: {}", e),
             }
             continue;
@@ -97,11 +101,14 @@ fn main() {
         if input_upper.starts_with("CHAIN ") {
             match extract_filename(input) {
                 Ok(filename) => match load_program(&mut program, &filename) {
-                    Ok(_) => {
-                        if let Err(e) = run_program(&mut executor, &mut program) {
-                            println!("Error: {}", e);
+                    Ok(_) => match run_program_with_outcome(&mut executor, &mut program) {
+                        Ok(RunOutcome::Ended) => {}
+                        Ok(RunOutcome::Quit) => {
+                            println!("Goodbye!");
+                            break;
                         }
-                    }
+                        Err(e) => println!("Error: {}", e),
+                    },
                     Err(e) => println!("Error: {}", e),
                 },
                 Err(e) => println!("Error: {}", e),

@@ -453,9 +453,6 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // STOP statement
         Token::Keyword(0xFA) => Ok(Statement::Stop),
 
-        // QUIT statement
-        Token::Keyword(0x98) => Ok(Statement::Quit),
-
         // REM statement (comment)
         Token::Keyword(0xF4) => {
             // Everything after REM is a comment
@@ -547,6 +544,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x93 => parse_rectangle_statement(&tokens[1..], line.line_number),
             // ELLIPSE statement
             0x9D => parse_ellipse_statement(&tokens[1..], line.line_number),
+            // QUIT statement
+            0x98 => Ok(Statement::Quit),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown extended statement: {:?}", tokens[0]),
                 line: line.line_number,
@@ -3343,8 +3342,8 @@ mod tests {
 
     #[test]
     fn test_parse_quit() {
-        // RED: Test that QUIT is parsed correctly
-        let line = TokenizedLine::new(None, vec![Token::Keyword(0x98)]); // QUIT token
+        // Use the token that the tokenizer gives for QUIT
+        let line = crate::tokenizer::tokenize("QUIT").unwrap();
         let stmt = parse_statement(&line).unwrap();
         assert_eq!(stmt, Statement::Quit);
     }
