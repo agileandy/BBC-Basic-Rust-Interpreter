@@ -8,9 +8,22 @@ use crate::error::Result;
 use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
 
 /// The tokens as the user typed them, for an error message. An empty list
-/// shows as "end of line".
+/// shows as "end of line". A whole real number shows with no exponent, so
+/// `2.0` shows as `2`, not as the LIST form `2E0`.
 fn tokens_text(tokens: &[Token]) -> String {
-    let line = TokenizedLine::new(None, tokens.to_vec());
+    let tokens = tokens
+        .iter()
+        .map(|token| match token {
+            Token::Real(value)
+                if value.fract() == 0.0
+                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(value) =>
+            {
+                Token::Integer(*value as i32)
+            }
+            _ => token.clone(),
+        })
+        .collect();
+    let line = TokenizedLine::new(None, tokens);
     match detokenize(&line) {
         Ok(text) if !text.is_empty() => text,
         _ => "end of line".to_string(),
@@ -534,8 +547,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         return Ok(Statement::Empty);
     }
 
-    // END, STOP, CLS and CLEAR take no argument
-    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8), unexpected, ..] = tokens.as_slice() {
+    // END, STOP, CLS, CLEAR and REPORT take no argument
+    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8 | 0xF6), unexpected, ..] = tokens.as_slice() {
         return Err(BBCBasicError::SyntaxError {
             message: format!(
                 "Unexpected {} after statement",

@@ -259,6 +259,8 @@ impl Cursor<'_> {
 enum BodyAbort {
     /// An error that stops the program
     Fatal(String),
+    /// A BASIC error that stops the program (see `StepError::FatalError`)
+    FatalError(BBCBasicError),
     /// END or STOP in the function body
     Stop,
     /// QUIT in the function body
@@ -283,6 +285,10 @@ enum StepError {
     Runtime(BBCBasicError),
     /// An error that stops the program.
     Fatal(String),
+    /// A BASIC error that stops the program. ON ERROR does not catch it.
+    /// The run loop adds the line, which is the line of a function body
+    /// statement if the error is in a function call.
+    FatalError(BBCBasicError),
 }
 
 impl From<BBCBasicError> for StepError {
@@ -552,6 +558,17 @@ fn error_text(error: &BBCBasicError, line_key: u32) -> String {
     }
 }
 
+/// Set ERR, ERL and the text for REPORT to an error. ERL is 0 for the
+/// typed line.
+fn record_error(executor: &mut Executor, error: &BBCBasicError, line_key: u32) {
+    let error_line = u16::try_from(line_key).unwrap_or(0);
+    executor.set_last_error(
+        error_number(error),
+        error_line,
+        error_text(error, TYPED_LINE),
+    );
+}
+
 /// Run from `start` until the run stops. A BASIC error in a stored line goes
 /// to the ON ERROR handler.
 fn run_lines(
@@ -605,17 +622,21 @@ fn run_lines(
             (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
                 return Err(message);
             }
+            (Some(BodyAbort::FatalError(e)), _) | (None, StepError::FatalError(e)) => {
+                record_error(executor, &e, error_line);
+                return Err(error_text(&e, error_line));
+            }
             (None, StepError::Runtime(e)) => {
+                // Set ERL, ERR and the text for REPORT, also when no
+                // handler catches the error
+                record_error(executor, &e, error_line);
+
                 // Handle an error in a stored line with the ON ERROR handler
                 // if one is set
                 let handler = executor.get_error_handler();
-                let (Some(handler_line), Ok(stored_line)) = (handler, u16::try_from(error_line))
-                else {
+                let (Some(handler_line), Ok(_)) = (handler, u16::try_from(error_line)) else {
                     return Err(error_text(&e, error_line));
                 };
-
-                // Set error information (ERL, ERR and the text for REPORT)
-                executor.set_last_error(error_number(&e), stored_line, error_text(&e, TYPED_LINE));
 
                 if !cursor.goto_line(handler_line) {
                     return Err(format!(
@@ -683,6 +704,9 @@ fn run_function_body(
             }
             Err(StepError::Fatal(message)) => {
                 abort_program(failure, line_number, BodyAbort::Fatal(message))
+            }
+            Err(StepError::FatalError(e)) => {
+                abort_program(failure, line_number, BodyAbort::FatalError(e))
             }
         };
     }
@@ -806,7 +830,7 @@ fn step(
             // BBC BASIC uses 1-based indexing
             let index = executor
                 .eval_integer(expression)
-                .map_err(|e| error_text(&e, line_number))?;
+                .map_err(StepError::FatalError)?;
 
             if index >= 1 && (index as usize) <= targets.len() {
                 let target = targets[(index - 1) as usize];
@@ -826,7 +850,7 @@ fn step(
             // BBC BASIC uses 1-based indexing
             let index = executor
                 .eval_integer(expression)
-                .map_err(|e| error_text(&e, line_number))?;
+                .map_err(StepError::FatalError)?;
 
             if index >= 1 && (index as usize) <= targets.len() {
                 let target = targets[(index - 1) as usize];
@@ -881,7 +905,7 @@ fn step(
                         target: param_name,
                         expression: arg_expr,
                     })
-                    .map_err(|e| error_text(&e, line_number))?;
+                    .map_err(StepError::FatalError)?;
             }
 
             executor.push_gosub_return(position);
@@ -922,7 +946,7 @@ fn step(
         Statement::Until { condition } => {
             let repeat_position = executor
                 .check_until(condition)
-                .map_err(|e| error_text(&e, line_number))?;
+                .map_err(StepError::FatalError)?;
             if let Some(repeat_position) = repeat_position {
                 // Condition false: loop back to the statement after REPEAT
                 program.goto(repeat_position);
@@ -932,7 +956,7 @@ fn step(
         Statement::While { condition } => {
             let entered = executor
                 .push_while(position, condition)
-                .map_err(|e| error_text(&e, line_number))?;
+                .map_err(StepError::FatalError)?;
             if entered.is_none() {
                 // Condition false: scan forward to the matching ENDWHILE
                 let mut depth = 1;
@@ -972,7 +996,7 @@ fn step(
             };
             let loop_position = executor
                 .check_endwhile(condition)
-                .map_err(|e| error_text(&e, line_number))?;
+                .map_err(StepError::FatalError)?;
             if let Some(loop_position) = loop_position {
                 // Condition still true: loop back to the statement after WHILE
                 program.goto(loop_position);

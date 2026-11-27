@@ -320,6 +320,18 @@ fn test_leftover_token_after_expression_shows_as_typed() {
 }
 
 #[test]
+fn test_leftover_real_number_shows_with_no_exponent() {
+    assert_eq!(
+        error_of(&["10 A = 1.0 2.0"]),
+        "Syntax error at line 10: Unexpected 2 after expression"
+    );
+    assert_eq!(
+        error_of(&["10 A = 1.0 2.5"]),
+        "Syntax error at line 10: Unexpected 2.5 after expression"
+    );
+}
+
+#[test]
 fn test_leftover_token_after_statement_shows_as_typed() {
     assert_eq!(
         error_of(&["10 END 5"]),
@@ -372,6 +384,145 @@ fn test_report_with_no_error_prints_nothing() {
     let (result, output) = run(&["10 REPORT", "20 PRINT \"X\""]);
     assert_eq!(result, Ok(()));
     assert_eq!(output, "X\n");
+}
+
+#[test]
+fn test_report_takes_no_argument() {
+    assert_eq!(
+        error_of(&["10 REPORT 5"]),
+        "Syntax error at line 10: Unexpected 5 after statement"
+    );
+}
+
+/// Store the program lines, RUN the program if `run_first`, then run each
+/// typed line with the same executor. Return the output after the RUN.
+/// The session is in a thread with a time limit.
+fn session(program_lines: &[&str], run_first: bool, typed_lines: &[&str]) -> String {
+    let program_lines: Vec<String> = program_lines.iter().map(|l| l.to_string()).collect();
+    let typed_lines: Vec<String> = typed_lines.iter().map(|l| l.to_string()).collect();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        for line in &program_lines {
+            program.store_line(tokenize(line).expect("line tokenizes"));
+        }
+        if run_first {
+            let _ = run_program(&mut executor, &mut program);
+        }
+        executor.clear_output();
+        for line in &typed_lines {
+            let line = tokenize(line).expect("typed line tokenizes");
+            let _ = run_typed_line(&mut executor, &program, &line);
+        }
+        let _ = sender.send(executor.get_output().to_string());
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the session ran for more than 5 seconds")
+}
+
+#[test]
+fn test_report_after_an_uncaught_typed_line_error() {
+    assert_eq!(
+        session(&[], false, &["PRINT 1 / 0", "REPORT"]),
+        "Division by zero"
+    );
+}
+
+#[test]
+fn test_report_after_a_run_that_stopped_with_an_error() {
+    assert_eq!(
+        session(
+            &["10 PRINT QQ%"],
+            true,
+            &["REPORT", "PRINT \" \"; ERL; \" \"; ERR"]
+        ),
+        "No such variable: QQ% 10 26\n"
+    );
+}
+
+// An error in a function body gives the line of the body statement, also
+// when the call is in a loop condition, an ON expression or a PROC argument
+
+/// The function body of these tests. FNf divides by zero at line 60.
+const FAILING_FUNCTION: [&str; 3] = ["50 DEF FNf(x)", "60 x = 1 / 0", "70 = x"];
+
+fn error_with_failing_function(lines: &[&str]) -> String {
+    let mut source = lines.to_vec();
+    source.extend(FAILING_FUNCTION);
+    error_of(&source)
+}
+
+#[test]
+fn test_function_error_in_until_condition_has_the_body_line() {
+    assert_eq!(
+        error_with_failing_function(&["10 REPEAT", "20 UNTIL FNf(1)", "30 END"]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_function_error_in_while_condition_has_the_body_line() {
+    assert_eq!(
+        error_with_failing_function(&["10 WHILE FNf(1)", "20 ENDWHILE", "30 END"]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_function_error_at_endwhile_has_the_body_line() {
+    // FNg(0) is 1. At ENDWHILE, FNg(1) divides by zero at line 60.
+    assert_eq!(
+        error_of(&[
+            "10 N = 0",
+            "20 WHILE FNg(N)",
+            "25 N = N + 1",
+            "30 ENDWHILE",
+            "40 END",
+            "50 DEF FNg(x)",
+            "60 y = 1 / (1 - x)",
+            "70 = 1",
+        ]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_function_error_in_on_goto_has_the_body_line() {
+    assert_eq!(
+        error_with_failing_function(&["10 ON FNf(1) GOTO 30", "30 END"]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_function_error_in_on_gosub_has_the_body_line() {
+    assert_eq!(
+        error_with_failing_function(&["10 ON FNf(1) GOSUB 30", "20 END", "30 RETURN"]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_function_error_in_proc_argument_has_the_body_line() {
+    assert_eq!(
+        error_with_failing_function(&[
+            "10 PROCp(FNf(1))",
+            "20 END",
+            "30 DEF PROCp(a)",
+            "40 ENDPROC"
+        ]),
+        "Division by zero at line 60"
+    );
+}
+
+#[test]
+fn test_error_in_until_condition_has_the_until_line() {
+    assert_eq!(
+        error_of(&["10 REPEAT", "20 UNTIL 1 / 0"]),
+        "Division by zero at line 20"
+    );
 }
 
 // The real binary
