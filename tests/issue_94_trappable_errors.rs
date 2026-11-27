@@ -166,7 +166,46 @@ fn test_unknown_built_in_name_keeps_syntax_error() {
     );
 }
 
+#[test]
+fn test_undefined_fn_with_built_in_name_does_not_call_the_built_in() {
+    assert_eq!(trapped_output(&["20 PRINT FNSIN(0)"]), "29 20\n");
+    assert_eq!(
+        error_of(&["20 PRINT FNSIN(0)"]),
+        "No such FN/PROC: FNSIN at line 20"
+    );
+}
+
 // D1: an error in a WHILE, ENDWHILE, ON or PROC argument expression
+
+#[test]
+fn test_error_in_until_condition_is_trapped() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 REPEAT",
+        "30 UNTIL 1/0",
+        "40 END",
+        "100 PRINT \"caught \"; ERR; \" \"; ERL",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "caught 18 30\n");
+    assert_eq!(
+        error_of(&["20 REPEAT", "30 UNTIL 1/0"]),
+        "Division by zero at line 30"
+    );
+}
+
+#[test]
+fn test_error_in_fn_body_called_by_until_gives_body_line() {
+    let body = [
+        "20 REPEAT",
+        "30 UNTIL FNa",
+        "40 END",
+        "50 DEF FNa",
+        "60 = 1 / 0",
+    ];
+    assert_eq!(trapped_output(&body), "18 60\n");
+    assert_eq!(error_of(&body), "Division by zero at line 60");
+}
 
 #[test]
 fn test_error_in_while_condition_is_trapped() {

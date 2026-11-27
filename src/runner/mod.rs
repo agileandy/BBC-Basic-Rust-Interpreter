@@ -259,8 +259,6 @@ impl Cursor<'_> {
 enum BodyAbort {
     /// An error that stops the program
     Fatal(String),
-    /// A BASIC error that stops the program (see `StepError::FatalError`)
-    FatalError(BBCBasicError),
     /// END or STOP in the function body
     Stop,
     /// QUIT in the function body
@@ -285,10 +283,6 @@ enum StepError {
     Runtime(BBCBasicError),
     /// An error that stops the program.
     Fatal(String),
-    /// A BASIC error that stops the program. ON ERROR does not catch it.
-    /// The run loop adds the line, which is the line of a function body
-    /// statement if the error is in a function call.
-    FatalError(BBCBasicError),
 }
 
 impl From<BBCBasicError> for StepError {
@@ -625,10 +619,6 @@ fn run_lines(
             (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
                 return Err(message);
             }
-            (Some(BodyAbort::FatalError(e)), _) | (None, StepError::FatalError(e)) => {
-                record_error(executor, &e, error_line);
-                return Err(error_text(&e, error_line));
-            }
             (None, StepError::Runtime(e)) => {
                 // Set ERL, ERR and the text for REPORT, also when no
                 // handler catches the error
@@ -710,9 +700,6 @@ fn run_function_body(
             }
             Err(StepError::Fatal(message)) => {
                 abort_program(failure, line_number, BodyAbort::Fatal(message))
-            }
-            Err(StepError::FatalError(e)) => {
-                abort_program(failure, line_number, BodyAbort::FatalError(e))
             }
         };
     }
@@ -951,13 +938,7 @@ fn step(
             Ok(Flow::Next)
         }
         Statement::Until { condition } => {
-            let repeat_position = executor
-                .check_until(condition)
-                .map_err(|error| match error {
-                    // No open REPEAT loop: ON ERROR can catch this error
-                    BBCBasicError::NoRepeat => StepError::Runtime(error),
-                    _ => StepError::FatalError(error),
-                })?;
+            let repeat_position = executor.check_until(condition)?;
             if let Some(repeat_position) = repeat_position {
                 // Condition false: loop back to the statement after REPEAT
                 program.goto(repeat_position);
