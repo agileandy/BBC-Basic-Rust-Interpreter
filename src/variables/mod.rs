@@ -127,6 +127,9 @@ impl Variable {
 #[derive(Debug, Clone)]
 pub struct VariableStore {
     variables: HashMap<String, Variable>,
+    /// Arrays, apart from scalars of the same name. `None` is an array that
+    /// LOCAL declared but no DIM has made yet.
+    arrays: HashMap<String, Option<Variable>>,
 }
 
 impl VariableStore {
@@ -134,6 +137,7 @@ impl VariableStore {
     pub fn new() -> Self {
         Self {
             variables: HashMap::new(),
+            arrays: HashMap::new(),
         }
     }
 
@@ -203,8 +207,26 @@ impl VariableStore {
             VarType::String => Variable::new_string_array(dimensions),
         };
 
-        self.variables.insert(name, variable);
+        self.arrays.insert(name, Some(variable));
         Ok(())
+    }
+
+    /// Get a dimensioned array by name
+    fn get_array(&self, name: &str) -> Result<&Variable> {
+        match self.arrays.get(name) {
+            Some(Some(array)) => Ok(array),
+            Some(None) => Err(BBCBasicError::ArrayNotDimensioned(name.to_string())),
+            None => Err(BBCBasicError::NoSuchVariable(name.to_string())),
+        }
+    }
+
+    /// Get a dimensioned array by name (mutable)
+    fn get_array_mut(&mut self, name: &str) -> Result<&mut Variable> {
+        match self.arrays.get_mut(name) {
+            Some(Some(array)) => Ok(array),
+            Some(None) => Err(BBCBasicError::ArrayNotDimensioned(name.to_string())),
+            None => Err(BBCBasicError::NoSuchVariable(name.to_string())),
+        }
     }
 
     /// Get a variable by name (immutable)
@@ -219,9 +241,7 @@ impl VariableStore {
 
     /// Get an array element (immutable)
     pub fn get_array_element(&self, name: &str, indices: &[usize]) -> Result<Variable> {
-        let variable = self
-            .get_variable(name)
-            .ok_or(BBCBasicError::NoSuchVariable(name.to_string()))?;
+        let variable = self.get_array(name)?;
 
         let linear_index = variable.calculate_index(indices)?;
 
@@ -242,9 +262,7 @@ impl VariableStore {
         indices: &[usize],
         value: Variable,
     ) -> Result<()> {
-        let variable = self
-            .get_variable_mut(name)
-            .ok_or(BBCBasicError::NoSuchVariable(name.to_string()))?;
+        let variable = self.get_array_mut(name)?;
 
         let linear_index = variable.calculate_index(indices)?;
 
@@ -267,19 +285,38 @@ impl VariableStore {
         self.variables.contains_key(name)
     }
 
-    /// Put back a saved variable as it was, including array dimensions and values
+    /// Put back a saved scalar variable as it was
     pub fn restore_variable(&mut self, name: String, variable: Variable) {
         self.variables.insert(name, variable);
     }
 
-    /// Remove a variable
-    pub fn remove_variable(&mut self, name: &str) {
-        self.variables.remove(name);
+    /// Copy the array entry of a name, for LOCAL. The outer `None` means no
+    /// array of this name exists. The inner `None` means it is not dimensioned.
+    pub fn save_array(&self, name: &str) -> Option<Option<Variable>> {
+        self.arrays.get(name).cloned()
     }
 
-    /// Clear all variables
+    /// Declare a LOCAL array that is not dimensioned yet
+    pub fn declare_local_array(&mut self, name: String) {
+        self.arrays.insert(name, None);
+    }
+
+    /// Put back an array entry from `save_array`, or remove the array if there was none
+    pub fn restore_array(&mut self, name: String, saved: Option<Option<Variable>>) {
+        match saved {
+            Some(entry) => {
+                self.arrays.insert(name, entry);
+            }
+            None => {
+                self.arrays.remove(&name);
+            }
+        }
+    }
+
+    /// Clear all variables and arrays
     pub fn clear(&mut self) {
         self.variables.clear();
+        self.arrays.clear();
     }
 }
 

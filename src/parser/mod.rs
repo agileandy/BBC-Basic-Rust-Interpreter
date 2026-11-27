@@ -1981,14 +1981,17 @@ fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
         // Expect variable name
         match &tokens[pos] {
             Token::Identifier(name) => {
-                variables.push(name.clone());
                 pos += 1;
-                // An array is named NAME(); DIM keys arrays by the bare name
+                // An array is named NAME(). Keep the brackets so that LOCAL A%()
+                // and LOCAL A% stay different variables.
                 if pos + 1 < tokens.len()
                     && is_paren(&tokens[pos], '(')
                     && is_paren(&tokens[pos + 1], ')')
                 {
+                    variables.push(format!("{name}()"));
                     pos += 2;
+                } else {
+                    variables.push(name.clone());
                 }
             }
             _ => {
@@ -3011,7 +3014,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_local_array_uses_bare_name() {
+    fn test_parse_local_array_keeps_brackets() {
         use crate::tokenizer::tokenize;
         let line = tokenize("LOCAL A%(), B, C$()").unwrap();
         let stmt = parse_statement(&line).unwrap();
@@ -3019,7 +3022,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Local {
-                variables: vec!["A%".to_string(), "B".to_string(), "C$".to_string()],
+                variables: vec!["A%()".to_string(), "B".to_string(), "C$()".to_string()],
             }
         );
     }
