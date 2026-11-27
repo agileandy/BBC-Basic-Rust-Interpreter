@@ -166,10 +166,11 @@ fn test_channel_text() {
 
 #[test]
 fn test_file_not_found_text_has_the_name() {
-    assert_eq!(
-        error_of(&["10 X = OPENIN(\"no-such-file-74.txt\")"]),
-        "File not found: no-such-file-74.txt at line 10"
-    );
+    // Since issue #105, OPENIN gives 0 for a missing file and no program
+    // statement gives this error, so the test checks the error text only.
+    let error =
+        bbc_basic_interpreter::BBCBasicError::FileNotFound("no-such-file-74.txt".to_string());
+    assert_eq!(error.to_string(), "File not found: no-such-file-74.txt");
 }
 
 #[test]

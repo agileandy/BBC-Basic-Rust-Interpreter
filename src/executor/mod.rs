@@ -191,6 +191,8 @@ enum FileHandle {
     Input(BufReader<File>),
     /// File opened for writing (OPENOUT)
     Output(BufWriter<File>),
+    /// File opened for reading and writing (OPENUP)
+    Update(BufReader<File>),
 }
 
 /// Local variable frame for procedure/function scoping
@@ -2100,6 +2102,17 @@ impl Executor {
                 let filename = self.eval_string(&args[0])?;
                 self.open_file_for_reading(&filename)
             }
+            "OPENUP" => {
+                // Open file for reading and writing, returns file handle
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "OPENUP requires 1 argument (filename)".to_string(),
+                        line: None,
+                    });
+                }
+                let filename = self.eval_string(&args[0])?;
+                self.open_file_for_update(&filename)
+            }
             "OPENOUT" => {
                 // Open file for writing, returns file handle
                 if args.len() != 1 {
@@ -3148,26 +3161,56 @@ impl Executor {
         }
     }
 
-    /// Open a file for reading (OPENIN)
+    /// Open a file for reading (OPENIN).
+    /// Gives 0, as BBC BASIC does, when the file cannot be opened.
     fn open_file_for_reading(&mut self, filename: &str) -> Result<i32> {
+        self.open_existing_file(File::open(filename), FileHandle::Input)
+    }
+
+    /// Open an existing file for reading and writing (OPENUP), with the
+    /// pointer at 0. Gives 0 when the file cannot be opened.
+    fn open_file_for_update(&mut self, filename: &str) -> Result<i32> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(filename);
+        self.open_existing_file(file, FileHandle::Update)
+    }
+
+    /// Store a file that OPENIN or OPENUP opened and give its handle,
+    /// or give 0 if the open failed.
+    fn open_existing_file(
+        &mut self,
+        file: std::io::Result<File>,
+        kind: fn(BufReader<File>) -> FileHandle,
+    ) -> Result<i32> {
         // Check if we've hit the maximum number of open files (BBC BASIC limit: ~255)
         if self.open_files.len() >= 255 {
             return Err(BBCBasicError::TooManyOpenFiles);
         }
 
-        // Try to open the file
-        let file =
-            File::open(filename).map_err(|_| BBCBasicError::FileNotFound(filename.to_string()))?;
-        let reader = BufReader::new(file);
+        let Ok(file) = file else {
+            return Ok(0);
+        };
 
         // Allocate a handle
         let handle = self.next_file_handle;
         self.next_file_handle += 1;
 
         // Store the file handle
-        self.open_files.insert(handle, FileHandle::Input(reader));
+        self.open_files.insert(handle, kind(BufReader::new(file)));
 
         Ok(handle)
+    }
+
+    /// Write bytes at the pointer of an OPENUP file.
+    fn write_update(reader: &mut BufReader<File>, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Seek;
+        // A seek to the logical position drops the read buffer, so that the
+        // write goes to the pointer and not to the end of the buffer.
+        let pos = reader.stream_position()?;
+        reader.seek(std::io::SeekFrom::Start(pos))?;
+        reader.get_mut().write_all(bytes)
     }
 
     /// Open a file for writing (OPENOUT)
@@ -3202,7 +3245,7 @@ impl Executor {
 
         // Only input files can be tested for EOF
         match file_handle {
-            FileHandle::Input(reader) => {
+            FileHandle::Input(reader) | FileHandle::Update(reader) => {
                 // Check if we're at EOF by trying to fill the buffer
                 // BBC BASIC EOF# returns -1 (TRUE) if at EOF, 0 (FALSE) otherwise
                 Ok(if reader.fill_buf().map(|b| b.is_empty()).unwrap_or(true) {
@@ -3272,9 +3315,13 @@ impl Executor {
             .get_mut(&handle)
             .ok_or(BBCBasicError::ChannelNotOpen(handle))?;
 
-        // Only output files can be written to
+        // Only output and update files can be written to
         let writer = match file_handle {
             FileHandle::Output(writer) => writer,
+            FileHandle::Update(reader) => {
+                return Self::write_update(reader, output.as_bytes())
+                    .map_err(|e| BBCBasicError::DiskError(format!("Write error: {}", e)));
+            }
             FileHandle::Input(_) => return Err(BBCBasicError::BadCall),
         };
 
@@ -3303,7 +3350,7 @@ impl Executor {
 
         // Only input files can be read from
         let reader = match file_handle {
-            FileHandle::Input(reader) => reader,
+            FileHandle::Input(reader) | FileHandle::Update(reader) => reader,
             FileHandle::Output(_) => return Err(BBCBasicError::BadCall),
         };
 
@@ -3351,6 +3398,12 @@ impl Executor {
         // Evaluate the handle
         let handle = self.eval_integer(handle_expr)?;
 
+        // CLOSE#0 closes all open files, as in BBC BASIC
+        if handle == 0 {
+            self.open_files.clear();
+            return Ok(());
+        }
+
         // Remove the file handle (this closes the file)
         self.open_files
             .remove(&handle)
@@ -3372,7 +3425,7 @@ impl Executor {
 
         // BGET# only works on input files
         match file_handle {
-            FileHandle::Input(reader) => {
+            FileHandle::Input(reader) | FileHandle::Update(reader) => {
                 // Read a single byte
                 let mut buf = [0u8; 1];
                 match reader.read_exact(&mut buf) {
@@ -3419,6 +3472,8 @@ impl Executor {
 
                 Ok(())
             }
+            FileHandle::Update(reader) => Self::write_update(reader, &[(value % 256) as u8])
+                .map_err(|e| BBCBasicError::DiskError(e.to_string())),
             FileHandle::Input(_) => {
                 Err(BBCBasicError::TypeMismatch) // Cannot write to input file
             }
@@ -3437,7 +3492,7 @@ impl Executor {
 
         // Get current position from the underlying file
         match file_handle {
-            FileHandle::Input(reader) => {
+            FileHandle::Input(reader) | FileHandle::Update(reader) => {
                 let pos = reader
                     .stream_position()
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
@@ -3470,7 +3525,7 @@ impl Executor {
         // Seek to the specified position
         let pos = position as u64;
         match file_handle {
-            FileHandle::Input(reader) => {
+            FileHandle::Input(reader) | FileHandle::Update(reader) => {
                 reader
                     .seek(std::io::SeekFrom::Start(pos))
                     .map_err(|e| BBCBasicError::DiskError(e.to_string()))?;
@@ -3497,7 +3552,7 @@ impl Executor {
 
         // Get file size by seeking to end
         match file_handle {
-            FileHandle::Input(reader) => {
+            FileHandle::Input(reader) | FileHandle::Update(reader) => {
                 // Save current position
                 let current_pos = reader
                     .stream_position()
@@ -5690,16 +5745,13 @@ mod tests {
     }
 
     #[test]
-    fn test_openin_fails_on_missing_file() {
-        // RED: Test OPENIN returns FileNotFound error
+    fn test_openin_gives_zero_on_missing_file() {
+        // Issue #105: OPENIN gives 0 for a file that is not there, as BBC BASIC does
         let mut executor = Executor::new();
 
         let result = executor.open_file_for_reading("nonexistent_file.txt");
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            BBCBasicError::FileNotFound(_)
-        ));
+        assert_eq!(result, Ok(0));
+        assert!(executor.open_files.is_empty());
     }
 
     #[test]
