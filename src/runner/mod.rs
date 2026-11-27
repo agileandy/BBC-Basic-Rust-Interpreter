@@ -125,6 +125,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
     // This lets READ access DATA regardless of program flow (GOTO, etc.)
     executor.reset_data();
     executor.clear_procedures();
+    executor.clear_functions();
 
     // First pass: parse each line, collect DATA statements and procedure definitions
     let mut statements: HashMap<u16, Statement> = HashMap::new();

@@ -2155,6 +2155,13 @@ impl Executor {
         self.procedures.clear();
     }
 
+    /// Clear all function definitions and the function body runner (used
+    /// at the start of a run, so that a removed DEF FN is not callable)
+    pub fn clear_functions(&mut self) {
+        self.functions.clear();
+        self.function_body_runner = BodyRunnerSlot::default();
+    }
+
     /// Set error handler (ON ERROR GOTO line)
     pub fn set_error_handler(&mut self, line_number: u16) {
         self.error_handler = Some(line_number);
@@ -2292,17 +2299,24 @@ impl Executor {
 
         let local_depth = self.local_stack.len();
         let return_depth = self.return_stack.len();
+        let for_depth = self.for_loops.len();
+        let repeat_depth = self.repeat_stack.len();
+        let while_depth = self.while_stack.len();
 
         // Enter local scope for function
         self.enter_local_scope();
         let result = self.run_function(&func, values, eval);
 
         // Exit local scope (restore variables), also after an error in the
-        // function. Scopes and returns that the body did not close go too.
+        // function. Scopes, returns and loops that the body did not close go
+        // too (for example a `=` line inside a FOR loop).
         while self.local_stack.len() > local_depth {
             self.exit_local_scope()?;
         }
         self.return_stack.truncate(return_depth);
+        self.for_loops.truncate(for_depth);
+        self.repeat_stack.truncate(repeat_depth);
+        self.while_stack.truncate(while_depth);
 
         result
     }

@@ -1,6 +1,7 @@
 //! Tests for functions that have more than one line (issue 6).
 
 use bbc_basic_interpreter::executor::Executor;
+use bbc_basic_interpreter::parser::parse_statement;
 use bbc_basic_interpreter::program::ProgramStore;
 use bbc_basic_interpreter::runner::run_program;
 use bbc_basic_interpreter::tokenizer::tokenize;
@@ -193,6 +194,116 @@ fn test_main_run_reaching_function_end_line_gives_error() {
 
     assert_eq!(result, Err("= without FN call at line 30".to_string()));
     assert_eq!(output, "BODY\n");
+}
+
+#[test]
+fn test_result_inside_for_loop_does_not_leave_loop_for_caller_next() {
+    // The bare NEXT on line 30 must see the loop of line 10, not the body loop
+    let (result, output) = run(&[
+        "10 FOR I% = 1 TO 3",
+        "20 PRINT FNfirst(I%)",
+        "30 NEXT",
+        "40 PRINT \"DONE\"",
+        "50 END",
+        "100 DEF FNfirst(N%)",
+        "110 LOCAL J%",
+        "120 FOR J% = 1 TO 10",
+        "130 IF J% > N% THEN = J%",
+        "140 NEXT J%",
+        "150 = 0",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "2\n3\n4\nDONE\n");
+}
+
+#[test]
+fn test_result_inside_repeat_loop_does_not_leave_loop_for_caller_until() {
+    let (result, output) = run(&[
+        "10 FOR I% = 1 TO 3",
+        "20 R% = 0",
+        "30 REPEAT",
+        "40 R% = R% + 1",
+        "50 PRINT FNcount(I%)",
+        "60 UNTIL R% = 2",
+        "70 NEXT",
+        "80 PRINT \"DONE\"",
+        "90 END",
+        "100 DEF FNcount(N%)",
+        "110 LOCAL K%",
+        "120 REPEAT",
+        "130 K% = K% + 1",
+        "140 IF K% >= N% THEN = K% * 10",
+        "150 UNTIL 0",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "10\n10\n20\n20\n30\n30\nDONE\n");
+}
+
+#[test]
+fn test_result_inside_while_loop_does_not_leave_loop_for_caller_endwhile() {
+    let (result, output) = run(&[
+        "10 I% = 0",
+        "20 WHILE I% < 3",
+        "30 I% = I% + 1",
+        "40 PRINT FNhalf(I% * 2)",
+        "50 ENDWHILE",
+        "60 PRINT \"DONE\"",
+        "70 END",
+        "100 DEF FNhalf(N%)",
+        "110 LOCAL H%",
+        "120 WHILE 1",
+        "130 H% = H% + 1",
+        "140 IF H% * 2 >= N% THEN = H%",
+        "150 ENDWHILE",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "1\n2\n3\nDONE\n");
+}
+
+#[test]
+fn test_removed_function_is_unknown_on_next_run() {
+    let mut executor = Executor::new();
+    let mut program = ProgramStore::new();
+    for line in [
+        "10 A = FNa",
+        "20 PRINT A",
+        "30 END",
+        "100 DEF FNa",
+        "110 = 5",
+    ] {
+        program.store_line(tokenize(line).expect("line tokenizes"));
+    }
+    assert_eq!(run_program(&mut executor, &mut program), Ok(()));
+    assert_eq!(executor.get_output(), "5\n");
+
+    // Remove the DEF line, then run again with the same executor
+    program.delete_line(100);
+    let result = run_program(&mut executor, &mut program);
+
+    assert_eq!(
+        result,
+        Err(
+            "Runtime error at line 10: SyntaxError { message: \"Unknown function: a\", line: None }"
+                .to_string()
+        )
+    );
+}
+
+#[test]
+fn test_single_line_function_in_immediate_mode_without_run() {
+    let mut executor = Executor::new();
+    for line in ["DEF FNsq(X) = X * X", "PRINT FNsq(3)"] {
+        let statement =
+            parse_statement(&tokenize(line).expect("line tokenizes")).expect("line parses");
+        executor
+            .execute_statement(&statement)
+            .expect("statement runs");
+    }
+
+    assert_eq!(executor.get_output(), "9\n");
 }
 
 #[test]
