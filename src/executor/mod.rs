@@ -307,8 +307,16 @@ const DEFAULT_OPEN_FILE_LIMIT: usize = 255;
 enum ReturnKind {
     /// GOSUB or ON GOSUB: RETURN goes back
     Gosub,
-    /// A PROC call: ENDPROC goes back
-    Proc,
+    /// A PROC call: ENDPROC goes back and closes the loops above these depths
+    Proc(LoopDepths),
+}
+
+/// The depths of the FOR, REPEAT and WHILE stacks at a call
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoopDepths {
+    for_depth: usize,
+    repeat_depth: usize,
+    while_depth: usize,
 }
 
 /// BBC BASIC statement executor
@@ -3063,22 +3071,43 @@ impl Executor {
         }
     }
 
-    /// Push the position of a PROC call onto the return stack
+    /// Push the position of a PROC call onto the return stack, with the
+    /// loop depths of the caller
     pub fn push_proc_return(&mut self, position: Position) {
-        self.return_stack.push((ReturnKind::Proc, position));
+        let depths = self.loop_depths();
+        self.return_stack.push((ReturnKind::Proc(depths), position));
     }
 
-    /// Pop the newest PROC call, and the GOSUBs that this PROC left open.
-    /// With no PROC call on the stack, give an error and change nothing.
+    /// Pop the newest PROC call, and the GOSUBs and loops that this PROC left
+    /// open. With no PROC call on the stack, give an error and change nothing.
     pub fn pop_proc_return(&mut self) -> Result<Position> {
         let index = self
             .return_stack
             .iter()
-            .rposition(|&(kind, _)| kind == ReturnKind::Proc)
+            .rposition(|&(kind, _)| matches!(kind, ReturnKind::Proc(_)))
             .ok_or(BBCBasicError::BadCall)?;
-        let (_, position) = self.return_stack[index];
+        let (kind, position) = self.return_stack[index];
         self.return_stack.truncate(index);
+        if let ReturnKind::Proc(depths) = kind {
+            self.close_loops(depths);
+        }
         Ok(position)
+    }
+
+    /// The depths of the FOR, REPEAT and WHILE stacks now
+    fn loop_depths(&self) -> LoopDepths {
+        LoopDepths {
+            for_depth: self.for_loops.len(),
+            repeat_depth: self.repeat_stack.len(),
+            while_depth: self.while_stack.len(),
+        }
+    }
+
+    /// Close the FOR, REPEAT and WHILE loops above the depths
+    fn close_loops(&mut self, depths: LoopDepths) {
+        self.for_loops.truncate(depths.for_depth);
+        self.repeat_stack.truncate(depths.repeat_depth);
+        self.while_stack.truncate(depths.while_depth);
     }
 
     /// Define a procedure at the position of its DEF PROC statement
@@ -3409,9 +3438,7 @@ impl Executor {
 
         let local_depth = self.local_stack.len();
         let return_depth = self.return_stack.len();
-        let for_depth = self.for_loops.len();
-        let repeat_depth = self.repeat_stack.len();
-        let while_depth = self.while_stack.len();
+        let loop_depths = self.loop_depths();
 
         // Enter local scope for function
         self.enter_local_scope();
@@ -3424,9 +3451,7 @@ impl Executor {
             self.exit_local_scope()?;
         }
         self.return_stack.truncate(return_depth);
-        self.for_loops.truncate(for_depth);
-        self.repeat_stack.truncate(repeat_depth);
-        self.while_stack.truncate(while_depth);
+        self.close_loops(loop_depths);
 
         result
     }
