@@ -90,6 +90,16 @@ pub enum PrintItem {
     Comma,           // ,
 }
 
+/// Item of an INPUT or INPUT LINE statement, in the order of the source
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputItem {
+    /// A prompt text. `question_mark` is true if a comma or a semicolon follows
+    /// the text, so that the next variable shows `?` after the text.
+    Prompt { text: String, question_mark: bool },
+    /// A variable that gets a reply
+    Variable(String),
+}
+
 /// BBC BASIC statements
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -107,9 +117,9 @@ pub enum Statement {
     /// PRINT statement
     Print { items: Vec<PrintItem> },
     /// INPUT statement
-    Input { variables: Vec<String> },
+    Input { items: Vec<InputItem> },
     /// INPUT LINE statement: each variable gets one full reply line
-    InputLine { variables: Vec<String> },
+    InputLine { items: Vec<InputItem> },
     /// FOR loop
     For {
         variable: String,
@@ -452,7 +462,7 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             } else if tokens.len() > 1 && matches!(tokens[1], Token::Keyword(0x86)) {
                 // INPUT LINE: 0x86 is the LINE token
                 Ok(Statement::InputLine {
-                    variables: parse_input_variables(&tokens[2..]),
+                    items: parse_input_items(&tokens[2..]),
                 })
             } else {
                 parse_input_statement(&tokens[1..])
@@ -1078,30 +1088,34 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 /// Parse INPUT statement
 fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
     Ok(Statement::Input {
-        variables: parse_input_variables(tokens),
+        items: parse_input_items(tokens),
     })
 }
 
-/// Parse the variable list of INPUT or INPUT LINE
-fn parse_input_variables(tokens: &[Token]) -> Vec<String> {
-    let mut variables = Vec::new();
+/// Parse the item list of INPUT or INPUT LINE: prompt texts and variables.
+/// A comma or a semicolon after a prompt text gives `?` after the text.
+fn parse_input_items(tokens: &[Token]) -> Vec<InputItem> {
+    let mut items = Vec::new();
     let mut pos = 0;
 
     while pos < tokens.len() {
-        match &tokens[pos] {
-            Token::Identifier(name) => {
-                variables.push(name.clone());
-                pos += 1;
-
-                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
-                    pos += 1; // skip comma
-                }
-            }
+        let item = match &tokens[pos] {
+            Token::String(text) => InputItem::Prompt {
+                text: text.clone(),
+                question_mark: matches!(tokens.get(pos + 1), Some(Token::Separator(',' | ';'))),
+            },
+            Token::Identifier(name) => InputItem::Variable(name.clone()),
             _ => break,
+        };
+        items.push(item);
+        pos += 1;
+
+        if matches!(tokens.get(pos), Some(Token::Separator(',' | ';'))) {
+            pos += 1; // skip the separator
         }
     }
 
-    variables
+    items
 }
 
 /// Parse PRINT# statement (file I/O)
@@ -3131,45 +3145,103 @@ mod tests {
         }
     }
 
+    fn input_var(name: &str) -> InputItem {
+        InputItem::Variable(name.to_string())
+    }
+
+    fn input_prompt(text: &str, question_mark: bool) -> InputItem {
+        InputItem::Prompt {
+            text: text.to_string(),
+            question_mark,
+        }
+    }
+
+    fn parse_input_text(source: &str) -> Statement {
+        use crate::tokenizer::tokenize;
+        parse_statement(&tokenize(source).unwrap()).unwrap()
+    }
+
     #[test]
     fn test_parse_input() {
-        // RED: Parse "INPUT A%, B$"
-        use crate::tokenizer::tokenize;
-        let line = tokenize("INPUT A%, B$").unwrap();
-        let stmt = parse_statement(&line).unwrap();
-
         assert_eq!(
-            stmt,
+            parse_input_text("INPUT A%, B$"),
             Statement::Input {
-                variables: vec!["A%".to_string(), "B$".to_string()],
+                items: vec![input_var("A%"), input_var("B$")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_prompt_with_semicolon_has_question_mark() {
+        assert_eq!(
+            parse_input_text("INPUT \"Name\";A$"),
+            Statement::Input {
+                items: vec![input_prompt("Name", true), input_var("A$")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_prompt_with_comma_has_question_mark() {
+        assert_eq!(
+            parse_input_text("INPUT \"Name\",A$"),
+            Statement::Input {
+                items: vec![input_prompt("Name", true), input_var("A$")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_prompt_with_no_separator_has_no_question_mark() {
+        assert_eq!(
+            parse_input_text("INPUT \"Name\" A$"),
+            Statement::Input {
+                items: vec![input_prompt("Name", false), input_var("A$")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_prompts_can_repeat() {
+        assert_eq!(
+            parse_input_text("INPUT \"X\", X, \"Y\" Y"),
+            Statement::Input {
+                items: vec![
+                    input_prompt("X", true),
+                    input_var("X"),
+                    input_prompt("Y", false),
+                    input_var("Y"),
+                ],
             }
         );
     }
 
     #[test]
     fn test_parse_input_line_one_variable() {
-        use crate::tokenizer::tokenize;
-        let line = tokenize("INPUT LINE A$").unwrap();
-        let stmt = parse_statement(&line).unwrap();
-
         assert_eq!(
-            stmt,
+            parse_input_text("INPUT LINE A$"),
             Statement::InputLine {
-                variables: vec!["A$".to_string()],
+                items: vec![input_var("A$")],
             }
         );
     }
 
     #[test]
     fn test_parse_input_line_two_variables() {
-        use crate::tokenizer::tokenize;
-        let line = tokenize("INPUT LINE A$, B$").unwrap();
-        let stmt = parse_statement(&line).unwrap();
-
         assert_eq!(
-            stmt,
+            parse_input_text("INPUT LINE A$, B$"),
             Statement::InputLine {
-                variables: vec!["A$".to_string(), "B$".to_string()],
+                items: vec![input_var("A$"), input_var("B$")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_line_with_prompt() {
+        assert_eq!(
+            parse_input_text("INPUT LINE \"Text\" A$"),
+            Statement::InputLine {
+                items: vec![input_prompt("Text", false), input_var("A$")],
             }
         );
     }
