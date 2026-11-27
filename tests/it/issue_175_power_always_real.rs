@@ -59,7 +59,7 @@ fn test_whole_number_powers_convert_exactly_to_an_integer() {
     ]);
     assert_eq!(
         (result, output),
-        (Ok(()), "         8 100 81 1000000000\n".to_string())
+        (Ok(()), "         8 100 81 1E9\n".to_string())
     );
 }
 

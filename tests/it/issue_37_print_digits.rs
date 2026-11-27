@@ -35,10 +35,10 @@ fn test_print_seven_halves_shows_three_point_five() {
 }
 
 #[test]
-fn test_print_str_of_one_third_shows_nine_digits() {
+fn test_print_str_of_one_third_shows_ten_digits() {
     assert_eq!(
         run(&["10 PRINT STR$(1 / 3)"]),
-        (Ok(()), "0.333333333\n".to_string())
+        (Ok(()), "0.3333333333\n".to_string())
     );
 }
 
@@ -67,9 +67,9 @@ fn test_print_large_real_uses_exponent_form() {
 }
 
 #[test]
-fn test_print_large_integer_variable_keeps_integer_form() {
+fn test_print_large_integer_variable_uses_exponent_form() {
     assert_eq!(
         run(&["10 A% = 1234567890", "20 PRINT A%"]),
-        (Ok(()), "1234567890\n".to_string())
+        (Ok(()), "1.23456789E9\n".to_string())
     );
 }

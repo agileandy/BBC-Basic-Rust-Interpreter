@@ -229,11 +229,11 @@ struct NumberFormat {
     for_str: bool,
 }
 
-/// The format of STR$ when byte 4 of `@%` is 0: the general format with 9
-/// digits, as PRINT shows with the start value of `@%`
+/// The format of STR$ when byte 4 of `@%` is 0: the general format with 10
+/// digits. The ROM sets format 0 at &B0B1 and 10 digits at &9EF9.
 const STR_FORMAT: NumberFormat = NumberFormat {
     width: 0,
-    digits: 9,
+    digits: 10,
     style: NumberStyle::General,
     for_str: false,
 };
@@ -267,26 +267,36 @@ impl NumberFormat {
             return value.to_string();
         }
         let text = match self.style {
-            NumberStyle::General => general_text(value.abs(), self.digits),
+            NumberStyle::General => general_text(value.abs(), self.digits, ROM_LOWEST_PLAIN),
             NumberStyle::Exponent => exponent_text(value.abs(), self.digits),
             NumberStyle::Fixed => fixed_text(value.abs(), self.digits),
         };
-        if value < 0.0 {
-            format!("-{}", text)
-        } else {
-            text
-        }
+        with_sign(value, text)
     }
 
-    /// The text of an integer value in this format, with no field. In the
-    /// general format, an integer shows all its digits. In the other formats,
-    /// it shows as a real value does.
+    /// The text of an integer value in this format, with no field. The ROM
+    /// changes an integer to a real value before it makes the digits (&9F09
+    /// to &9F0C), so an integer shows as a real value does.
     fn format_integer(&self, value: i32) -> String {
-        if self.style == NumberStyle::General {
-            value.to_string()
-        } else {
-            self.format_real(value as f64)
-        }
+        self.format_real(value as f64)
+    }
+}
+
+/// The lowest decimal exponent that the general format of the ROM shows in
+/// plain decimal: -1, so 0.1 is plain and 0.05 is 5E-2. The ROM gives the
+/// exponent form for a negative exponent other than -1 (&9FC3 to &9FCD).
+const ROM_LOWEST_PLAIN: i32 = -1;
+
+/// The lowest decimal exponent that the PRINT# and LVAR text shows in plain
+/// decimal. This text is not a ROM format, and does not change (issue 197).
+const FILE_LOWEST_PLAIN: i32 = -7;
+
+/// Put a minus sign before the text of a value that is below 0
+fn with_sign(value: f64, text: String) -> String {
+    if value < 0.0 {
+        format!("-{}", text)
+    } else {
+        text
     }
 }
 
@@ -337,10 +347,11 @@ fn round_digits(value: f64, count: i32) -> Option<(String, i32)> {
     ))
 }
 
-/// The general format of a value that is 0 or more. If the exponent is from
-/// -7 up to (not including) the count of digits, the text is plain decimal.
-/// Otherwise the text has a mantissa and an exponent, for example `1.5E10`.
-fn general_text(value: f64, count: usize) -> String {
+/// The general format of a value that is 0 or more. If the exponent of the
+/// rounded value is from `lowest` up to (not including) the count of digits,
+/// the text is plain decimal (ROM &9FB3 to &9FB9). Otherwise the text has a
+/// mantissa and an exponent, for example `1.5E10`.
+fn general_text(value: f64, count: usize, lowest: i32) -> String {
     let Some((digits, exponent)) = (value > 0.0)
         .then(|| round_digits(value, count as i32))
         .flatten()
@@ -348,7 +359,7 @@ fn general_text(value: f64, count: usize) -> String {
         return "0".to_string();
     };
 
-    if (-7..count as i32).contains(&exponent) {
+    if (lowest..count as i32).contains(&exponent) {
         let (whole, fraction) = if exponent >= 0 {
             let split = exponent as usize + 1;
             (digits[..split].to_string(), digits[split..].to_string())
@@ -404,7 +415,7 @@ fn fixed_text(value: f64, places: usize) -> String {
             .expect("exponent format has an exponent");
         let count = places as i32 + exponent + 1;
         if count > 10 {
-            return general_text(value, 10);
+            return general_text(value, 10, ROM_LOWEST_PLAIN);
         }
         round_digits(value, count)
     } else {
@@ -412,7 +423,7 @@ fn fixed_text(value: f64, places: usize) -> String {
     };
     let (digits, exponent) = rounded.unwrap_or_else(|| ("0".to_string(), 0));
     if places as i32 + exponent + 1 > 10 {
-        return general_text(value, 10);
+        return general_text(value, 10, ROM_LOWEST_PLAIN);
     }
 
     // Each digit after the rounded digits is 0
@@ -441,23 +452,36 @@ fn format_hex(value: i32) -> String {
 
 /// Make the text for a real value. If `exact` is false, the text is the PRINT text.
 /// If `exact` is true (PRINT#, issue #157), the text reads back as the same value:
-/// it is the PRINT text if that text gives the same value, otherwise the shortest
-/// text that gives the same value, for example `0.3333333333333333`.
+/// it is the 9 digit text with plain decimal from 1E-7 if that text gives the same
+/// value, otherwise the shortest text that gives the same value, for example
+/// `0.3333333333333333`.
 fn format_real(value: f64, exact: bool) -> String {
-    let text = format_number(value);
-    if !exact || !value.is_finite() || text.parse::<f64>() == Ok(value) {
+    if !exact || !value.is_finite() {
+        return format_number(value);
+    }
+    let text = with_sign(value, general_text(value.abs(), 9, FILE_LOWEST_PLAIN));
+    if text.parse::<f64>() == Ok(value) {
         text
     } else {
         format!("{:?}", value)
     }
 }
 
-/// Make the PRINT text for a real value, as a BBC Micro does. The value is rounded
-/// to 9 significant digits, without trailing zeros. If the absolute value is from
-/// 1E-7 up to (not including) 1E9, the text is plain decimal. Otherwise the text
-/// has a mantissa and an exponent, for example `1.5E10`.
+/// The format of the start value of `@%`: the general format with 9 digits
+const DEFAULT_FORMAT: NumberFormat = NumberFormat {
+    width: 10,
+    digits: 9,
+    style: NumberStyle::General,
+    for_str: false,
+};
+
+/// Make the PRINT text for a real value with the start value of `@%`, as a BBC
+/// Micro does. The value is rounded to 9 significant digits, without trailing
+/// zeros. If the rounded absolute value is from 0.1 up to (not including) 1E9,
+/// the text is plain decimal. Otherwise the text has a mantissa and an
+/// exponent, for example `1.5E10` or `5E-2`.
 fn format_number(value: f64) -> String {
-    STR_FORMAT.format_real(value)
+    DEFAULT_FORMAT.format_real(value)
 }
 
 /// File handle for file I/O operations
@@ -5433,7 +5457,7 @@ mod tests {
         assert_eq!(format_number(1.5e10), "1.5E10");
         assert_eq!(format_number(1e-8), "1E-8");
         assert_eq!(format_number(-1e-8), "-1E-8");
-        assert_eq!(format_number(1e-7), "0.0000001");
+        assert_eq!(format_number(1e-7), "1E-7");
         assert_eq!(format_number(999999999.6), "1E9");
     }
 

@@ -40,7 +40,9 @@ fn test_large_real_array_element_into_integer_variable_gives_too_big() {
 
 #[test]
 fn test_largest_and_smallest_values_in_range_are_truncated() {
+    // @% = &A0A prints 10 digits, so the output shows the exact value (issue 197)
     let (result, output) = run(&[
+        "5 @% = &A0A",
         "10 A% = 2147483647.9",
         "20 B% = -2147483648.9",
         "30 PRINT A%",
