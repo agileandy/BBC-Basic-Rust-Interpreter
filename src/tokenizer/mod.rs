@@ -124,6 +124,15 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 }
             }
 
+            // Leading digits are always a line number. A number that does not
+            // fit is an error, so that the line does not run at once.
+            if num_str.parse::<u16>().is_err() {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Line number out of range".to_string(),
+                    line: None,
+                });
+            }
+
             // A line of only digits is a line number with no statement. The
             // line is trimmed, so trailing spaces are already gone.
             if temp_chars.peek().is_none() {
@@ -1068,8 +1077,11 @@ mod tests {
 
     #[test]
     fn test_tokenize_integer_too_large_for_i32_is_real() {
-        let result = tokenize("3000000000").unwrap();
-        assert_eq!(result.tokens, vec![Token::Real(3_000_000_000.0)]);
+        let result = tokenize("PRINT 3000000000").unwrap();
+        assert_eq!(
+            result.tokens,
+            vec![Token::Keyword(0xF1), Token::Real(3_000_000_000.0)]
+        );
     }
 
     #[test]
@@ -1147,9 +1159,13 @@ mod tests {
 
     #[test]
     fn test_tokenize_number_alone_out_of_line_range_is_not_a_line_number() {
-        let result = tokenize("99999").unwrap();
-        assert_eq!(result.line_number, None);
-        assert_eq!(result.tokens, vec![Token::Integer(99999)]);
+        assert_eq!(
+            tokenize("99999").map(|_| ()),
+            Err(BBCBasicError::SyntaxError {
+                message: "Line number out of range".to_string(),
+                line: None,
+            })
+        );
     }
 
     #[test]
