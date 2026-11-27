@@ -251,6 +251,32 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             continue;
         }
 
+        // A hex number is & and one to 8 hex digits. It is a 32-bit integer.
+        if ch == '&' {
+            chars.next(); // consume the '&'
+            let mut hex = String::new();
+            while let Some(&ch) = chars.peek() {
+                if ch.is_ascii_digit() || ('A'..='F').contains(&ch) {
+                    hex.push(ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if hex.is_empty() {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Bad hex".to_string(),
+                    line: line_number,
+                });
+            }
+            if hex.len() > 8 {
+                return Err(BBCBasicError::TooBig);
+            }
+            let value = u32::from_str_radix(&hex, 16).map_err(|_| BBCBasicError::TooBig)?;
+            tokens.push(Token::Integer(value as i32));
+            continue;
+        }
+
         // Keywords and identifiers
         if ch.is_alphabetic() || ch == '_' {
             let mut word = String::new();
@@ -789,11 +815,57 @@ mod tests {
                 Token::Identifier("E".to_string())
             ]
         );
-        // &1E: the tokenizer drops '&', then gives 1 and E as before
+        // &1E is a hex number, not 1 and E
         let result = tokenize("PRINT &1E").unwrap();
+        assert_eq!(result.tokens[1..], [Token::Integer(0x1E)]);
+    }
+
+    #[test]
+    fn test_tokenize_hex_literals() {
+        let cases = [
+            ("&1F", 31),
+            ("&FF", 255),
+            ("&7FFFFFFF", i32::MAX),
+            ("&FFFFFFFF", -1),
+            ("&80000000", i32::MIN),
+            ("&1E3", 483),
+        ];
+        for (source, value) in cases {
+            let result = tokenize(source).unwrap();
+            assert_eq!(result.tokens, vec![Token::Integer(value)], "{source}");
+        }
+    }
+
+    #[test]
+    fn test_tokenize_hex_literal_in_expression() {
+        let result = tokenize("A = &10 + 1").unwrap();
         assert_eq!(
-            result.tokens[1..],
-            [Token::Integer(1), Token::Identifier("E".to_string())]
+            result.tokens,
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Operator('='),
+                Token::Integer(16),
+                Token::Operator('+'),
+                Token::Integer(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_ampersand_with_no_hex_digit_is_syntax_error() {
+        for source in ["&", "PRINT &", "&G"] {
+            assert!(
+                matches!(tokenize(source), Err(BBCBasicError::SyntaxError { .. })),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tokenize_hex_literal_with_nine_digits_is_too_big() {
+        assert_eq!(
+            tokenize("&123456789").map(|_| ()),
+            Err(BBCBasicError::TooBig)
         );
     }
 
