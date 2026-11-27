@@ -299,6 +299,9 @@ pub enum ErrorHandler {
     Statements(Position),
 }
 
+/// The number of files that a program can open at one time.
+const DEFAULT_OPEN_FILE_LIMIT: usize = 255;
+
 /// BBC BASIC statement executor
 #[derive(Debug)]
 pub struct Executor {
@@ -340,6 +343,8 @@ pub struct Executor {
     last_error: Option<ErrorInfo>,
     // Open file handles: handle number -> FileHandle
     open_files: HashMap<i32, FileHandle>,
+    // Maximum number of files open at one time. A test can lower it.
+    open_file_limit: usize,
     // Next file handle number to allocate
     next_file_handle: i32,
     // FOR position to jump back to after the last NEXT (None = that loop is complete)
@@ -395,6 +400,7 @@ impl Executor {
             trace_limit: None,
             last_error: None,
             open_files: HashMap::new(),
+            open_file_limit: DEFAULT_OPEN_FILE_LIMIT,
             next_file_handle: 1,
             next_loop_line: None,
             start_time: std::time::Instant::now(),
@@ -3154,6 +3160,12 @@ impl Executor {
         self.next_loop_line = None;
     }
 
+    /// Set the number of files that a program can open at one time. A test
+    /// lowers it, because a test cannot open 255 real files.
+    pub fn set_open_file_limit(&mut self, limit: usize) {
+        self.open_file_limit = limit;
+    }
+
     /// Set error handler (ON ERROR GOTO line)
     pub fn set_error_handler(&mut self, line_number: u16) {
         self.error_handler = Some(ErrorHandler::Line(line_number));
@@ -3408,8 +3420,8 @@ impl Executor {
         file: std::io::Result<File>,
         kind: fn(BufReader<File>) -> FileHandle,
     ) -> Result<i32> {
-        // Check if we've hit the maximum number of open files (BBC BASIC limit: ~255)
-        if self.open_files.len() >= 255 {
+        // Check if we've hit the maximum number of open files
+        if self.open_files.len() >= self.open_file_limit {
             return Err(BBCBasicError::TooManyOpenFiles);
         }
 
@@ -3440,7 +3452,7 @@ impl Executor {
     /// Open a file for writing (OPENOUT)
     fn open_file_for_writing(&mut self, filename: &str) -> Result<i32> {
         // Check if we've hit the maximum number of open files
-        if self.open_files.len() >= 255 {
+        if self.open_files.len() >= self.open_file_limit {
             return Err(BBCBasicError::TooManyOpenFiles);
         }
 
