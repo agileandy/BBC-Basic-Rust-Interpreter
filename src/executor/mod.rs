@@ -291,8 +291,9 @@ pub struct FunctionDefinition {
 /// The body of a function definition
 #[derive(Debug, Clone)]
 pub enum FunctionBody {
-    /// Single-line function: `DEF FNname(params) = expr`
-    Expression(Expression),
+    /// Single-line function: `DEF FNname(params) = expr`, and the line of
+    /// the DEF (none for a typed line)
+    Expression(Expression, Option<u32>),
     /// Multi-line function: the body starts after the DEF statement at this position
     Lines(Position),
 }
@@ -412,6 +413,8 @@ pub struct Executor {
     functions: HashMap<String, FunctionDefinition>,
     // Runs the body lines of a multi-line function (set by the run loop)
     function_body_runner: BodyRunnerSlot,
+    // DEF line of the innermost single-line function whose body failed
+    function_error_line: Option<u32>,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
     // Error handler: where the run continues on error (None = no handler)
@@ -479,6 +482,7 @@ impl Executor {
             procedures: HashMap::new(),
             functions: HashMap::new(),
             function_body_runner: BodyRunnerSlot::default(),
+            function_error_line: None,
             local_stack: Vec::new(),
             error_handler: None,
             trace_limit: None,
@@ -2417,7 +2421,7 @@ impl Executor {
                 // its body runs, so it is "not a string" here (a known limit).
                 match self.functions.get_key_value(name) {
                     Some((key, func)) if !open.contains(&key.as_str()) => match &func.body {
-                        FunctionBody::Expression(body) => {
+                        FunctionBody::Expression(body, _) => {
                             open.push(key);
                             let is_string = self.is_string_expr_guarded(body, open);
                             open.pop();
@@ -3940,12 +3944,27 @@ impl Executor {
         params: &[String],
         expression: &Expression,
     ) -> Result<()> {
+        // The run collected this definition with its DEF line before the
+        // start: keep that line
+        let line = match self.functions.get(name) {
+            Some(FunctionDefinition {
+                params: old_params,
+                body: FunctionBody::Expression(old_expression, line),
+            }) if old_params.as_slice() == params && old_expression == expression => *line,
+            _ => None,
+        };
         self.define_function(
             name.to_string(),
             params.to_vec(),
-            FunctionBody::Expression(expression.clone()),
+            FunctionBody::Expression(expression.clone(), line),
         );
         Ok(())
+    }
+
+    /// Take the DEF line of the innermost single-line function whose body
+    /// failed, if the last call failed in the body of one.
+    pub fn take_function_error_line(&mut self) -> Option<u32> {
+        self.function_error_line.take()
     }
 
     /// Define a function (single-line or multi-line)
@@ -4069,7 +4088,20 @@ impl Executor {
         self.bind_parameters(&func.params, values)?;
 
         match &func.body {
-            FunctionBody::Expression(expression) => eval(self, expression),
+            FunctionBody::Expression(expression, def_line) => {
+                let result = eval(self, expression);
+                match (&result, def_line) {
+                    // The innermost failed DEF line stays
+                    (Err(_), Some(line)) => {
+                        self.function_error_line.get_or_insert(*line);
+                    }
+                    (Err(_), None) => {}
+                    // The caller ignored the errors of earlier calls (for
+                    // example a PRINT that tries each type). Forget their line.
+                    (Ok(_), _) => self.function_error_line = None,
+                }
+                result
+            }
             FunctionBody::Lines(def_position) => {
                 let runner = self.function_body_runner.0.clone().ok_or_else(|| {
                     BBCBasicError::SyntaxError {
