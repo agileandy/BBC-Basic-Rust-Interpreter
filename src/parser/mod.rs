@@ -2148,11 +2148,16 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     let condition = parse_expression(condition_tokens)?;
 
     // Find ELSE keyword (if present). A REM or DATA statement uses the rest
-    // of the line, so an ELSE after it is part of it.
+    // of the line, so an ELSE after it is part of it. A statement starts
+    // after a colon or after the THEN of an inner IF.
     let after_then = &tokens[then_pos + 1..];
     let mut else_pos = None;
     for (index, token) in after_then.iter().enumerate() {
-        let statement_start = index == 0 || matches!(after_then[index - 1], Token::Separator(':'));
+        let statement_start = index == 0
+            || matches!(
+                after_then[index - 1],
+                Token::Separator(':') | Token::Keyword(0x8C)
+            );
         if statement_start && matches!(token, Token::Keyword(0xF4 | 0xDC)) {
             break;
         }
@@ -3185,6 +3190,34 @@ mod tests {
                     ))],
                 }]),
             }
+        );
+    }
+
+    #[test]
+    fn test_parse_if_else_in_rem_after_inner_then_is_part_of_the_rem() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize(r#"IF A% THEN IF B% THEN REM note ELSE PRINT "z""#).unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        let Statement::If {
+            then_part,
+            else_part: None,
+            ..
+        } = stmt
+        else {
+            panic!("outer IF has an ELSE part: {:?}", stmt);
+        };
+        assert!(
+            matches!(
+                then_part.as_slice(),
+                [Statement::If {
+                    then_part: inner,
+                    else_part: None,
+                    ..
+                }] if matches!(inner.as_slice(), [Statement::Rem { .. }])
+            ),
+            "inner IF is not THEN REM with no ELSE: {:?}",
+            then_part
         );
     }
 

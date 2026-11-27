@@ -37,17 +37,43 @@ enum Item {
     /// A statement to execute
     Statement(Statement),
     /// The condition of an IF. If it is false, the run goes to the item at
-    /// `otherwise` on the same line (the ELSE branch or the end of the line).
+    /// `otherwise` on the same line (after the next ELSE on the line, or the
+    /// end of the line).
     If {
         condition: Expression,
         otherwise: usize,
     },
-    /// The end of a THEN branch: the run goes to the item at this index on
-    /// the same line (after the ELSE branch).
+    /// An ELSE: the run goes to the item at this index on the same line (the
+    /// end of the line).
     Skip(usize),
 }
 
-/// Add the run list items of the statements to `items`.
+/// Make the run list of the statements of one line.
+///
+/// The items keep the order of the line as typed. In BBC BASIC a false IF
+/// continues after the next ELSE on the line, at any depth, and the run
+/// skips the rest of the line when it gets to an ELSE.
+fn flatten_line(statements: Vec<Statement>) -> Vec<Item> {
+    let mut items = Vec::new();
+    flatten(statements, &mut items);
+
+    let end = items.len();
+    let mut after_next_else = end;
+    for index in (0..end).rev() {
+        match &mut items[index] {
+            Item::Skip(target) => {
+                *target = end;
+                after_next_else = index + 1;
+            }
+            Item::If { otherwise, .. } => *otherwise = after_next_else,
+            Item::Statement(_) => {}
+        }
+    }
+    items
+}
+
+/// Add the run list items of the statements to `items`, in the order of the
+/// line. `flatten_line` sets the jump indexes.
 fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
     for statement in statements {
         let Statement::If {
@@ -60,29 +86,14 @@ fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
             continue;
         };
 
-        let if_index = items.len();
         items.push(Item::If {
             condition,
             otherwise: 0,
         });
         flatten(then_part, items);
-
-        let otherwise = match else_part {
-            Some(else_part) => {
-                let skip_index = items.len();
-                items.push(Item::Skip(0));
-                let else_start = items.len();
-                flatten(else_part, items);
-                items[skip_index] = Item::Skip(items.len());
-                else_start
-            }
-            None => items.len(),
-        };
-        if let Item::If {
-            otherwise: slot, ..
-        } = &mut items[if_index]
-        {
-            *slot = otherwise;
+        if let Some(else_part) = else_part {
+            items.push(Item::Skip(0));
+            flatten(else_part, items);
         }
     }
 }
@@ -242,8 +253,7 @@ pub fn run_program_with_outcome(
     for (line_number, line) in program.list() {
         let statements = parse_line(line)
             .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
-        let mut items = Vec::new();
-        flatten(statements, &mut items);
+        let items = flatten_line(statements);
 
         for (index, item) in items.iter().enumerate() {
             let Item::Statement(statement) = item else {
