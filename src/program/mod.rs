@@ -153,6 +153,7 @@ fn token_size(token: &Token) -> usize {
         Token::Real(value) => value.to_string().len(),
         Token::String(text) => text.len() + 2,
         Token::DataText(text) | Token::RemText(text) | Token::Identifier(text) => text.len(),
+        Token::Member(structure, member) => structure.len() + 1 + member.len(),
         Token::EndOfLine => 0,
     }
 }

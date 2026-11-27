@@ -1370,6 +1370,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::BadCall => 30,
         BBCBasicError::NoSuchVariable(_) => 26,
         BBCBasicError::Array => 14,
+        // The number of BBC BASIC for Windows (issue #191)
+        BBCBasicError::BadStructure => 56,
         BBCBasicError::SyntaxError { .. } => 16,
         BBCBasicError::BadProgram => 254,
         BBCBasicError::NegativeRoot => 21,

@@ -31,6 +31,9 @@ pub enum Token {
     RemText(String),
     /// Variable or procedure name
     Identifier(String),
+    /// A structure member, such as `point.x`: the structure name and the
+    /// member name (issue #191)
+    Member(String, String),
     /// Operators (+, -, *, etc.)
     Operator(char),
     /// Separators (,, ;, :)
@@ -76,6 +79,7 @@ fn ends_with_value(tokens: &[Token]) -> bool {
                 | Token::Real(_)
                 | Token::String(_)
                 | Token::Identifier(_)
+                | Token::Member(..)
                 | Token::Separator(')')
                 // PAGE TIME LOMEM HIMEM, COUNT ERL ERR FALSE GET PI POS
                 // TRUE VPOS, and the PAGE..HIMEM forms at the left of `=`
@@ -388,6 +392,26 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 }
             }
 
+            // A name, a full stop and a letter start a structure member,
+            // such as point.x (issue #191). A short form wins (above).
+            if chars.peek() == Some(&'.')
+                && is_structure_name(&word, &keyword_map, &extended_map)
+                && chars.clone().nth(1).is_some_and(starts_member_name)
+            {
+                chars.next(); // consume the '.'
+                let member = take_name(&mut chars);
+                if chars.peek() == Some(&'.')
+                    && chars.clone().nth(1).is_some_and(starts_member_name)
+                {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Nested structures are not supported".to_string(),
+                        line: line_number,
+                    });
+                }
+                tokens.push(Token::Member(word, member));
+                continue;
+            }
+
             // A keyword matches only in upper case, as in BBC BASIC.
             // A word in another letter case is a name.
             if let Some(&token_byte) = keyword_map.get(&word) {
@@ -450,7 +474,8 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
-            ',' | ';' | ':' | '(' | ')' => {
+            // { and } enclose the members of a structure (issue #191)
+            ',' | ';' | ':' | '(' | ')' | '{' | '}' => {
                 chars.next();
                 tokens.push(Token::Separator(ch));
             }
@@ -499,6 +524,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                     false
                 }
                 (Token::Identifier(_), Token::Separator('(')) => false,
+                // A structure lists as typed: DIM point{x,y%}
+                (Token::Identifier(_), Token::Separator('{')) => false,
+                (_, Token::Separator('}')) => false,
                 (Token::Keyword(FN | PROC), Token::Identifier(_)) => false,
                 // A keyword after a closing bracket: IF (A) THEN
                 (Token::Separator(')'), Token::Keyword(_)) => true,
@@ -529,7 +557,7 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Keyword(0xC3), Token::Operator('~')) => false,
                 // The memory forms ?A, !A, A?1 and A!1 list as typed
                 (Token::Operator('?' | '!'), _) => false,
-                (Token::Identifier(_), Token::Operator('?' | '!')) => false,
+                (Token::Identifier(_) | Token::Member(..), Token::Operator('?' | '!')) => false,
                 // A unary minus joins its value: ABS(-X), X = -Y, 2 * -Y
                 (Token::Operator('-'), _)
                     if i < 2
@@ -591,6 +619,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             }
             Token::Identifier(name) => {
                 result.push_str(name);
+            }
+            Token::Member(structure, member) => {
+                result.push_str(&format!("{structure}.{member}"));
             }
             Token::DataText(text) | Token::RemText(text) => {
                 result.push_str(text);
@@ -908,6 +939,41 @@ fn short_form_keyword(letters: &str) -> Option<&'static str> {
         })
         .min_by_key(|(minimum, _)| minimum.len())
         .map(|&(_, keyword)| keyword)
+}
+
+/// True if the name and a full stop are a keyword short form, such as `P`
+/// in `P.`. A structure with this name cannot use a member (issue #191).
+pub fn is_short_form(name: &str) -> bool {
+    short_form_keyword(name).is_some()
+}
+
+/// True if the word can be the name of a structure before a full stop: it
+/// is not a keyword, not PROCname or FNname, and has no `%` or `$` (issue
+/// #191). The caller checks the short forms first.
+fn is_structure_name(
+    word: &str,
+    keyword_map: &HashMap<String, u8>,
+    extended_map: &HashMap<String, (u8, u8)>,
+) -> bool {
+    !word.ends_with(['%', '$'])
+        && !keyword_map.contains_key(word)
+        && !extended_map.contains_key(word)
+        && split_proc_or_fn(word).is_none()
+}
+
+/// True if the character can start a member name: a letter or `_`, as at
+/// the start of a variable name
+fn starts_member_name(ch: char) -> bool {
+    ch.is_alphabetic() || ch == '_'
+}
+
+/// Take a name from the characters: letters, digits, `_`, `%` and `$`
+fn take_name(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut name = String::new();
+    while let Some(ch) = chars.next_if(|c| c.is_alphanumeric() || matches!(c, '_' | '%' | '$')) {
+        name.push(ch);
+    }
+    name
 }
 
 /// If a typed line starts with a short form, give the line with the full
@@ -1449,7 +1515,8 @@ mod tests {
     }
 
     /// The characters that the tokenizer does not know (issue 62).
-    const UNKNOWN_CHARACTERS: [char; 8] = ['@', '|', '\\', '[', ']', '{', '}', '`'];
+    // { and } are the characters of a structure (issue #191)
+    const UNKNOWN_CHARACTERS: [char; 6] = ['@', '|', '\\', '[', ']', '`'];
 
     #[test]
     fn test_unknown_character_in_statement_gives_syntax_error() {
@@ -1585,11 +1652,15 @@ mod tests {
 
     #[test]
     fn test_decimal_point_before_a_letter_is_not_a_number() {
-        // No keyword starts with X, so `X.` is not a short form (issue 167)
-        assert!(matches!(
-            tokenize("10 PRINT X.B"),
-            Err(BBCBasicError::SyntaxError { message, .. }) if message == "Unknown character '.'"
-        ));
+        // No keyword starts with X, so `X.` is not a short form (issue 167).
+        // A full stop and a letter after a name start a member (issue #191).
+        assert_eq!(
+            tokenize("10 PRINT X.B").unwrap().tokens,
+            vec![
+                Token::Keyword(0xF1),
+                Token::Member("X".to_string(), "B".to_string())
+            ]
+        );
     }
 
     #[test]
@@ -2069,5 +2140,66 @@ mod tests {
         assert_eq!(expand_short_form("X."), "X.");
         assert_eq!(expand_short_form("10 P.5"), "10 P.5");
         assert_eq!(expand_short_form("l."), "l.");
+    }
+
+    // Structures (issue #191)
+
+    #[test]
+    fn test_name_full_stop_and_letter_is_a_member() {
+        assert_eq!(
+            tokens_of("p.x%=XY.n$"),
+            vec![
+                Token::Member("p".to_string(), "x%".to_string()),
+                Token::Operator('='),
+                Token::Member("XY".to_string(), "n$".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_short_form_wins_over_a_member() {
+        assert_eq!(
+            tokens_of("P.x"),
+            vec![Token::Keyword(0xF1), Token::Identifier("x".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_keywords_and_typed_names_do_not_start_a_member() {
+        for text in ["PRINT.x", "a%.x", "a$.x", "PROCa.x"] {
+            assert!(tokenize(text).is_err(), "{text} is not a member");
+        }
+    }
+
+    #[test]
+    fn test_a_member_needs_a_letter_after_the_full_stop() {
+        assert_eq!(
+            tokens_of("x.5"),
+            vec![Token::Identifier("x".to_string()), Token::Real(0.5)]
+        );
+    }
+
+    #[test]
+    fn test_braces_are_separators_and_list_as_typed() {
+        assert_eq!(
+            tokens_of("DIM p{x}"),
+            vec![
+                Token::Keyword(0xDE),
+                Token::Identifier("p".to_string()),
+                Token::Separator('{'),
+                Token::Identifier("x".to_string()),
+                Token::Separator('}'),
+            ]
+        );
+        assert_round_trip("10 DIM p{x,y%},q{s$}", "10 DIM p{x,y%},q{s$}");
+        assert_round_trip("20 p.x?1 = q.s$", "20 p.x?1 = q.s$");
+    }
+
+    #[test]
+    fn test_is_short_form() {
+        assert!(is_short_form("P"));
+        assert!(is_short_form("PT"));
+        assert!(!is_short_form("XY"));
+        assert!(!is_short_form("p"));
     }
 }
