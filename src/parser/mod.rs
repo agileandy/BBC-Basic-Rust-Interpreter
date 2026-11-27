@@ -273,8 +273,9 @@ pub enum Statement {
     Local { variables: Vec<String> },
     /// DATA statement - stores data values
     Data { values: Vec<DataValue> },
-    /// READ statement - reads data into variables
-    Read { variables: Vec<String> },
+    /// READ statement - reads data into variables and array elements. A
+    /// target is never an `InputItem::Prompt`.
+    Read { variables: Vec<InputItem> },
     /// RESTORE statement - resets data pointer (optionally to specific line)
     Restore { line_number: Option<u16> },
     /// REPEAT statement - starts a REPEAT...UNTIL loop
@@ -2513,41 +2514,55 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 }
 
 /// Parse READ statement
-/// Supports: READ var1, var2, var3, ...
+/// Supports: READ var1, A(I), N$(1, 2), ... (issue #153). The targets are
+/// split at the commas that are not in brackets. An empty part is a syntax
+/// error, as in a list of expressions (issue #155).
 fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    let mut variables = Vec::new();
-    let mut pos = 0;
-
-    while pos < tokens.len() {
-        // Skip commas
-        if matches!(tokens[pos], Token::Separator(',')) {
-            pos += 1;
-            continue;
-        }
-
-        // Expect variable name
-        match &tokens[pos] {
-            Token::Identifier(name) => {
-                variables.push(name.clone());
-                pos += 1;
-            }
-            _ => {
-                return Err(BBCBasicError::SyntaxError {
-                    message: "Expected variable name in READ".to_string(),
-                    line: line_number,
-                });
-            }
-        }
-    }
-
-    if variables.is_empty() {
+    if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "READ requires at least one variable".to_string(),
             line: line_number,
         });
     }
 
+    let variables = split_at_commas(tokens)
+        .into_iter()
+        .map(|part| {
+            if part.is_empty() {
+                Err(BBCBasicError::SyntaxError {
+                    message: "Missing value at a comma".to_string(),
+                    line: line_number,
+                })
+            } else {
+                parse_read_target(part, line_number)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     Ok(Statement::Read { variables })
+}
+
+/// Parse one READ target: a variable, or an array element with the index
+/// form of INPUT. Another form gives a syntax error.
+fn parse_read_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
+    match tokens {
+        [Token::Identifier(name)] => Ok(InputItem::Variable(name.clone())),
+        [Token::Identifier(name), Token::Separator('('), ..]
+            if find_closing_bracket(tokens, 1) == Some(tokens.len() - 1) =>
+        {
+            Ok(InputItem::ArrayElement {
+                name: name.clone(),
+                indices: parse_comma_separated_expressions(
+                    &tokens[2..tokens.len() - 1],
+                    line_number,
+                )?,
+            })
+        }
+        _ => Err(BBCBasicError::SyntaxError {
+            message: "Expected variable name in READ".to_string(),
+            line: line_number,
+        }),
+    }
 }
 
 /// Parse RESTORE statement
@@ -6466,5 +6481,41 @@ mod tests {
                 line: Some(20),
             })
         );
+    }
+
+    #[test]
+    fn test_parse_read_variables() {
+        assert_eq!(
+            parse_input_text("READ A, B$, C%"),
+            Statement::Read {
+                variables: vec![input_var("A"), input_var("B$"), input_var("C%")],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_read_array_elements() {
+        assert_eq!(
+            parse_input_text("READ Q(1,2), N$(I), X"),
+            Statement::Read {
+                variables: vec![
+                    input_element("Q", vec![Expression::Integer(1), Expression::Integer(2)]),
+                    input_element("N$", vec![Expression::Variable("I".to_string())]),
+                    input_var("X"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_read_target_that_is_not_a_variable_is_an_error() {
+        use crate::tokenizer::tokenize;
+        for source in ["READ 5", "READ A + 1", "READ A(1) B", "READ \"x\"", "READ"] {
+            assert!(
+                parse_statement(&tokenize(source).unwrap()).is_err(),
+                "{}",
+                source
+            );
+        }
     }
 }

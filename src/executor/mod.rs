@@ -1402,9 +1402,21 @@ impl Executor {
         self.data_pointer = 0;
     }
 
-    /// Execute READ statement - reads data into variables
-    fn execute_read(&mut self, variables: &[String]) -> Result<()> {
-        for var_name in variables {
+    /// Execute READ statement - reads data into variables and array elements.
+    /// The indices of an element are evaluated when it gets its value, so
+    /// `READ I, A(I)` uses the new I (issue #153).
+    fn execute_read(&mut self, variables: &[InputItem]) -> Result<()> {
+        for target in variables {
+            let (var_name, indices) = match target {
+                InputItem::Variable(name) => (name, None),
+                InputItem::ArrayElement { name, indices } => (name, Some(indices.as_slice())),
+                InputItem::Prompt { .. } => {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "Expected variable name in READ".to_string(),
+                        line: None,
+                    })
+                }
+            };
             // Check if we've run out of data
             if self.data_pointer >= self.data_values.len() {
                 return Err(BBCBasicError::OutOfData);
@@ -1414,32 +1426,27 @@ impl Executor {
             let data_value = &self.data_values[self.data_pointer];
             self.data_pointer += 1;
 
-            // Assign to variable based on type
-            if var_name.ends_with('%') {
-                // Integer variable
-                let int_val = match data_value {
+            // Convert the value to the type of the target
+            let value = if var_name.ends_with('%') {
+                Variable::Integer(match data_value {
                     DataValue::Integer(v) => *v,
                     DataValue::Real(v) => *v as i32,
                     DataValue::String(s) => parse_leading_number(s) as i32,
-                };
-                self.variables.set_integer_var(var_name.clone(), int_val);
+                })
             } else if var_name.ends_with('$') {
-                // String variable
-                let str_val = match data_value {
+                Variable::String(match data_value {
                     DataValue::String(s) => s.clone(),
                     DataValue::Integer(v) => v.to_string(),
                     DataValue::Real(v) => v.to_string(),
-                };
-                self.variables.set_string_var(var_name.clone(), str_val)?;
+                })
             } else {
-                // Real variable
-                let real_val = match data_value {
+                Variable::Real(match data_value {
                     DataValue::Real(v) => *v,
                     DataValue::Integer(v) => *v as f64,
                     DataValue::String(s) => parse_leading_number(s),
-                };
-                self.variables.set_real_var(var_name.clone(), real_val);
-            }
+                })
+            };
+            self.store_input_value(var_name, indices, value)?;
         }
         Ok(())
     }
@@ -5481,7 +5488,11 @@ mod tests {
 
         // READ A%, B%, C%
         let read_stmt = Statement::Read {
-            variables: vec!["A%".to_string(), "B%".to_string(), "C%".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+                InputItem::Variable("C%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt).unwrap();
 
@@ -5507,7 +5518,11 @@ mod tests {
 
         // READ A$, B$, C$
         let read_stmt = Statement::Read {
-            variables: vec!["A$".to_string(), "B$".to_string(), "C$".to_string()],
+            variables: vec![
+                InputItem::Variable("A$".to_string()),
+                InputItem::Variable("B$".to_string()),
+                InputItem::Variable("C$".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt).unwrap();
 
@@ -5533,7 +5548,11 @@ mod tests {
 
         // READ A%, B, C$
         let read_stmt = Statement::Read {
-            variables: vec!["A%".to_string(), "B".to_string(), "C$".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B".to_string()),
+                InputItem::Variable("C$".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt).unwrap();
 
@@ -5559,7 +5578,10 @@ mod tests {
 
         // READ A%, B%
         let read_stmt1 = Statement::Read {
-            variables: vec!["A%".to_string(), "B%".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt1).unwrap();
 
@@ -5572,7 +5594,10 @@ mod tests {
 
         // READ C%, D%
         let read_stmt2 = Statement::Read {
-            variables: vec!["C%".to_string(), "D%".to_string()],
+            variables: vec![
+                InputItem::Variable("C%".to_string()),
+                InputItem::Variable("D%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt2).unwrap();
 
@@ -5607,7 +5632,10 @@ mod tests {
 
         // READ A%, B% (should get 100, 200)
         let read_stmt1 = Statement::Read {
-            variables: vec!["A%".to_string(), "B%".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt1).unwrap();
 
@@ -5622,7 +5650,10 @@ mod tests {
 
         // READ C%, D% (should get 300, 400 from line 20)
         let read_stmt2 = Statement::Read {
-            variables: vec!["C%".to_string(), "D%".to_string()],
+            variables: vec![
+                InputItem::Variable("C%".to_string()),
+                InputItem::Variable("D%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt2).unwrap();
 
@@ -5650,10 +5681,10 @@ mod tests {
         // READ A%, B%, C%, D%
         let read_stmt = Statement::Read {
             variables: vec![
-                "A%".to_string(),
-                "B%".to_string(),
-                "C%".to_string(),
-                "D%".to_string(),
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+                InputItem::Variable("C%".to_string()),
+                InputItem::Variable("D%".to_string()),
             ],
         };
         executor.execute_statement(&read_stmt).unwrap();
@@ -5677,7 +5708,10 @@ mod tests {
 
         // READ A%, B% - should fail on B%
         let read_stmt = Statement::Read {
-            variables: vec!["A%".to_string(), "B%".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+            ],
         };
         let result = executor.execute_statement(&read_stmt);
 
@@ -5716,7 +5750,11 @@ mod tests {
 
         // Now READ should work even though we never "executed" line 20
         let read_stmt = Statement::Read {
-            variables: vec!["A%".to_string(), "B%".to_string(), "C%".to_string()],
+            variables: vec![
+                InputItem::Variable("A%".to_string()),
+                InputItem::Variable("B%".to_string()),
+                InputItem::Variable("C%".to_string()),
+            ],
         };
         executor.execute_statement(&read_stmt).unwrap();
 
