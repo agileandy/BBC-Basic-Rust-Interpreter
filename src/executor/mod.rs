@@ -26,25 +26,19 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
-/// Convert a DATA text item for a READ into a numeric variable. A `&` item is a
-/// hex number. Other text gives its leading number, as `VAL` does, or 0.
-fn data_item_number(text: &str) -> f64 {
-    match text.trim_start().strip_prefix('&') {
-        Some(hex) => {
-            let digits = hex
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(hex.len());
-            u32::from_str_radix(&hex[..digits], 16).map_or(0.0, |v| v as i32 as f64)
-        }
-        None => parse_leading_number(text),
-    }
-}
-
 /// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
+/// VAL, INPUT and READ of a DATA text item use it.
 /// The number has an optional sign, digits with one optional decimal point, and an
-/// optional exponent. If there is no number, the result is 0.
+/// optional exponent. A `&` and hex digits is a 32-bit hex number, as in `&1F`.
+/// If there is no number, the result is 0.
 fn parse_leading_number(text: &str) -> f64 {
     let text = text.trim_start();
+    if let Some(hex) = text.strip_prefix('&') {
+        let digits = hex
+            .find(|c: char| !c.is_ascii_hexdigit())
+            .unwrap_or(hex.len());
+        return u32::from_str_radix(&hex[..digits], 16).map_or(0.0, |v| v as i32 as f64);
+    }
     let bytes = text.as_bytes();
     let digits_from = |mut i: usize| {
         while i < bytes.len() && bytes[i].is_ascii_digit() {
@@ -80,6 +74,12 @@ fn parse_leading_number(text: &str) -> f64 {
     }
 
     text[..end].parse::<f64>().unwrap_or(0.0)
+}
+
+/// Make the hex text of an integer, as `PRINT ~` does: upper case, with no `&`
+/// and no leading zeros. A negative value shows its 32-bit form.
+fn format_hex(value: i32) -> String {
+    format!("{:X}", value as u32)
 }
 
 /// Make the PRINT text for a real value, as a BBC Micro does. The value is rounded
@@ -503,17 +503,22 @@ impl Executor {
     fn execute_print(&mut self, items: &[crate::parser::PrintItem]) -> Result<()> {
         use crate::parser::PrintItem;
 
+        // After ~, numeric items print in hex until the next comma or semicolon
+        let mut hex = false;
         for item in items {
             match item {
                 PrintItem::Expression(expr) => {
                     // Evaluate expression and print it
-                    let output = self.format_expression(expr)?;
+                    let output = self.format_print_item(expr, hex)?;
                     self.print_output(&output);
                 }
+                PrintItem::Hex => hex = true,
                 PrintItem::Semicolon => {
                     // Semicolon suppresses newline (do nothing)
+                    hex = false;
                 }
                 PrintItem::Comma => {
+                    hex = false;
                     // Comma moves to the next print zone of 10 columns
                     let next_zone = (self.column / 10 + 1) * 10;
                     self.print_output(&" ".repeat(next_zone - self.column));
@@ -551,6 +556,16 @@ impl Executor {
         }
 
         Ok(())
+    }
+
+    /// Format a PRINT item. If `hex` is true, a numeric item shows in hex.
+    /// A string item does not change.
+    fn format_print_item(&mut self, expr: &Expression, hex: bool) -> Result<String> {
+        if hex && !self.is_string_expr(expr) {
+            Ok(format_hex(real_to_integer(self.eval_number(expr)?)?))
+        } else {
+            self.format_expression(expr)
+        }
     }
 
     /// Format an expression for printing
@@ -927,7 +942,7 @@ impl Executor {
                 let int_val = match data_value {
                     DataValue::Integer(v) => *v,
                     DataValue::Real(v) => *v as i32,
-                    DataValue::String(s) => data_item_number(s) as i32,
+                    DataValue::String(s) => parse_leading_number(s) as i32,
                 };
                 self.variables.set_integer_var(var_name.clone(), int_val);
             } else if var_name.ends_with('$') {
@@ -943,7 +958,7 @@ impl Executor {
                 let real_val = match data_value {
                     DataValue::Real(v) => *v,
                     DataValue::Integer(v) => *v as f64,
-                    DataValue::String(s) => data_item_number(s),
+                    DataValue::String(s) => parse_leading_number(s),
                 };
                 self.variables.set_real_var(var_name.clone(), real_val);
             }
@@ -1476,7 +1491,7 @@ impl Executor {
             Expression::String(_) => true,
             Expression::Variable(name)
             | Expression::ArrayAccess { name, .. }
-            | Expression::FunctionCall { name, .. } => name.ends_with('$'),
+            | Expression::FunctionCall { name, .. } => name.ends_with('$') || name == "STR$~",
             Expression::BinaryOp {
                 op: BinaryOperator::Add | BinaryOperator::StringConcat,
                 left,
@@ -2064,6 +2079,15 @@ impl Executor {
                     // If length not specified, take rest of string
                     Ok(chars.iter().skip(start_idx).collect())
                 }
+            }
+            "STR$~" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "STR$~ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                Ok(format_hex(real_to_integer(self.eval_number(&args[0])?)?))
             }
             "STR$" => {
                 if args.len() != 1 {
@@ -2704,19 +2728,24 @@ impl Executor {
         use crate::parser::PrintItem;
         let mut output = String::new();
 
+        // After ~, numeric items are hex until the next comma or semicolon
+        let mut hex = false;
         for item in items {
             match item {
                 PrintItem::Expression(expr) => {
-                    output.push_str(&self.format_expression(expr)?);
+                    output.push_str(&self.format_print_item(expr, hex)?);
                 }
                 PrintItem::Tab(_) | PrintItem::Spc(_) => {
                     // TAB and SPC not typically used in file I/O, but we can support them
                     // For simplicity, ignore them in file output
                 }
+                PrintItem::Hex => hex = true,
                 PrintItem::Semicolon => {
                     // Semicolon suppresses newline - do nothing
+                    hex = false;
                 }
                 PrintItem::Comma => {
+                    hex = false;
                     // Comma outputs a tab
                     output.push('\t');
                 }
@@ -3026,6 +3055,22 @@ mod tests {
         assert_eq!(parse_leading_number("1E"), 1.0);
         assert_eq!(parse_leading_number("2e+2x"), 200.0);
         assert_eq!(parse_leading_number("1.5.6"), 1.5);
+    }
+
+    #[test]
+    fn test_parse_leading_number_reads_hex() {
+        assert_eq!(parse_leading_number("&1F"), 31.0);
+        assert_eq!(parse_leading_number("  &FFx"), 255.0);
+        assert_eq!(parse_leading_number("&FFFFFFFF"), -1.0);
+        assert_eq!(parse_leading_number("&"), 0.0);
+        assert_eq!(parse_leading_number("&G"), 0.0);
+    }
+
+    #[test]
+    fn test_format_hex_uses_32_bit_form() {
+        assert_eq!(format_hex(255), "FF");
+        assert_eq!(format_hex(0), "0");
+        assert_eq!(format_hex(-1), "FFFFFFFF");
     }
 
     #[test]
