@@ -107,6 +107,8 @@ pub mod error {
         BadPath(String),
         // A handle that is not a collection (issue #139)
         BadCollection,
+        // A map with no value for the key, with the key text (issue #140)
+        NoSuchKey(String),
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -156,6 +158,7 @@ pub mod error {
                 BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
                 BBCBasicError::BadPath(path) => write!(f, "Bad path: {}", path),
                 BBCBasicError::BadCollection => write!(f, "Bad collection"),
+                BBCBasicError::NoSuchKey(key) => write!(f, "No such key: {}", key),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }

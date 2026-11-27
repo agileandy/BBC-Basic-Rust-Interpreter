@@ -1304,6 +1304,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::BadPath(_) => 152,
         // Bad collection is an extension error. BBC BASIC does not use ERR 153 (issue #139).
         BBCBasicError::BadCollection => 153,
+        // No such key is an extension error. BBC BASIC does not use ERR 154 (issue #140).
+        BBCBasicError::NoSuchKey(_) => 154,
         _ => 255,
     }
 }

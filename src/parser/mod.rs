@@ -413,6 +413,16 @@ pub enum Statement {
     ListRemove { list: Expression, index: Expression },
     /// LISTCLEAR l - remove all elements of a list (extension)
     ListClear { list: Expression },
+    /// MAPPUT m, key$, value - put a value for a key of a map (extension, issue #140)
+    MapPut {
+        map: Expression,
+        key: Expression,
+        value: Expression,
+    },
+    /// MAPREMOVE m, key$ - remove a key of a map (extension)
+    MapRemove { map: Expression, key: Expression },
+    /// MAPCLEAR m - remove all keys of a map (extension)
+    MapClear { map: Expression },
     /// Empty statement
     Empty,
 }
@@ -841,7 +851,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                         path: parse_expression(&tokens[1..])?,
                     })
                 }
-                // The list statements (issue #139) use the same rule as MKDIR.
+                // The list statements (issue #139) and the map statements
+                // (issue #140) use the same rule as MKDIR.
                 Err(error) => match &tokens[0] {
                     Token::Identifier(name) if is_list_statement(name) => {
                         parse_list_statement(name, &tokens[1..], line.line_number)
@@ -1950,17 +1961,26 @@ fn parse_savejson_statement(tokens: &[Token], line_number: Option<u16>) -> Resul
     Ok(Statement::SaveJson { file, json })
 }
 
-/// Tell if a name is a list statement (extension, issue #139).
+/// Tell if a name is a list statement (extension, issue #139) or a map
+/// statement (extension, issue #140).
 fn is_list_statement(name: &str) -> bool {
     matches!(
         name,
-        "LISTADD" | "LISTSET" | "LISTINSERT" | "LISTREMOVE" | "LISTCLEAR"
+        "LISTADD"
+            | "LISTSET"
+            | "LISTINSERT"
+            | "LISTREMOVE"
+            | "LISTCLEAR"
+            | "MAPPUT"
+            | "MAPREMOVE"
+            | "MAPCLEAR"
     )
 }
 
 /// Parse a list statement: LISTADD l, value, LISTSET l, i, value,
 /// LISTINSERT l, i, value, LISTREMOVE l, i or LISTCLEAR l (issue #139).
-/// A comma in brackets does not divide the arguments.
+/// Parse a map statement: MAPPUT m, key$, value, MAPREMOVE m, key$ or
+/// MAPCLEAR m (issue #140). A comma in brackets does not divide the arguments.
 fn parse_list_statement(
     name: &str,
     tokens: &[Token],
@@ -1983,8 +2003,8 @@ fn parse_list_statement(
     args.push(parse_expression(&tokens[start..])?);
 
     let count = match name {
-        "LISTCLEAR" => 1,
-        "LISTADD" | "LISTREMOVE" => 2,
+        "LISTCLEAR" | "MAPCLEAR" => 1,
+        "LISTADD" | "LISTREMOVE" | "MAPREMOVE" => 2,
         _ => 3,
     };
     if args.len() != count {
@@ -2016,7 +2036,17 @@ fn parse_list_statement(
             list,
             index: next(),
         },
-        _ => Statement::ListClear { list },
+        "LISTCLEAR" => Statement::ListClear { list },
+        "MAPPUT" => Statement::MapPut {
+            map: list,
+            key: next(),
+            value: next(),
+        },
+        "MAPREMOVE" => Statement::MapRemove {
+            map: list,
+            key: next(),
+        },
+        _ => Statement::MapClear { map: list },
     })
 }
 

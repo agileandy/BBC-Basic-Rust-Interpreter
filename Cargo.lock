@@ -16,6 +16,7 @@ name = "bbc-basic-interpreter"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "indexmap",
  "libc",
  "quickcheck",
  "quickcheck_macros",
