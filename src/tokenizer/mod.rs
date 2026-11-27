@@ -58,6 +58,37 @@ impl TokenizedLine {
     }
 }
 
+/// True if the last token ends a value: a number, a string, a name, a
+/// closing bracket, or a keyword that is a value with no argument, such as
+/// PI. A `-` after a value is the subtract operator.
+fn ends_with_value(tokens: &[Token]) -> bool {
+    matches!(
+        tokens.last(),
+        Some(
+            Token::Integer(_)
+                | Token::Real(_)
+                | Token::String(_)
+                | Token::Identifier(_)
+                | Token::Separator(')')
+                // PAGE TIME LOMEM HIMEM, COUNT ERL ERR FALSE GET PI POS
+                // TRUE VPOS, and the PAGE..HIMEM forms at the left of `=`
+                | Token::Keyword(
+                    0x90..=0x93
+                        | 0x9C
+                        | 0x9E
+                        | 0x9F
+                        | 0xA3
+                        | 0xA5
+                        | 0xAF
+                        | 0xB1
+                        | 0xB9
+                        | 0xBC
+                        | 0xD0..=0xD3
+                )
+        )
+    )
+}
+
 /// Tokenize a BBC BASIC source line
 pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
     let mut tokens = Vec::new();
@@ -176,9 +207,10 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
         }
 
         // Numbers (integer or real, including negative). A real number
-        // can start with a decimal point, such as .5
+        // can start with a decimal point, such as .5. A `-` starts a
+        // negative number only when no value is before it, so 5-3 subtracts.
         if ch.is_ascii_digit()
-            || ((ch == '-' || ch == '.')
+            || ((ch == '.' || (ch == '-' && !ends_with_value(&tokens)))
                 && chars
                     .clone()
                     .nth(1)
@@ -1281,5 +1313,174 @@ mod tests {
     fn test_detokenize_data_line_lists_as_typed() {
         let source = "10 DATA  \"A,B\" ,C:D";
         assert_eq!(detokenize(&tokenize(source).unwrap()).unwrap(), source);
+    }
+
+    // Issue 87: a `-` starts a negative number only when no value is before it.
+
+    fn tokens_of(source: &str) -> Vec<Token> {
+        tokenize(source).unwrap().tokens
+    }
+
+    #[test]
+    fn test_minus_after_number_is_subtract() {
+        assert_eq!(
+            tokens_of("PRINT 5-3"),
+            vec![
+                Token::Keyword(0xF1),
+                Token::Integer(5),
+                Token::Operator('-'),
+                Token::Integer(3)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_identifier_is_subtract() {
+        assert_eq!(
+            tokens_of("Y%=X%-1"),
+            vec![
+                Token::Identifier("Y%".to_string()),
+                Token::Operator('='),
+                Token::Identifier("X%".to_string()),
+                Token::Operator('-'),
+                Token::Integer(1)
+            ]
+        );
+        assert_eq!(
+            tokens_of("Y=A-B"),
+            vec![
+                Token::Identifier("Y".to_string()),
+                Token::Operator('='),
+                Token::Identifier("A".to_string()),
+                Token::Operator('-'),
+                Token::Identifier("B".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_closing_bracket_is_subtract() {
+        let tokens = tokens_of("Y=A(1)-1");
+        assert_eq!(
+            &tokens[tokens.len() - 3..],
+            &[
+                Token::Separator(')'),
+                Token::Operator('-'),
+                Token::Integer(1)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_string_is_subtract() {
+        let tokens = tokens_of("Y=\"A\"-1");
+        assert_eq!(
+            &tokens[tokens.len() - 2..],
+            &[Token::Operator('-'), Token::Integer(1)]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_value_keyword_is_subtract() {
+        assert_eq!(
+            tokens_of("Y=PI-3"),
+            vec![
+                Token::Identifier("Y".to_string()),
+                Token::Operator('='),
+                Token::Keyword(0xAF),
+                Token::Operator('-'),
+                Token::Integer(3)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_operator_starts_negative_number() {
+        assert_eq!(
+            tokens_of("Y=2*-3"),
+            vec![
+                Token::Identifier("Y".to_string()),
+                Token::Operator('='),
+                Token::Integer(2),
+                Token::Operator('*'),
+                Token::Integer(-3)
+            ]
+        );
+        assert_eq!(
+            tokens_of("A = -1"),
+            vec![
+                Token::Identifier("A".to_string()),
+                Token::Operator('='),
+                Token::Integer(-1)
+            ]
+        );
+        assert_eq!(tokens_of("Y=X%+-1")[4..], [Token::Integer(-1)]);
+    }
+
+    #[test]
+    fn test_minus_after_opening_bracket_starts_negative_number() {
+        assert_eq!(
+            tokens_of("PRINT (-3)"),
+            vec![
+                Token::Keyword(0xF1),
+                Token::Separator('('),
+                Token::Integer(-3),
+                Token::Separator(')')
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_keyword_starts_negative_number() {
+        assert_eq!(
+            tokens_of("PRINT -1"),
+            vec![Token::Keyword(0xF1), Token::Integer(-1)]
+        );
+        let tokens = tokens_of("FOR I% = 10 TO 1 STEP -1");
+        assert_eq!(
+            &tokens[tokens.len() - 2..],
+            &[Token::Keyword(0x88), Token::Integer(-1)]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_comma_starts_negative_number() {
+        assert_eq!(
+            tokens_of("PRINT 1,-2"),
+            vec![
+                Token::Keyword(0xF1),
+                Token::Integer(1),
+                Token::Separator(','),
+                Token::Integer(-2)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_before_decimal_point_number_is_subtract() {
+        assert_eq!(
+            tokens_of("Y=X-.5"),
+            vec![
+                Token::Identifier("Y".to_string()),
+                Token::Operator('='),
+                Token::Identifier("X".to_string()),
+                Token::Operator('-'),
+                Token::Real(0.5)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_line_number_is_not_changed_by_minus_rule() {
+        let line = tokenize("10 PRINT 1").unwrap();
+        assert_eq!(line.line_number, Some(10));
+        assert_eq!(line.tokens, vec![Token::Keyword(0xF1), Token::Integer(1)]);
+    }
+
+    #[test]
+    fn test_detokenize_subtract_reads_back_to_same_tokens() {
+        let line = tokenize("10 PRINT 5-3").unwrap();
+        let listed = detokenize(&line).unwrap();
+        assert_eq!(tokenize(&listed).unwrap(), line);
     }
 }
