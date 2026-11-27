@@ -128,12 +128,15 @@ enum FileHandle {
 struct LocalFrame {
     /// Saved variable values (variable name -> saved value)
     saved_variables: HashMap<String, Option<Variable>>,
+    /// Saved arrays (array name -> saved entry, see `VariableStore::save_array`)
+    saved_arrays: HashMap<String, Option<Option<Variable>>>,
 }
 
 impl LocalFrame {
     fn new() -> Self {
         Self {
             saved_variables: HashMap::new(),
+            saved_arrays: HashMap::new(),
         }
     }
 }
@@ -2194,6 +2197,16 @@ impl Executor {
                 line: None,
             })?;
 
+        // LOCAL NAME() saves the array only, and makes it undimensioned
+        if let Some(array_name) = name.strip_suffix("()") {
+            let saved_array = self.variables.save_array(array_name);
+            frame
+                .saved_arrays
+                .insert(array_name.to_string(), saved_array);
+            self.variables.declare_local_array(array_name.to_string());
+            return Ok(());
+        }
+
         // Save current value (or None if doesn't exist)
         let current_value = self.variables.get_variable(name).cloned();
         frame
@@ -2224,36 +2237,16 @@ impl Executor {
                 line: None,
             })?;
 
-        // Restore all saved variables
+        // Restore all saved scalars. A scalar that did not exist before is left as it is.
         for (name, saved_value) in frame.saved_variables {
-            match saved_value {
-                Some(var) => {
-                    // Restore previous value
-                    match var {
-                        Variable::Integer(v) => self.variables.set_integer_var(name, v),
-                        Variable::Real(v) => self.variables.set_real_var(name, v),
-                        Variable::String(v) => {
-                            let _ = self.variables.set_string_var(name, v);
-                        }
-                        array @ (Variable::IntegerArray { .. }
-                        | Variable::RealArray { .. }
-                        | Variable::StringArray { .. }) => {
-                            self.variables.restore_variable(name, array);
-                        }
-                    }
-                }
-                None => {
-                    // Remove an array that the procedure made, so the name is free again.
-                    // A scalar that did not exist before is left as it is.
-                    if self
-                        .variables
-                        .get_variable(&name)
-                        .is_some_and(Variable::is_array)
-                    {
-                        self.variables.remove_variable(&name);
-                    }
-                }
+            if let Some(var) = saved_value {
+                self.variables.restore_variable(name, var);
             }
+        }
+
+        // Restore all saved arrays. An array that did not exist before is removed.
+        for (name, saved_array) in frame.saved_arrays {
+            self.variables.restore_array(name, saved_array);
         }
 
         Ok(())
