@@ -183,3 +183,4 @@ mod issue_197_rom_number_formats;
 mod issue_201_error_statement;
 mod issue_192_structure_array_members;
 mod issue_199_ide_small_gaps;
+mod issue_198_for_target_variable;

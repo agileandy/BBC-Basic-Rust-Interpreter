@@ -192,7 +192,7 @@ fn test_a_structure_name_that_is_a_short_form() {
 #[test]
 fn test_the_forms_of_later_issues_give_a_syntax_error() {
     // Array members and nested structures are valid since issue #192
-    let cases: [(&[&str], u16, &str); 4] = [
+    let cases: [(&[&str], u16, &str); 3] = [
         (
             &["10 DIM p{(3)a}"],
             10,
@@ -207,11 +207,6 @@ fn test_the_forms_of_later_issues_give_a_syntax_error() {
             &["10 DIM a{x}, b{x}", "20 b{} = a{}"],
             20,
             "A reference to a whole structure is not supported",
-        ),
-        (
-            &["10 DIM a{x}", "20 FOR a.x = 1 TO 3 : NEXT"],
-            20,
-            "A FOR variable that is a structure member is not supported",
         ),
     ];
     for (source, line, message) in cases {

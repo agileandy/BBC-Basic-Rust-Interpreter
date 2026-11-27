@@ -347,18 +347,6 @@ pub(super) fn member_target(
     Ok((last + 1 == tokens.len()).then_some(InputItem::Member(path)))
 }
 
-/// The FOR loop variable cannot be a member in this issue. The manual
-/// permits it ("Any numeric assignable item"): a later issue can add it.
-pub(super) fn check_for_variable(tokens: &[Token], line_number: Option<u16>) -> Result<()> {
-    if matches!(tokens.first(), Some(Token::Member(..))) {
-        return Err(syntax_error(
-            "A FOR variable that is a structure member is not supported",
-            line_number,
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::{parse_line, BinaryOperator};
