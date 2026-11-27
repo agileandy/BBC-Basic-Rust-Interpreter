@@ -187,10 +187,16 @@ impl Cursor<'_> {
     /// the matching ENDIF line stops the scan. Returns None if no line
     /// matches before the end of the program.
     ///
-    /// A line that ends with a block IF opens a nested block. Only an ELSE
-    /// or ENDIF at the start of a line counts.
+    /// A line that ends with a block IF opens a nested block. This includes
+    /// the ELSE line on `line` (an `ELSE IF ... THEN` line). Only an ELSE or
+    /// ENDIF at the start of a line counts.
     fn skip_block(&mut self, line: u32, stop_at_else: bool) -> Option<()> {
-        let mut depth = 1;
+        let else_opens_block = !stop_at_else
+            && matches!(
+                self.lines.items.get(&line).and_then(|items| items.last()),
+                Some(Item::Statement(Statement::IfBlock { .. }))
+            );
+        let mut depth = if else_opens_block { 2 } else { 1 };
         let after = (Bound::Excluded(line), Bound::Unbounded);
         for &line in self.lines.line_numbers.range(after) {
             let items = &self.lines.items[&line];
@@ -394,6 +400,9 @@ pub fn run_typed_line(
         items: all_items,
         line_numbers,
     });
+    // A stored line that does not parse is an Invalid item, and the check
+    // does not count it
+    check_if_blocks(&lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     executor.clear_control_stacks();
@@ -412,13 +421,16 @@ pub fn run_typed_line(
 /// rules of `Cursor::skip_block`. Without this check, a true block with no
 /// ENDIF runs to the end of the program with no error.
 ///
-/// An ENDIF line with no open block is permitted (it does nothing).
+/// An ENDIF line with no open block is also an error, so that the user
+/// sees the mistake before the run. When the run gets to it, it does nothing.
 fn check_if_blocks(lines: &ProgramLines) -> Result<(), String> {
     let mut open = Vec::new();
     for line in &lines.line_numbers {
         let items = &lines.items[line];
         if let Some(Item::Statement(Statement::EndIf)) = items.first() {
-            open.pop();
+            if open.pop().is_none() {
+                return Err(format!("ENDIF without matching IF{}", at_line(*line)));
+            }
         }
         if let Some(Item::Statement(Statement::IfBlock { .. })) = items.last() {
             open.push(*line);

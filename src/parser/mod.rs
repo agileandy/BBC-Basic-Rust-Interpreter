@@ -600,11 +600,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x95 => parse_while_statement(&tokens[1..], line.line_number),
             // ENDWHILE statement
             0xA4 => Ok(Statement::EndWhile),
-            // ENDIF: parse_line reads it at the start of a line
-            0xA5 => Err(BBCBasicError::SyntaxError {
-                message: "ENDIF must be the first statement of a line".to_string(),
-                line: line.line_number,
-            }),
+            // ENDIF that is not at the start of a line: it does nothing, and
+            // the block IF scan does not count it (BBC BASIC V)
+            0xA5 => Ok(Statement::EndIf),
             // CIRCLE statement
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             // FILL statement
@@ -3525,10 +3523,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_endif_or_else_not_at_line_start_is_error() {
-        assert!(line_statements("40 PRINT 1 : ENDIF").is_err());
+    fn test_parse_else_not_at_line_start_is_error() {
         assert!(line_statements("40 PRINT 1 : ELSE").is_err());
-        assert!(line_statements("40 IF X THEN ENDIF").is_err());
+    }
+
+    #[test]
+    fn test_parse_endif_not_at_line_start_is_endif_statement() {
+        assert_eq!(
+            line_statements("40 PRINT 1 : ENDIF"),
+            Ok(vec![print_integer(1), Statement::EndIf])
+        );
+        assert_eq!(
+            line_statements("40 IF X THEN ENDIF"),
+            Ok(vec![Statement::If {
+                condition: Expression::Variable("X".to_string()),
+                then_part: vec![Statement::EndIf],
+                else_part: None,
+            }])
+        );
     }
 
     #[test]

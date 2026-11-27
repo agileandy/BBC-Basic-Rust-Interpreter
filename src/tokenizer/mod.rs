@@ -315,7 +315,9 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                         tokens.push(Token::DataText(text));
                     }
                 }
-            } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word) {
+            } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word).filter(|_| {
+                word == upper_word || !UPPER_CASE_ONLY_KEYWORDS.contains(&upper_word.as_str())
+            }) {
                 tokens.push(Token::ExtendedKeyword(prefix, token_byte));
             } else if let Some((keyword, name)) = split_proc_or_fn(&word) {
                 // PROCname or FNname: the name joins the keyword with no space
@@ -658,6 +660,10 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("ENDIF", 0xA5),
 ];
 
+/// Keywords that match only when typed in upper case. Other case forms are
+/// names, so a program with a variable `endif` keeps its meaning.
+const UPPER_CASE_ONLY_KEYWORDS: &[&str] = &["ENDIF"];
+
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
 /// The keyword must be in upper case, as in BBC BASIC.
 fn split_proc_or_fn(word: &str) -> Option<(&'static str, &str)> {
@@ -845,6 +851,14 @@ mod tests {
         assert_eq!(result.line_number, Some(40));
         assert_eq!(result.tokens, vec![Token::ExtendedKeyword(0xC8, 0xA5)]);
         assert_eq!(detokenize(&result).unwrap(), "40 ENDIF");
+    }
+
+    #[test]
+    fn test_tokenize_endif_not_in_upper_case_is_identifier() {
+        for word in ["endif", "EndIf", "ENDif"] {
+            let result = tokenize(&format!("{}=5", word)).unwrap();
+            assert_eq!(result.tokens[0], Token::Identifier(word.to_string()));
+        }
     }
 
     #[test]
