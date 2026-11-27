@@ -12,5 +12,5 @@
 120   INPUT#C%, B(I%)
 130 NEXT I%
 140 CLOSE#C%
-150 FOR I% = 1 TO N% : PRINT B(I%);" "; : NEXT I%
-160 PRINT
+150 REM A table of index and value, each in a field of 10
+160 FOR I% = 1 TO N% : PRINT I%, B(I%) : NEXT I%

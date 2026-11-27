@@ -1,4 +1,4 @@
-10 REM PRINT with the apostrophe for a new line
+10 REM PRINT separators: the apostrophe, the semicolon and the comma
 20 PRINT "Line one"'"Line two"
 30 PRINT "Gap below"''"After a blank line"
 40 PRINT '"Starts on a new line"
@@ -10,6 +10,16 @@
 100 PRINT "Sum: ";2 + 3'"Product: ";2 * 3
 110 PRINT TAB(2);"Tab";'SPC(2);"Space"
 120 X = 1.5
-130 PRINT X'X * 2'X * 3
-140 PRINT "No new line after this";
-150 PRINT '"End"
+130 REM A number at the start of PRINT fills a field of 10
+140 PRINT 42
+150 REM A semicolon before a number turns the field off
+160 PRINT ;42
+170 REM A comma moves to the next field of 10 and turns the field on
+180 PRINT "A";42,42
+190 REM A comma at the edge of a field prints no spaces
+200 PRINT 1,22,333
+210 REM An apostrophe does not change the field
+220 PRINT X'X * 2
+230 PRINT ;X'X * 2
+240 PRINT "No new line after this";
+250 PRINT '"End"

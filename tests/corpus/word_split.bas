@@ -12,7 +12,7 @@
 120 PRINT "Words: ";N%
 130 LONG% = 1
 140 FOR I% = 1 TO N%
-150   PRINT I%;" ";W$(I%);" (";LEN W$(I%);")"
+150   PRINT ;I%;" ";W$(I%);" (";LEN W$(I%);")"
 160   IF LEN W$(I%) > LEN W$(LONG%) THEN LONG% = I%
 170 NEXT I%
 180 PRINT "Longest: ";W$(LONG%)

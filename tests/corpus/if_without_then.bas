@@ -5,7 +5,7 @@
 50 IF X% > 3 X% = X% + 1 : PRINT "Now ";X%
 60 IF X% < 3 PRINT "Small" : PRINT "Not shown"
 70 FOR I% = 1 TO 4
-80   IF I% MOD 2 PRINT I%;" is odd" ELSE PRINT I%;" is even"
+80   IF I% MOD 2 PRINT ;I%;" is odd" ELSE PRINT ;I%;" is even"
 90 NEXT I%
 100 A$ = "YES"
 110 IF A$ = "YES" PROCsay("Agreed")

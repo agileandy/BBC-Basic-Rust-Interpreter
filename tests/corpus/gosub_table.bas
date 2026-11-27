@@ -3,7 +3,7 @@
 20 FOR I% = 1 TO 4
 30   READ OP%, A, B
 40   ON OP% GOSUB 200, 300, 400, 500
-50   PRINT A;" ";S$;" ";B;" = ";R
+50   PRINT ;A;" ";S$;" ";B;" = ";R
 60 NEXT I%
 70 GOSUB 600
 80 PRINT "Calls: ";CALLS%
