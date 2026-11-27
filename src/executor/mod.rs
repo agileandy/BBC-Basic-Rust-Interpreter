@@ -5,6 +5,7 @@
 // Unit tests never read stdin, so the stdin reader is not used in them.
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
+mod vdu;
 
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
@@ -319,6 +320,9 @@ pub struct Executor {
     // Current screen mode (MODE). A BBC Micro starts in mode 7, but the
     // executor starts in mode 0 so that graphics work with no MODE statement.
     screen_mode: ScreenMode,
+    // Bytes of a VDU command that waits for more parameter bytes. They stay
+    // between VDU statements.
+    vdu_queue: Vec<u8>,
 }
 
 impl Executor {
@@ -355,6 +359,7 @@ impl Executor {
             output: String::new(),
             column: 0,
             screen_mode: ScreenMode::from_number(0).expect("mode 0 is in the mode table"),
+            vdu_queue: Vec::new(),
         }
     }
 
@@ -457,6 +462,7 @@ impl Executor {
             Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
             Statement::Clg => self.execute_clg(),
             Statement::Mode { mode } => self.execute_mode(mode),
+            Statement::Vdu { items } => self.execute_vdu(items),
             Statement::Ellipse { x, y, major, minor } => self.execute_ellipse(x, y, major, minor),
             Statement::Rectangle {
                 x1,
@@ -1258,10 +1264,12 @@ impl Executor {
     }
 
     /// Remove all variables, arrays and DIM blocks, close the loops, the calls and the
-    /// LOCAL scopes, and move the DATA pointer to the first value. The
+    /// LOCAL scopes, move the DATA pointer to the first value and remove a
+    /// VDU command that is not complete. The
     /// resident integer variables A% to Z%, the procedures and the
     /// functions stay. CLEAR, RUN, NEW, LOAD and CHAIN use this.
     pub fn clear_variables(&mut self) {
+        self.vdu_queue.clear();
         self.variables.clear();
         self.reset_dim_space();
         self.clear_control_stacks();
