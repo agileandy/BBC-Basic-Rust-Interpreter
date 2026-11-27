@@ -1383,10 +1383,14 @@ impl Executor {
     }
 
     /// Execute MODE statement - select a screen mode, clear the text screen
-    /// and reset the graphics. A number that is not 0 to 7 gives Bad MODE.
+    /// and reset the graphics. A number from 8 to 255 selects mode `n AND 7`,
+    /// as on a BBC Micro Model B. A number that is not 0 to 255 gives Bad MODE.
     fn execute_mode(&mut self, mode: &Expression) -> Result<()> {
         let number = self.eval_integer(mode)?;
-        let screen_mode = ScreenMode::from_number(number).ok_or(BBCBasicError::BadMode)?;
+        if !(0..=255).contains(&number) {
+            return Err(BBCBasicError::BadMode);
+        }
+        let screen_mode = ScreenMode::from_number(number & 7).ok_or(BBCBasicError::BadMode)?;
 
         self.screen_mode = screen_mode;
         self.graphics.reset_for_mode(&screen_mode);
@@ -1414,6 +1418,11 @@ impl Executor {
         } else {
             self.text_background = colour;
         }
+    }
+
+    /// The current screen mode
+    pub fn screen_mode(&self) -> ScreenMode {
+        self.screen_mode
     }
 
     /// The current text foreground colour

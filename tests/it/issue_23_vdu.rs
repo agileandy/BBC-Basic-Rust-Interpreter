@@ -46,14 +46,6 @@ fn test_vdu_22_selects_a_mode() {
 }
 
 #[test]
-fn test_vdu_22_with_a_bad_mode_gives_error() {
-    let (result, _) = run(&["10 VDU 22, 9"]);
-
-    let message = result.expect_err("VDU 22, 9 must give an error");
-    assert!(message.contains("at line 10"), "message: {}", message);
-}
-
-#[test]
 fn test_vdu_25_moves_then_draws_a_line() {
     let (result, output) = run(&[
         "10 VDU 25, 4, 100; 200;",
