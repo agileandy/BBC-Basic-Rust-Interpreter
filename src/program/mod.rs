@@ -37,8 +37,6 @@ impl Position {
 pub struct ProgramStore {
     /// Stored program lines (line_number -> TokenizedLine)
     lines: BTreeMap<u16, TokenizedLine>,
-    /// Current execution line (for RUN, GOTO, etc.)
-    current_line: Option<u16>,
 }
 
 impl ProgramStore {
@@ -46,7 +44,6 @@ impl ProgramStore {
     pub fn new() -> Self {
         Self {
             lines: BTreeMap::new(),
-            current_line: None,
         }
     }
 
@@ -75,7 +72,6 @@ impl ProgramStore {
     /// Clear all program lines (NEW command)
     pub fn clear(&mut self) {
         self.lines.clear();
-        self.current_line = None;
     }
 
     /// Check if program is empty
@@ -91,43 +87,6 @@ impl ProgramStore {
     /// List the program (returns lines in order)
     pub fn list(&self) -> Vec<(u16, &TokenizedLine)> {
         self.lines.iter().map(|(k, v)| (*k, v)).collect()
-    }
-
-    /// Start program execution from the first line
-    pub fn start_execution(&mut self) -> Option<u16> {
-        self.current_line = self.lines.keys().next().copied();
-        self.current_line
-    }
-
-    /// Get the next line to execute
-    pub fn next_line(&mut self) -> Option<u16> {
-        if let Some(current) = self.current_line {
-            // Find the next line after current
-            self.current_line = self.lines.range((current + 1)..).next().map(|(k, _)| *k);
-            self.current_line
-        } else {
-            None
-        }
-    }
-
-    /// Jump to a specific line (for GOTO, GOSUB)
-    pub fn goto_line(&mut self, line_number: u16) -> bool {
-        if self.lines.contains_key(&line_number) {
-            self.current_line = Some(line_number);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Get the current execution line
-    pub fn get_current_line(&self) -> Option<u16> {
-        self.current_line
-    }
-
-    /// Stop execution
-    pub fn stop_execution(&mut self) {
-        self.current_line = None;
     }
 }
 
@@ -202,60 +161,6 @@ mod tests {
     }
 
     #[test]
-    fn test_start_execution() {
-        let mut store = ProgramStore::new();
-
-        store.store_line(tokenize("10 PRINT \"A\"").unwrap());
-        store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-
-        let first_line = store.start_execution();
-        assert_eq!(first_line, Some(10));
-        assert_eq!(store.get_current_line(), Some(10));
-    }
-
-    #[test]
-    fn test_next_line() {
-        let mut store = ProgramStore::new();
-
-        store.store_line(tokenize("10 PRINT \"A\"").unwrap());
-        store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-
-        store.start_execution();
-        assert_eq!(store.get_current_line(), Some(10));
-
-        store.next_line();
-        assert_eq!(store.get_current_line(), Some(20));
-
-        store.next_line();
-        assert_eq!(store.get_current_line(), Some(30));
-
-        let next = store.next_line();
-        assert_eq!(next, None);
-    }
-
-    #[test]
-    fn test_goto_line() {
-        let mut store = ProgramStore::new();
-
-        store.store_line(tokenize("10 PRINT \"A\"").unwrap());
-        store.store_line(tokenize("20 PRINT \"B\"").unwrap());
-        store.store_line(tokenize("30 PRINT \"C\"").unwrap());
-
-        store.start_execution();
-
-        // Jump to line 30
-        let success = store.goto_line(30);
-        assert!(success);
-        assert_eq!(store.get_current_line(), Some(30));
-
-        // Try to jump to non-existent line
-        let success = store.goto_line(999);
-        assert!(!success);
-    }
-
-    #[test]
     fn test_list_program() {
         let mut store = ProgramStore::new();
 
@@ -283,19 +188,5 @@ mod tests {
         let line = store.get_line(10).unwrap();
         // Verify it's the new line (this is a simplified check)
         assert!(line.line_number == Some(10));
-    }
-
-    #[test]
-    fn test_stop_execution() {
-        let mut store = ProgramStore::new();
-
-        store.store_line(tokenize("10 PRINT \"A\"").unwrap());
-        store.start_execution();
-
-        assert_eq!(store.get_current_line(), Some(10));
-
-        store.stop_execution();
-
-        assert_eq!(store.get_current_line(), None);
     }
 }
