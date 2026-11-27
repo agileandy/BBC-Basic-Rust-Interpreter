@@ -826,7 +826,8 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("MOUSE", 0x97),
     ("QUIT", 0x98),
     ("SYS", 0x99),
-    ("INSTALL", 0x9A),
+    // INSTALL (0x9A) is not a keyword here. The parser finds it by its place
+    // on the line, so that a variable named INSTALL still works (issue #185).
     ("LIBRARY", 0x9B),
     ("TINT", 0x9C),
     ("ELLIPSE", 0x9D),

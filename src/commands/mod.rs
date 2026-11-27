@@ -81,6 +81,8 @@ pub fn run_command(
         executor.clear_variables();
         // The handler line belongs to the old program
         executor.clear_error_handler();
+        // NEW removes the libraries of INSTALL (issue #185)
+        executor.libraries_mut().clear();
         say!(executor, "Program cleared");
         return Ok(Done);
     }
@@ -252,7 +254,7 @@ fn extract_filename(input: &str) -> Result<String, String> {
 }
 
 /// Use the file name as given if it has an extension, else add .bbas
-fn resolve_program_path(filename: &str) -> String {
+pub(crate) fn resolve_program_path(filename: &str) -> String {
     if std::path::Path::new(filename).extension().is_some() {
         filename.to_string()
     } else {
@@ -310,13 +312,15 @@ fn load_program(
     executor.clear_variables();
     // The handler line belongs to the old program
     executor.clear_error_handler();
+    // LOAD removes the libraries of INSTALL (issue #185)
+    executor.libraries_mut().clear();
 
     say!(executor, "Loaded from {}", path);
     Ok(())
 }
 
 /// Tokenize each line of the file text into a new program store
-fn parse_program(content: &str) -> Result<ProgramStore, String> {
+pub(crate) fn parse_program(content: &str) -> Result<ProgramStore, String> {
     let mut program = ProgramStore::new();
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();

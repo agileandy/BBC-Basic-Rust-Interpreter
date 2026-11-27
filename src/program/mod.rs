@@ -11,8 +11,35 @@ use std::collections::BTreeMap;
 /// stored line number, so it cannot be the key of a stored line.
 pub const TYPED_LINE: u32 = u16::MAX as u32 + 1;
 
+/// The line keys of line set `n` start at `n << SET_SHIFT` (issue #185).
+/// Set 0 is the program, with its stored lines and `TYPED_LINE`. Each
+/// library of INSTALL has the next set number. The key of a line holds its
+/// set, so that each stored position and each line of an error keeps it.
+const SET_SHIFT: u32 = 17;
+
+/// The line key of a stored line of a line set
+pub fn line_key(set: usize, line: u16) -> u32 {
+    // A run cannot install 2^15 libraries: the shift cannot overflow
+    ((set as u32) << SET_SHIFT) | u32::from(line)
+}
+
+/// The line set of a line key: 0 for the program, n for library n
+pub fn key_set(key: u32) -> usize {
+    (key >> SET_SHIFT) as usize
+}
+
+/// The line number of a line key in its set (None for the typed line)
+pub fn key_line(key: u32) -> Option<u16> {
+    if key == TYPED_LINE {
+        None
+    } else {
+        Some((key & u32::from(u16::MAX)) as u16)
+    }
+}
+
 /// The position of a statement in a running program: a line key (a stored
-/// line number or `TYPED_LINE`) and an index in the statements of that line.
+/// line number or `TYPED_LINE`, see `line_key`) and an index in the
+/// statements of that line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     pub line: u32,
@@ -28,7 +55,8 @@ impl Position {
         }
     }
 
-    /// The stored line number of the position (None for the typed line)
+    /// The stored line number of a position in the program (None for the
+    /// typed line and for a library line)
     pub fn stored_line(&self) -> Option<u16> {
         u16::try_from(self.line).ok()
     }
@@ -168,6 +196,29 @@ impl Default for ProgramStore {
 mod tests {
     use super::*;
     use crate::tokenizer::tokenize;
+
+    #[test]
+    fn a_line_key_holds_its_set_and_its_line_number() {
+        // The program keys are the line numbers, as before issue #185
+        assert_eq!(line_key(0, 10), 10);
+        assert_eq!(key_set(line_key(0, 65535)), 0);
+        assert_eq!(key_set(TYPED_LINE), 0);
+        assert_eq!(key_line(TYPED_LINE), None);
+
+        let key = line_key(2, 65535);
+        assert_eq!(key_set(key), 2);
+        assert_eq!(key_line(key), Some(65535));
+        assert_ne!(key, TYPED_LINE);
+        // A library position is not a stored line of the program (TRACE)
+        assert_eq!(
+            Position {
+                line: key,
+                index: 0
+            }
+            .stored_line(),
+            None
+        );
+    }
 
     #[test]
     fn test_size_of_empty_program_is_end_marker() {

@@ -15,6 +15,7 @@ pub mod extensions;
 pub mod filesystem;
 pub mod graphics;
 pub mod json;
+pub mod library;
 pub mod matrix;
 pub mod memory;
 pub mod os;

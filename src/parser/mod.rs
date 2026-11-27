@@ -435,6 +435,9 @@ pub enum Statement {
         channel: Expression,
         position: Expression,
     },
+    /// INSTALL file$ - load a library file of procedures and functions
+    /// (issue #185). The run loop executes it.
+    Install { file: Expression },
     /// MKDIR statement - make one directory (extension, not BBC BASIC)
     MakeDirectory { path: Expression },
     /// RMDIR statement - remove one empty directory (extension, not BBC BASIC)
@@ -910,6 +913,12 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // such as ?A = 5
         Token::Identifier(_) | Token::Member(..) | Token::Operator('?' | '!') => {
             match parse_assignment(tokens, line.line_number) {
+                // INSTALL file$ uses the same rule as MKDIR (issue #185)
+                Err(_) if matches!(&tokens[0], Token::Identifier(name) if name == "INSTALL") => {
+                    Ok(Statement::Install {
+                        file: parse_expression(&tokens[1..])?,
+                    })
+                }
                 // MKDIR path$ and RMDIR path$ are extension statements. A line
                 // that is a valid assignment, such as MKDIR = 3, keeps that meaning.
                 Err(_) if matches!(&tokens[0], Token::Identifier(name) if name == "MKDIR") => {
