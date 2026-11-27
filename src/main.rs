@@ -1,6 +1,6 @@
 use bbc_basic_interpreter::{
     executor::Executor,
-    program::ProgramStore,
+    program::{parse_list_range, ProgramStore},
     runner::{run_program_with_outcome, run_typed_line, RunOutcome},
     tokenizer::{detokenize, tokenize},
 };
@@ -77,8 +77,11 @@ fn main() {
             continue;
         }
 
-        if input.eq_ignore_ascii_case("list") {
-            list_program(&program);
+        if let Some(range) = list_command(input) {
+            match range {
+                Ok((start, end)) => list_program(&program, start, end),
+                Err(e) => println!("Error: {}", e),
+            }
             continue;
         }
 
@@ -212,13 +215,33 @@ fn process_line(
     }
 }
 
-fn list_program(program: &ProgramStore) {
+/// Match `LIST` with an optional range (any case). Return the range, or a syntax error.
+/// A bad range after `list` in lower or mixed case is a statement, such as `list = 5`.
+fn list_command(input: &str) -> Option<Result<(u16, u16), String>> {
+    let word = input.get(..4)?;
+    if !word.eq_ignore_ascii_case("list") {
+        return None;
+    }
+    let rest = &input[4..];
+    if !rest.is_empty()
+        && !rest.starts_with(|c: char| c.is_whitespace() || c.is_ascii_digit() || c == ',')
+    {
+        return None;
+    }
+    let range = parse_list_range(rest);
+    if range.is_err() && word != "LIST" {
+        return None;
+    }
+    Some(range)
+}
+
+fn list_program(program: &ProgramStore, start: u16, end: u16) {
     if program.is_empty() {
         println!("No program");
         return;
     }
 
-    for (line_number, line) in program.list() {
+    for (line_number, line) in program.list_range(start, end) {
         match detokenize(line) {
             Ok(text) => println!("{}", text),
             Err(e) => println!("Error listing line {}: {}", line_number, e),
@@ -561,7 +584,7 @@ fn print_help() {
     println!("  10                       - Delete line 10");
     println!();
     println!("Immediate Commands:");
-    println!("  LIST                     - List the program");
+    println!("  LIST [start][,[end]]     - List the program, or a range of lines");
     println!("  RUN                      - Run the stored program");
     println!("  NEW                      - Clear the program");
     println!("  LVAR                     - List the variables and arrays");
