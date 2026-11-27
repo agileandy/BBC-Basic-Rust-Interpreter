@@ -2145,10 +2145,20 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     let condition_tokens = &tokens[..then_pos];
     let condition = parse_expression(condition_tokens)?;
 
-    // Find ELSE keyword (if present)
-    let else_pos = tokens[then_pos + 1..]
-        .iter()
-        .position(|t| matches!(t, Token::Keyword(0x8B)));
+    // Find ELSE keyword (if present). A REM or DATA statement uses the rest
+    // of the line, so an ELSE after it is part of it.
+    let after_then = &tokens[then_pos + 1..];
+    let mut else_pos = None;
+    for (index, token) in after_then.iter().enumerate() {
+        let statement_start = index == 0 || matches!(after_then[index - 1], Token::Separator(':'));
+        if statement_start && matches!(token, Token::Keyword(0xF4 | 0xDC)) {
+            break;
+        }
+        if matches!(token, Token::Keyword(0x8B)) {
+            else_pos = Some(index);
+            break;
+        }
+    }
 
     let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
         // ELSE found: split then_part and else_part

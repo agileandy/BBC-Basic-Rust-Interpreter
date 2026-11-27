@@ -19,15 +19,27 @@ use bbc_basic_interpreter::tokenizer::tokenize;
 /// The run has a time limit, so that a loop defect fails the test and does
 /// not stop the test run.
 fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let source: Vec<String> = source.iter().map(|line| line.to_string()).collect();
+    run_with_one_executor(&[source])
+}
+
+/// Run the programs one after the other with the same executor. Return the
+/// result of the last run and the output of all the runs.
+fn run_with_one_executor(sources: &[&[&str]]) -> (Result<(), String>, String) {
+    let sources: Vec<Vec<String>> = sources
+        .iter()
+        .map(|source| source.iter().map(|line| line.to_string()).collect())
+        .collect();
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut executor = Executor::new();
-        let mut program = ProgramStore::new();
-        for line in &source {
-            program.store_line(tokenize(line).expect("line tokenizes"));
+        let mut result = Ok(());
+        for source in &sources {
+            let mut program = ProgramStore::new();
+            for line in source {
+                program.store_line(tokenize(line).expect("line tokenizes"));
+            }
+            result = run_program(&mut executor, &mut program);
         }
-        let result = run_program(&mut executor, &mut program);
         let _ = sender.send((result, executor.get_output().to_string()));
     });
     receiver
@@ -253,6 +265,55 @@ fn test_error_in_third_statement_gives_line_in_erl() {
 
     assert_eq!(result, Ok(()));
     assert_eq!(output, "ERL 20\n");
+}
+
+#[test]
+fn test_false_while_ignores_endwhile_in_if_branch() {
+    let (result, output) = run(&[
+        "10 X% = 5",
+        "15 Q% = 0",
+        "20 WHILE X% < 3",
+        "30 IF Q% THEN ENDWHILE",
+        "40 ENDWHILE",
+        "50 PRINT \"after\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "after\n");
+}
+
+#[test]
+fn test_second_run_has_no_repeat_from_first_run() {
+    let (result, output) = run_with_one_executor(&[
+        &["10 REPEAT", "20 END"],
+        &["10 PRINT \"B\"", "20 UNTIL 0", "30 PRINT \"DONE\""],
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "B\nDONE\n");
+}
+
+#[test]
+fn test_second_run_has_no_gosub_return_from_first_run() {
+    let (result, output) = run_with_one_executor(&[
+        &["10 GOSUB 100", "100 END"],
+        &["10 RETURN", "20 PRINT \"X\""],
+    ]);
+
+    assert_eq!(result, Err("RETURN without GOSUB".to_string()));
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_else_after_rem_in_then_branch_is_comment() {
+    let (result, output) = run(&[
+        "10 X% = 1",
+        "20 IF X% THEN PRINT \"A\" : REM or else fail",
+        "30 PRINT \"B\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "A\nB\n");
 }
 
 /// Give the input lines to the interpreter binary and return its output.

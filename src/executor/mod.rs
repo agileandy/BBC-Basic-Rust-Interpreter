@@ -2262,6 +2262,16 @@ impl Executor {
         self.function_body_runner = BodyRunnerSlot::default();
     }
 
+    /// Clear the GOSUB, FOR, REPEAT and WHILE stacks (used at the start of a
+    /// run, so that a position from an earlier run is not used)
+    pub fn clear_control_stacks(&mut self) {
+        self.return_stack.clear();
+        self.for_loops.clear();
+        self.repeat_stack.clear();
+        self.while_stack.clear();
+        self.next_loop_line = None;
+    }
+
     /// Set error handler (ON ERROR GOTO line)
     pub fn set_error_handler(&mut self, line_number: u16) {
         self.error_handler = Some(line_number);

@@ -150,6 +150,15 @@ impl Cursor<'_> {
         }
         self.current
     }
+
+    /// Go to the last item of the current line, so that `next` goes to the
+    /// first statement of the next line.
+    fn skip_rest_of_line(&mut self) {
+        if let Some(current) = self.current.as_mut() {
+            let line_length = self.lines.items.get(&current.line).map_or(0, Vec::len);
+            current.index = line_length.saturating_sub(1).max(current.index);
+        }
+    }
 }
 
 /// Why a function body run stopped the program instead of giving a BASIC error.
@@ -205,6 +214,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
     executor.reset_data();
     executor.clear_procedures();
     executor.clear_functions();
+    executor.clear_control_stacks();
 
     // First pass: parse each line, collect DATA statements and procedure definitions
     let mut all_items: HashMap<u16, Vec<Item>> = HashMap::new();
@@ -597,9 +607,12 @@ fn step(
                     let Some(current) = program.next() else {
                         return Err("WHILE without matching ENDWHILE".to_string().into());
                     };
-                    match program.lines.statement(current) {
-                        Some(Statement::While { .. }) => depth += 1,
-                        Some(Statement::EndWhile) => depth -= 1,
+                    match program.lines.item(current) {
+                        // An IF uses the rest of its line. A WHILE or ENDWHILE
+                        // in its branches does not count.
+                        Some(Item::If { .. }) => program.skip_rest_of_line(),
+                        Some(Item::Statement(Statement::While { .. })) => depth += 1,
+                        Some(Item::Statement(Statement::EndWhile)) => depth -= 1,
                         _ => {}
                     }
                 }
