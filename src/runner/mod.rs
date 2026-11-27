@@ -11,8 +11,9 @@ use std::rc::Rc;
 
 use crate::error::BBCBasicError;
 use crate::executor::{ErrorHandler, Executor, FunctionBody, Interrupt, ResultEvaluator};
+use crate::library::{fault_at, read_library, Library};
 use crate::parser::{parse_line, BinaryOperator, Expression, Statement};
-use crate::program::{Position, ProgramStore, TYPED_LINE};
+use crate::program::{key_line, key_set, line_key, Position, ProgramStore, TYPED_LINE};
 use crate::tokenizer::TokenizedLine;
 
 /// What the run loop does after a statement.
@@ -125,15 +126,82 @@ fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
     }
 }
 
-/// The parsed lines of the program, shared with the function body runner.
+/// The parsed lines of one line set: the program, or one library of INSTALL
+/// (issue #185). The keys are the line keys of the set.
 struct ProgramLines {
     items: HashMap<u32, Vec<Item>>,
-    /// The stored line numbers. The typed line is not in this set, so a jump
+    /// The stored line keys. The typed line is not in this set, so a jump
     /// or the end of a stored line never goes to it.
     line_numbers: BTreeSet<u32>,
+    /// The file and the line numbers of a library (None for the program)
+    library: Option<LibraryLines>,
+}
+
+/// A library line has the key of its place in the file, so the run goes
+/// through the lines in file order. A line can have a number or not.
+struct LibraryLines {
+    /// The file name, for the error messages
+    path: String,
+    /// The key of each line number (the first line with the number)
+    keys: HashMap<u16, u32>,
+    /// The line number of each key of a line with a number
+    numbers: HashMap<u32, u16>,
 }
 
 impl ProgramLines {
+    /// The lines of a set. The stored line keys are the keys of `items`.
+    fn new(items: HashMap<u32, Vec<Item>>, library: Option<LibraryLines>) -> Self {
+        let line_numbers = items.keys().copied().collect();
+        Self {
+            items,
+            line_numbers,
+            library,
+        }
+    }
+
+    /// The key of a line number in this set. In a library, only a line with
+    /// a number has one.
+    fn key_of(&self, line_number: u16) -> Option<u32> {
+        match &self.library {
+            Some(library) => library.keys.get(&line_number).copied(),
+            None => Some(line_number.into()),
+        }
+    }
+
+    /// The line number of a key, for ERL (None for the typed line and for a
+    /// library line with no number)
+    fn number_of(&self, line_key: u32) -> Option<u16> {
+        match &self.library {
+            Some(library) => library.numbers.get(&line_key).copied(),
+            None => key_line(line_key),
+        }
+    }
+
+    /// The name of a line in a message: `30`, `30 in "lib.bbas"` for a
+    /// library line with a number, or `3 of "lib.bbas"` for the third line
+    /// of the file when it has no number. None for the typed line.
+    fn line_label(&self, line_key: u32) -> Option<String> {
+        let place = key_line(line_key)?;
+        Some(match (&self.library, self.number_of(line_key)) {
+            (None, _) => place.to_string(),
+            (Some(library), Some(number)) => format!("{} in \"{}\"", number, library.path),
+            (Some(library), None) => format!("{} of \"{}\"", place, library.path),
+        })
+    }
+
+    /// " at line N" for a line of this set (see `line_label`), and nothing
+    /// for the typed line
+    fn at_line(&self, line_key: u32) -> String {
+        self.line_label(line_key)
+            .map_or_else(String::new, |label| format!(" at line {}", label))
+    }
+
+    /// The text of the internal error for a position with no line
+    fn line_not_found(&self, line_key: u32) -> String {
+        let label = self.line_label(line_key).unwrap_or_default();
+        format!("Line {} not found", label)
+    }
+
     /// The item at a position
     fn item(&self, position: Position) -> Option<&Item> {
         self.items.get(&position.line)?.get(position.index)
@@ -202,10 +270,67 @@ impl ProgramLines {
     }
 }
 
+/// The line sets of a run, shared with the function body runner. Set 0 is
+/// the program, and set n is library n. INSTALL adds a set while the
+/// program runs, so the list is in a `RefCell`.
+struct RunLines {
+    sets: RefCell<Vec<Rc<ProgramLines>>>,
+}
+
+impl RunLines {
+    fn new(program: ProgramLines) -> Self {
+        Self {
+            sets: RefCell::new(vec![Rc::new(program)]),
+        }
+    }
+
+    /// The line set of a line key
+    fn set_of(&self, line_key: u32) -> Rc<ProgramLines> {
+        Rc::clone(&self.sets.borrow()[key_set(line_key)])
+    }
+
+    /// The number of the next set that `add` makes
+    fn next_set(&self) -> usize {
+        self.sets.borrow().len()
+    }
+
+    fn add(&self, lines: ProgramLines) {
+        self.sets.borrow_mut().push(Rc::new(lines));
+    }
+
+    /// " at line N" for a line key of any set (see `ProgramLines::at_line`).
+    /// NEW and LOAD remove each routine with their libraries, so a key of a
+    /// set that is not there is a defect: it gives only the number in the key.
+    fn at_line(&self, line_key: u32) -> String {
+        match self.sets.borrow().get(key_set(line_key)) {
+            Some(lines) => lines.at_line(line_key),
+            None => format!(" at line {}", key_line(line_key).unwrap_or(0)),
+        }
+    }
+
+    /// The value of ERL for a line key: the line number in its file, or 0
+    /// for the typed line and for a library line with no number
+    fn erl(&self, line_key: u32) -> u16 {
+        let sets = self.sets.borrow();
+        let lines = sets.get(key_set(line_key));
+        lines
+            .and_then(|lines| lines.number_of(line_key))
+            .unwrap_or(0)
+    }
+
+    /// The BBC BASIC text of an error at a line key of any set
+    fn error_text(&self, error: &BBCBasicError, line_key: u32) -> String {
+        error_text_at(error, &self.at_line(line_key))
+    }
+}
+
 /// The position of a run. A function body run has its own cursor, so the
 /// caller continues from its own position.
 struct Cursor<'a> {
-    lines: &'a ProgramLines,
+    all: &'a RunLines,
+    /// The line set of the current position
+    set: usize,
+    lines: Rc<ProgramLines>,
     current: Option<Position>,
     /// The number of local scopes at the start of this run. A scope above
     /// it is a PROC that this run called, so ENDPROC can close it.
@@ -216,21 +341,60 @@ struct Cursor<'a> {
     return_floor: usize,
 }
 
-impl Cursor<'_> {
-    /// Go to the first statement of a line. Returns false if the line does
-    /// not exist.
-    fn goto_line(&mut self, line_number: u16) -> bool {
-        if self.lines.line_numbers.contains(&u32::from(line_number)) {
-            self.current = Some(Position::line_start(line_number));
-            true
-        } else {
-            false
+impl<'a> Cursor<'a> {
+    /// A cursor at `start`, or at the program when `start` is None
+    fn new(
+        all: &'a RunLines,
+        start: Option<Position>,
+        proc_floor: usize,
+        return_floor: usize,
+    ) -> Self {
+        let line_key = start.map_or(0, |position| position.line);
+        Self {
+            all,
+            set: key_set(line_key),
+            lines: all.set_of(line_key),
+            current: start,
+            proc_floor,
+            return_floor,
         }
     }
 
+    /// Use the line set of a line key for the next moves
+    fn enter_set(&mut self, line_key: u32) {
+        if key_set(line_key) != self.set {
+            self.set = key_set(line_key);
+            self.lines = self.all.set_of(line_key);
+        }
+    }
+
+    /// Go to the first statement of a line of the current line set. A GOTO
+    /// in a library goes to a line of the library that has this number.
+    /// Returns false if the line does not exist.
+    fn goto_line(&mut self, line_number: u16) -> bool {
+        self.lines
+            .key_of(line_number)
+            .is_some_and(|line_key| self.goto_key(line_key))
+    }
+
+    /// Go to the first statement of the line with this line key. Returns
+    /// false if the line does not exist.
+    fn goto_key(&mut self, line_key: u32) -> bool {
+        if !self.all.set_of(line_key).line_numbers.contains(&line_key) {
+            return false;
+        }
+        self.enter_set(line_key);
+        self.current = Some(Position {
+            line: line_key,
+            index: 0,
+        });
+        true
+    }
+
     /// Go to a position. A position after the last item of its line is the
-    /// first statement of the next line.
+    /// first statement of the next line of its set.
     fn goto(&mut self, position: Position) {
+        self.enter_set(position.line);
         let line_length = self.lines.items.get(&position.line).map_or(0, Vec::len);
         self.current = if position.index < line_length {
             Some(position)
@@ -404,6 +568,7 @@ pub fn run_program_with_outcome(
     executor.clear_variables();
     // RUN starts with no ON ERROR handler. CLEAR keeps the handler.
     executor.clear_error_handler();
+    // RUN and CHAIN keep the libraries of INSTALL, as the manual says
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
@@ -420,24 +585,22 @@ pub fn run_program_with_outcome(
                     .map_err(|e| error_text(&e, line_number.into()))?;
             }
         }
-        define_routines(executor, line_number, &items);
+        define_routines(executor, line_number.into(), &items, false);
 
         all_items.insert(line_number.into(), items);
     }
 
-    let line_numbers = all_items.keys().copied().collect();
-    let lines = Rc::new(ProgramLines {
-        items: all_items,
-        line_numbers,
-    });
-    check_if_blocks(&lines)?;
-    check_case_blocks(&lines)?;
-    let failure = install_function_body_runner(executor, &lines);
-
-    let start = lines.line_numbers.first().map(|line| Position {
+    let program_lines = ProgramLines::new(all_items, None);
+    check_if_blocks(&program_lines)?;
+    check_case_blocks(&program_lines)?;
+    let start = program_lines.line_numbers.first().map(|line| Position {
         line: *line,
         index: 0,
     });
+    let lines = Rc::new(RunLines::new(program_lines));
+    add_installed_libraries(executor, &lines)?;
+    let failure = install_function_body_runner(executor, &lines);
+
     let local_depth = executor.local_depth();
     let outcome = run_lines(executor, &lines, &failure, start);
     // A run that stops inside a PROC or FN restores its LOCAL variables
@@ -507,20 +670,18 @@ pub fn run_typed_line(
                 data_line_numbers.extend(values.iter().map(|_| Some(line_number)));
             }
         }
-        define_routines(executor, line_number, &items);
+        define_routines(executor, line_number.into(), &items, false);
         all_items.insert(line_number.into(), items);
     }
     executor.use_data_pool(data_values, data_line_numbers);
 
-    let line_numbers = all_items.keys().copied().collect();
-    all_items.insert(TYPED_LINE, typed_items);
-    let lines = Rc::new(ProgramLines {
-        items: all_items,
-        line_numbers,
-    });
+    let mut program_lines = ProgramLines::new(all_items, None);
+    program_lines.items.insert(TYPED_LINE, typed_items);
     // A stored line that does not parse is an Invalid item, and the check
     // does not count it
-    check_if_blocks(&lines)?;
+    check_if_blocks(&program_lines)?;
+    let lines = Rc::new(RunLines::new(program_lines));
+    add_installed_libraries(executor, &lines)?;
     // No CASE check here: a stored CASE mistake must not stop a typed
     // command. A typed line cannot hold a CASE. If the run gets to a stored
     // CASE structure with no ENDCASE, the CASE scan gives the error.
@@ -550,7 +711,7 @@ fn check_if_blocks(lines: &ProgramLines) -> Result<(), String> {
         let items = &lines.items[line];
         if let Some(Item::Statement(Statement::EndIf)) = items.first() {
             if open.pop().is_none() {
-                return Err(format!("ENDIF without matching IF{}", at_line(*line)));
+                return Err(format!("ENDIF without matching IF{}", lines.at_line(*line)));
             }
         }
         if let Some(Item::Statement(Statement::IfBlock { .. })) = items.last() {
@@ -558,7 +719,7 @@ fn check_if_blocks(lines: &ProgramLines) -> Result<(), String> {
         }
     }
     match open.last() {
-        Some(line) => Err(format!("IF without matching ENDIF{}", at_line(*line))),
+        Some(line) => Err(format!("IF without matching ENDIF{}", lines.at_line(*line))),
         None => Ok(()),
     }
 }
@@ -580,7 +741,11 @@ fn check_case_blocks(lines: &ProgramLines) -> Result<(), String> {
         };
         if let Some(word) = word {
             if open.is_empty() {
-                return Err(format!("{} without matching CASE{}", word, at_line(line)));
+                return Err(format!(
+                    "{} without matching CASE{}",
+                    word,
+                    lines.at_line(line)
+                ));
             }
             if word == "ENDCASE" {
                 open.pop();
@@ -591,21 +756,31 @@ fn check_case_blocks(lines: &ProgramLines) -> Result<(), String> {
         }
     }
     match open.last() {
-        Some(line) => Err(format!("CASE without matching ENDCASE{}", at_line(*line))),
+        Some(line) => Err(format!(
+            "CASE without matching ENDCASE{}",
+            lines.at_line(*line)
+        )),
         None => Ok(()),
     }
 }
 
-/// Define the DEF PROC and DEF FN statements of a line before the run, so
-/// that a definition after END works.
-fn define_routines(executor: &mut Executor, line_number: u16, items: &[Item]) {
+/// Define the DEF PROC and DEF FN statements of the line with this line key
+/// before the run, so that a definition after END works.
+///
+/// For a library line (`from_library`), a name that the program defines
+/// keeps that definition. A name of an earlier library gets the new one, so
+/// the last library that defines a name wins, as the manual says.
+fn define_routines(executor: &mut Executor, line_key: u32, items: &[Item], from_library: bool) {
     for (index, item) in items.iter().enumerate() {
         let position = Position {
-            line: line_number.into(),
+            line: line_key,
             index,
         };
         match item {
             Item::Statement(Statement::DefProc { name, params }) => {
+                if from_library && program_defines_procedure(executor, name) {
+                    continue;
+                }
                 executor.define_procedure(name.clone(), position, params.clone());
             }
             Item::Statement(Statement::DefFn {
@@ -613,6 +788,9 @@ fn define_routines(executor: &mut Executor, line_number: u16, items: &[Item]) {
                 params,
                 expression,
             }) => {
+                if from_library && program_defines_function(executor, name) {
+                    continue;
+                }
                 let body = match expression {
                     Some(expression) => {
                         FunctionBody::Expression(expression.clone(), Some(position.line))
@@ -626,11 +804,105 @@ fn define_routines(executor: &mut Executor, line_number: u16, items: &[Item]) {
     }
 }
 
+/// True if the procedure of this name has its DEF in the program (set 0)
+fn program_defines_procedure(executor: &Executor, name: &str) -> bool {
+    executor
+        .get_procedure(name)
+        .is_some_and(|procedure| key_set(procedure.position.line) == 0)
+}
+
+/// True if the function of this name has its DEF in the program (set 0),
+/// or the user typed its DEF in immediate mode
+fn program_defines_function(executor: &Executor, name: &str) -> bool {
+    executor
+        .get_function(name)
+        .is_some_and(|function| match &function.body {
+            FunctionBody::Lines(position) => key_set(position.line) == 0,
+            FunctionBody::Expression(_, Some(line_key)) => key_set(*line_key) == 0,
+            FunctionBody::Expression(_, None) => true,
+        })
+}
+
+/// Parse each line of a library as line set `set`. Each line has the key of
+/// its place in the file. A line with a fault gives Bad library with its
+/// place in the file, and no part of the library is used. The DATA of a
+/// library is not used (issue #186).
+fn parse_library(library: &Library, set: usize) -> Result<ProgramLines, BBCBasicError> {
+    let mut items = HashMap::new();
+    let mut keys = HashMap::new();
+    let mut numbers = HashMap::new();
+    for library_line in &library.lines {
+        let key = line_key(set, library_line.place);
+        let statements = parse_line(&library_line.line)
+            .map_err(|error| fault_at(library_line.place, &library.path, &error))?;
+        items.insert(key, flatten_line(statements));
+        if let Some(number) = library_line.line.line_number {
+            keys.entry(number).or_insert(key);
+            numbers.insert(key, number);
+        }
+    }
+    let library_lines = LibraryLines {
+        path: library.path.clone(),
+        keys,
+        numbers,
+    };
+    let lines = ProgramLines::new(items, Some(library_lines));
+    check_if_blocks(&lines).map_err(BBCBasicError::BadLibrary)?;
+    check_case_blocks(&lines).map_err(BBCBasicError::BadLibrary)?;
+    Ok(lines)
+}
+
+/// Define the routines of a library, in file order
+fn define_library_routines(executor: &mut Executor, lines: &ProgramLines) {
+    for &key in &lines.line_numbers {
+        define_routines(executor, key, &lines.items[&key], true);
+    }
+}
+
+/// Add the installed libraries to the line sets of a run, after the
+/// program, in the order of the INSTALL statements. Their routines come
+/// after those of the program.
+///
+/// This parses each library again for each run and each typed line. It is
+/// a cost and not a fault: the parsed lines are not kept between runs.
+fn add_installed_libraries(executor: &mut Executor, lines: &RunLines) -> Result<(), String> {
+    let libraries = executor.libraries().libraries().to_vec();
+    for library in &libraries {
+        // INSTALL parsed each line before it kept the library
+        let library_lines =
+            parse_library(library, lines.next_set()).map_err(|error| error_text_at(&error, ""))?;
+        define_library_routines(executor, &library_lines);
+        lines.add(library_lines);
+    }
+    Ok(())
+}
+
+/// Run `INSTALL file$`: load the file as a library, and add its routines
+/// (issue #185). A library with the same supplied name that is already
+/// installed is not loaded again. A file that is not there gives File not
+/// found, and a bad line gives Bad library. ON ERROR can catch both.
+fn install_library(
+    executor: &mut Executor,
+    all: &RunLines,
+    file: &Expression,
+) -> Result<(), StepError> {
+    let name = executor.eval_file_name(file)?;
+    if executor.libraries().is_installed(&name) {
+        return Ok(());
+    }
+    let library = read_library(&name)?;
+    let lines = parse_library(&library, all.next_set())?;
+    define_library_routines(executor, &lines);
+    all.add(lines);
+    executor.libraries_mut().add(library);
+    Ok(())
+}
+
 /// Make a call to a multi-line function run its body in `lines`. Returns the
 /// record of a failed body run, for the run loop.
 fn install_function_body_runner(
     executor: &mut Executor,
-    lines: &Rc<ProgramLines>,
+    lines: &Rc<RunLines>,
 ) -> Rc<RefCell<BodyFailure>> {
     let failure = Rc::new(RefCell::new(BodyFailure::default()));
     let runner_lines = Rc::clone(lines);
@@ -665,19 +937,21 @@ fn at_line(line_key: u32) -> String {
 /// The BBC BASIC text of an error: "<text> at line N", or
 /// "Syntax error at line N: <message>". The typed line has no line number.
 fn error_text(error: &BBCBasicError, line_key: u32) -> String {
+    error_text_at(error, &at_line(line_key))
+}
+
+/// The BBC BASIC text of an error with the location text `at`, such as
+/// " at line 30" or ` at line 30 in "mathlib.bbas"`
+fn error_text_at(error: &BBCBasicError, at: &str) -> String {
     match error {
-        BBCBasicError::SyntaxError { message, .. } if line_key != TYPED_LINE => {
-            format!("Syntax error at line {}: {}", line_key, message)
-        }
-        BBCBasicError::SyntaxError { message, .. } => format!("Syntax error: {}", message),
-        _ => format!("{}{}", error, at_line(line_key)),
+        BBCBasicError::SyntaxError { message, .. } => format!("Syntax error{}: {}", at, message),
+        _ => format!("{}{}", error, at),
     }
 }
 
-/// Set ERR, ERL and the text for REPORT to an error. ERL is 0 for the
-/// typed line.
-fn record_error(executor: &mut Executor, error: &BBCBasicError, line_key: u32) {
-    let error_line = u16::try_from(line_key).unwrap_or(0);
+/// Set ERR, ERL and the text for REPORT to an error. `error_line` is the
+/// value of ERL (see `RunLines::erl`).
+fn record_error(executor: &mut Executor, error: &BBCBasicError, error_line: u16) {
     executor.set_last_error(
         error_number(error),
         error_line,
@@ -705,25 +979,21 @@ fn is_on_error_statements(lines: &ProgramLines, handler_position: Position) -> b
 /// to the ON ERROR handler.
 fn run_lines(
     executor: &mut Executor,
-    lines: &ProgramLines,
+    lines: &RunLines,
     failure: &RefCell<BodyFailure>,
     start: Option<Position>,
 ) -> Result<RunOutcome, String> {
     let local_depth = executor.local_depth();
-    let mut cursor = Cursor {
-        lines,
-        current: start,
-        proc_floor: local_depth,
-        // The main run can return through each open GOSUB (CONT in a GOSUB)
-        return_floor: 0,
-    };
+    // The main run can return through each open GOSUB (CONT in a GOSUB)
+    let mut cursor = Cursor::new(lines, start, local_depth, 0);
     let mut previous_line = None;
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
-        let item = lines
+        let set = Rc::clone(&cursor.lines);
+        let item = set
             .item(position)
-            .ok_or_else(|| format!("Line {} not found", line_number))?;
+            .ok_or_else(|| set.line_not_found(line_number))?;
 
         // TRACE: a new stored line starts at its first statement, or when
         // the run comes from a different line
@@ -743,7 +1013,7 @@ fn run_lines(
             Ok(Flow::Stop) => break,
             Ok(Flow::Quit) => return Ok(RunOutcome::Quit),
             Ok(Flow::FnReturn(_)) => {
-                return Err(format!("= without FN call{}", at_line(line_number)));
+                return Err(format!("= without FN call{}", set.at_line(line_number)));
             }
             Err(error) => error,
         };
@@ -767,21 +1037,25 @@ fn run_lines(
             (None, StepError::Runtime(e) | StepError::RuntimeAt(e, _)) => {
                 // Set ERL, ERR and the text for REPORT, also when no
                 // handler catches the error
-                record_error(executor, &e, error_line);
+                record_error(executor, &e, lines.erl(error_line));
 
                 // Handle an error in a stored line with the ON ERROR handler
                 // if one is set
                 let handler = executor.get_error_handler();
-                let (Some(handler), Ok(_)) = (handler, u16::try_from(error_line)) else {
-                    return Err(error_text(&e, error_line));
+                let (Some(handler), Some(_)) = (handler, key_line(error_line)) else {
+                    return Err(lines.error_text(&e, error_line));
                 };
 
                 match handler {
-                    ErrorHandler::Line(handler_line) => {
-                        if !cursor.goto_line(handler_line) {
+                    ErrorHandler::Line(handler_key) => {
+                        if !cursor.goto_key(handler_key) {
                             return Err(format!(
-                                "Error handler line {} not found (from error at line {})",
-                                handler_line, error_line
+                                "Error handler line {} not found (from error{})",
+                                lines
+                                    .set_of(handler_key)
+                                    .line_label(handler_key)
+                                    .unwrap_or_default(),
+                                lines.at_line(error_line)
                             ));
                         }
                     }
@@ -791,15 +1065,18 @@ fn run_lines(
                         if position.line == handler_position.line
                             && position.index >= handler_position.index =>
                     {
-                        return Err(error_text(&e, error_line));
+                        return Err(lines.error_text(&e, error_line));
                     }
                     // A program edit after the ON ERROR changed or deleted
                     // its line: the handler is not valid
                     ErrorHandler::Statements(handler_position)
-                        if !is_on_error_statements(lines, handler_position) =>
+                        if !is_on_error_statements(
+                            &lines.set_of(handler_position.line),
+                            handler_position,
+                        ) =>
                     {
                         executor.clear_error_handler();
-                        return Err(error_text(&e, error_line));
+                        return Err(lines.error_text(&e, error_line));
                     }
                     ErrorHandler::Statements(handler_position) => cursor.goto(handler_position),
                 }
@@ -824,25 +1101,26 @@ fn run_lines(
 /// and any stop of the program go to `failure` for the main run loop.
 fn run_function_body(
     executor: &mut Executor,
-    lines: &ProgramLines,
+    lines: &RunLines,
     failure: &RefCell<BodyFailure>,
     def_position: Position,
     evaluate: ResultEvaluator,
 ) -> Result<(), BBCBasicError> {
     let def_line = def_position.line;
-    let mut cursor = Cursor {
+    // The scope of the function is open: ENDPROC cannot close it. The
+    // GOSUBs of the caller are not open in the function body.
+    let mut cursor = Cursor::new(
         lines,
-        current: Some(def_position),
-        // The scope of the function is open: ENDPROC cannot close it
-        proc_floor: executor.local_depth(),
-        // The GOSUBs of the caller are not open in the function body
-        return_floor: executor.return_depth(),
-    };
+        Some(def_position),
+        executor.local_depth(),
+        executor.return_depth(),
+    );
     cursor.next();
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
-        let item = lines.item(position).ok_or(BBCBasicError::BadProgram)?;
+        let set = Rc::clone(&cursor.lines);
+        let item = set.item(position).ok_or(BBCBasicError::BadProgram)?;
 
         let result = match step(executor, &mut cursor, item, position) {
             Ok(Flow::Next) => {
@@ -886,7 +1164,7 @@ fn run_function_body(
     }
 
     // The body ran past the last line of the program
-    let message = format!("Function at line {} has no = line", def_line);
+    let message = format!("Function{} has no = line", lines.at_line(def_line));
     abort_program(failure, def_line, BodyAbort::Fatal(message))
 }
 
@@ -920,14 +1198,19 @@ fn run_case(
     value: &Expression,
     line_number: u32,
 ) -> Result<(), StepError> {
-    let lines = program.lines;
+    let lines = Rc::clone(&program.lines);
     // The WHEN and OTHERWISE lines of the structure, and its ENDCASE line
     let mut case_lines = Vec::new();
     let mut end_line = line_number;
     loop {
         end_line = lines
             .next_case_line(end_line, end_line == line_number)
-            .ok_or_else(|| format!("CASE without matching ENDCASE{}", at_line(line_number)))?;
+            .ok_or_else(|| {
+                format!(
+                    "CASE without matching ENDCASE{}",
+                    lines.at_line(line_number)
+                )
+            })?;
         if let Some(Statement::EndCase) = lines.first_statement(end_line) {
             break;
         }
@@ -1012,19 +1295,49 @@ fn step(
             if executor.eval_integer(condition)? != 0 {
                 return Ok(Flow::Next);
             }
-            program
-                .skip_block(line_number, true)
-                .ok_or_else(|| format!("IF without matching ENDIF{}", at_line(line_number)))?;
+            program.skip_block(line_number, true).ok_or_else(|| {
+                format!(
+                    "IF without matching ENDIF{}",
+                    program.lines.at_line(line_number)
+                )
+            })?;
             return Ok(Flow::Jumped);
         }
         // The end of a THEN block: continue after the matching ENDIF
         Statement::BlockElse => {
-            program
-                .skip_block(line_number, false)
-                .ok_or_else(|| format!("ELSE without matching ENDIF{}", at_line(line_number)))?;
+            program.skip_block(line_number, false).ok_or_else(|| {
+                format!(
+                    "ELSE without matching ENDIF{}",
+                    program.lines.at_line(line_number)
+                )
+            })?;
             return Ok(Flow::Jumped);
         }
         Statement::EndIf => return Ok(Flow::Next),
+        // The handler line is in the line set of the ON ERROR GOTO. In a
+        // library, only a line with a number has a key: with no line of
+        // that number, the error is at the ON ERROR GOTO.
+        Statement::OnError {
+            line_number: target,
+        } => {
+            let handler_key = program
+                .lines
+                .key_of(*target)
+                .ok_or(BBCBasicError::NoSuchLine((*target).into()))?;
+            executor.set_error_handler_line_key(handler_key);
+            return Ok(Flow::Next);
+        }
+        Statement::Install { file } => {
+            install_library(executor, program.all, file)?;
+            return Ok(Flow::Next);
+        }
+        // INSTALL defined the functions of a library with the precedence of
+        // the manual. A run through a single-line DEF FN of a library must
+        // not define it again over a function that wins.
+        Statement::DefFn {
+            expression: Some(_),
+            ..
+        } if program.set != 0 => return Ok(Flow::Next),
         // Store the handler and continue at the next line. The handler
         // statements run only when an error occurs.
         Statement::OnErrorStatements { .. } => {
@@ -1046,11 +1359,15 @@ fn step(
             } else {
                 "OTHERWISE"
             };
-            let lines = program.lines;
+            let lines = Rc::clone(&program.lines);
             let mut line = line_number;
             loop {
                 line = lines.next_case_line(line, false).ok_or_else(|| {
-                    format!("{} without matching CASE{}", word, at_line(line_number))
+                    format!(
+                        "{} without matching CASE{}",
+                        word,
+                        lines.at_line(line_number)
+                    )
                 })?;
                 if let Some(Statement::EndCase) = lines.first_statement(line) {
                     program.goto(Position { line, index: 1 });
@@ -1240,16 +1557,17 @@ fn step(
             let entered = executor.push_while(position, condition)?;
             if entered.is_none() {
                 // Condition false: scan forward to the matching ENDWHILE
+                let lines = Rc::clone(&program.lines);
                 let mut depth = 1;
                 while depth > 0 {
                     let Some(current) = program.next() else {
                         return Err(format!(
                             "WHILE without matching ENDWHILE{}",
-                            at_line(line_number)
+                            lines.at_line(line_number)
                         )
                         .into());
                     };
-                    match program.lines.item(current) {
+                    match lines.item(current) {
                         // An IF uses the rest of its line. A WHILE or ENDWHILE
                         // in its branches does not count.
                         Some(Item::If { .. }) => program.skip_rest_of_line(),
@@ -1267,11 +1585,11 @@ fn step(
             let while_position = executor
                 .check_endwhile_get_while_line()
                 .ok_or(BBCBasicError::NoWhile)?;
-            let Some(Statement::While { condition }) = program.lines.statement(while_position)
-            else {
+            let while_lines = program.all.set_of(while_position.line);
+            let Some(Statement::While { condition }) = while_lines.statement(while_position) else {
                 return Err(format!(
-                    "Could not find WHILE statement at line {}",
-                    while_position.line
+                    "Could not find WHILE statement{}",
+                    while_lines.at_line(while_position.line)
                 )
                 .into());
             };
@@ -1299,7 +1617,7 @@ fn step(
 /// later loop. A DEF line, or the end of the program, stops the scan with
 /// the error FOR EACH without matching NEXT, and removes the loop.
 fn skip_empty_for_each(executor: &mut Executor, program: &mut Cursor) -> Result<(), StepError> {
-    let lines = program.lines;
+    let lines = Rc::clone(&program.lines);
     let mut depth = 1;
     loop {
         let Some(current) = program.next() else {
@@ -1394,6 +1712,46 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::MissingNext => 156,
         // Singular matrix is an extension error. BBC BASIC does not use ERR 157 (issue #190).
         BBCBasicError::SingularMatrix => 157,
+        // Bad library is an extension error. The manual names no error for
+        // INSTALL, and BBC BASIC does not use ERR 158 (issue #185).
+        BBCBasicError::BadLibrary(_) => 158,
         _ => 255,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A library line set with a numbered line at place 2 (line 30) and a
+    /// line with no number at place 3
+    fn library_set() -> ProgramLines {
+        let library = LibraryLines {
+            path: "lib.bbas".to_string(),
+            keys: HashMap::from([(30, line_key(1, 2))]),
+            numbers: HashMap::from([(line_key(1, 2), 30)]),
+        };
+        ProgramLines::new(HashMap::new(), Some(library))
+    }
+
+    #[test]
+    fn line_not_found_names_the_line_and_the_file_of_a_library() {
+        let lines = library_set();
+
+        assert_eq!(
+            lines.line_not_found(line_key(1, 2)),
+            "Line 30 in \"lib.bbas\" not found"
+        );
+        assert_eq!(
+            lines.line_not_found(line_key(1, 3)),
+            "Line 3 of \"lib.bbas\" not found"
+        );
+    }
+
+    #[test]
+    fn line_not_found_names_a_program_line_as_before() {
+        let lines = ProgramLines::new(HashMap::new(), None);
+
+        assert_eq!(lines.line_not_found(10), "Line 10 not found");
     }
 }

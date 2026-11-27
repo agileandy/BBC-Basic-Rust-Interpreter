@@ -81,6 +81,8 @@ pub fn run_command(
         executor.clear_variables();
         // The handler line belongs to the old program
         executor.clear_error_handler();
+        // NEW removes the libraries of INSTALL and each routine (issue #185)
+        executor.clear_libraries_and_routines();
         say!(executor, "Program cleared");
         return Ok(Done);
     }
@@ -98,6 +100,9 @@ pub fn run_command(
     if is_file_command && input_upper.starts_with("LOAD ") {
         let filename = extract_filename(input)?;
         load_program(executor, program, &filename)?;
+        // LOAD removes the libraries of INSTALL and each routine (issue
+        // #185). CHAIN keeps the libraries, as the manual says.
+        executor.clear_libraries_and_routines();
         return Ok(Done);
     }
 
@@ -252,7 +257,7 @@ fn extract_filename(input: &str) -> Result<String, String> {
 }
 
 /// Use the file name as given if it has an extension, else add .bbas
-fn resolve_program_path(filename: &str) -> String {
+pub(crate) fn resolve_program_path(filename: &str) -> String {
     if std::path::Path::new(filename).extension().is_some() {
         filename.to_string()
     } else {

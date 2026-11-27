@@ -17,6 +17,7 @@ pub use console::{Console, Interrupt};
 use crate::collections::{CollectionStore, Element};
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
+use crate::library::LibraryStore;
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, DimItem, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
@@ -366,8 +367,10 @@ pub struct ErrorInfo {
 /// Where the run continues when an error occurs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorHandler {
-    /// ON ERROR GOTO: the first statement of this line
-    Line(u16),
+    /// ON ERROR GOTO: the first statement of the line with this line key.
+    /// The key holds the line set, so that the handler of a library goes to
+    /// a line of the library (issue #185).
+    Line(u32),
     /// ON ERROR <statements>: the first statement after ON ERROR
     Statements(Position),
 }
@@ -478,6 +481,8 @@ pub struct Executor {
     function_loop_floor: LoopDepths,
     // Error handler: where the run continues on error (None = no handler)
     error_handler: Option<ErrorHandler>,
+    // The libraries of INSTALL (issue #185)
+    libraries: LibraryStore,
     // TRACE: the run prints each stored line number below this limit (None = off)
     trace_limit: Option<u32>,
     // Last error information (for ERL and ERR functions)
@@ -548,6 +553,7 @@ impl Executor {
             evaluation_depth: 0,
             function_loop_floor: LoopDepths::default(),
             error_handler: None,
+            libraries: LibraryStore::default(),
             trace_limit: None,
             last_error: None,
             open_files: HashMap::new(),
@@ -817,6 +823,12 @@ impl Executor {
                 // The run loop sets the handler, because it knows the position
                 Ok(())
             }
+            // The run loop executes INSTALL, because it adds a line set
+            // (issue #185). With no run loop, INSTALL cannot work.
+            Statement::Install { .. } => Err(BBCBasicError::SyntaxError {
+                message: "INSTALL needs the run loop".to_string(),
+                line: None,
+            }),
             Statement::Trace { mode } => self.execute_trace(mode),
             Statement::PrintFile { handle, items } => self.execute_print_file(handle, items),
             Statement::InputFile { handle, targets } => self.execute_input_file(handle, targets),
@@ -4274,7 +4286,13 @@ impl Executor {
 
     /// Set error handler (ON ERROR GOTO line)
     pub fn set_error_handler(&mut self, line_number: u16) {
-        self.error_handler = Some(ErrorHandler::Line(line_number));
+        self.set_error_handler_line_key(line_number.into());
+    }
+
+    /// Set the error handler to the line with this line key (ON ERROR GOTO
+    /// in a line set of the run loop)
+    pub fn set_error_handler_line_key(&mut self, line_key: u32) {
+        self.error_handler = Some(ErrorHandler::Line(line_key));
     }
 
     /// Set the error handler to the statements at a position
@@ -4291,6 +4309,35 @@ impl Executor {
     /// Get the error handler (returns None if no handler set)
     pub fn get_error_handler(&self) -> Option<ErrorHandler> {
         self.error_handler
+    }
+
+    /// The libraries of INSTALL. CLEAR, RUN and CHAIN keep them.
+    pub fn libraries(&self) -> &LibraryStore {
+        &self.libraries
+    }
+
+    /// The libraries of INSTALL, to add a library
+    pub fn libraries_mut(&mut self) -> &mut LibraryStore {
+        &mut self.libraries
+    }
+
+    /// Remove the libraries and each procedure and function (NEW and LOAD).
+    /// A routine whose DEF is in a removed library must not stay, and a
+    /// single-line function of the old program must not stay.
+    pub fn clear_libraries_and_routines(&mut self) {
+        self.libraries.clear();
+        self.clear_procedures();
+        self.clear_functions();
+    }
+
+    /// The definition of a function, if one has this name
+    pub fn get_function(&self, name: &str) -> Option<&FunctionDefinition> {
+        self.functions.get(name)
+    }
+
+    /// The value of a string expression: the file name of INSTALL
+    pub fn eval_file_name(&mut self, expression: &Expression) -> Result<String> {
+        self.eval_string(expression)
     }
 
     /// Execute a TRACE statement. The trace stays on between runs.
@@ -7179,6 +7226,18 @@ mod tests {
         executor.execute_statement(&stmt).unwrap();
 
         assert_eq!(executor.get_error_handler(), None);
+    }
+
+    #[test]
+    fn install_outside_the_run_loop_gives_an_error() {
+        // The run loop executes INSTALL (issue #185). The executor alone
+        // cannot add a line set, so it must not do nothing with no error.
+        let mut executor = Executor::new();
+        let stmt = Statement::Install {
+            file: Expression::String("lib".to_string()),
+        };
+
+        assert!(executor.execute_statement(&stmt).is_err());
     }
 
     #[test]
