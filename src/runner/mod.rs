@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::error::BBCBasicError;
 use crate::executor::{ErrorHandler, Executor, FunctionBody, ResultEvaluator};
-use crate::parser::{parse_line, Expression, Statement};
+use crate::parser::{parse_line, BinaryOperator, Expression, Statement};
 use crate::program::{Position, ProgramStore, TYPED_LINE};
 use crate::tokenizer::TokenizedLine;
 
@@ -145,6 +145,54 @@ impl ProgramLines {
             Item::Statement(statement) => Some(statement),
             _ => None,
         }
+    }
+
+    /// The first statement of a line (None for an IF item)
+    fn first_statement(&self, line: u32) -> Option<&Statement> {
+        self.statement(Position { line, index: 0 })
+    }
+
+    /// True if the line ends with `CASE expr OF`, so it opens a CASE structure
+    fn ends_with_case(&self, line: u32) -> bool {
+        matches!(
+            self.items.get(&line).and_then(|items| items.last()),
+            Some(Item::Statement(Statement::Case { .. }))
+        )
+    }
+
+    /// The next WHEN, OTHERWISE or ENDCASE line of a CASE structure, after
+    /// `line`. Returns None if no line matches before the end of the program.
+    ///
+    /// With `opens` true, `line` is the CASE line of the structure. If not,
+    /// `line` is a WHEN or OTHERWISE line of the structure, and a CASE at its
+    /// end opens a nested structure. Only a WHEN, OTHERWISE or ENDCASE at the
+    /// start of a line counts, as for the block IF scan. The lines of a
+    /// nested CASE structure do not count.
+    fn next_case_line(&self, line: u32, opens: bool) -> Option<u32> {
+        let mut depth = if !opens && self.ends_with_case(line) {
+            2
+        } else {
+            1
+        };
+        let after = (Bound::Excluded(line), Bound::Unbounded);
+        for &next in self.line_numbers.range(after) {
+            match self.first_statement(next) {
+                Some(Statement::When { .. } | Statement::Otherwise) if depth == 1 => {
+                    return Some(next);
+                }
+                Some(Statement::EndCase) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(next);
+                    }
+                }
+                _ => {}
+            }
+            if self.ends_with_case(next) {
+                depth += 1;
+            }
+        }
+        None
     }
 }
 
@@ -370,6 +418,7 @@ pub fn run_program_with_outcome(
         line_numbers,
     });
     check_if_blocks(&lines)?;
+    check_case_blocks(&lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     let start = lines.line_numbers.first().map(|line| Position {
@@ -415,6 +464,10 @@ pub fn run_typed_line(
             Item::Statement(Statement::OnErrorStatements { .. }) => {
                 return Err("ON ERROR with statements needs a line number".to_string());
             }
+            // The WHEN lines are on the next lines, and a typed line has none
+            Item::Statement(Statement::Case { .. }) => {
+                return Err("CASE needs a line number".to_string());
+            }
             _ => {}
         }
     }
@@ -455,6 +508,7 @@ pub fn run_typed_line(
     // A stored line that does not parse is an Invalid item, and the check
     // does not count it
     check_if_blocks(&lines)?;
+    check_case_blocks(&lines)?;
     let failure = install_function_body_runner(executor, &lines);
 
     executor.clear_control_stacks();
@@ -490,6 +544,39 @@ fn check_if_blocks(lines: &ProgramLines) -> Result<(), String> {
     }
     match open.last() {
         Some(line) => Err(format!("IF without matching ENDIF{}", at_line(*line))),
+        None => Ok(()),
+    }
+}
+
+/// Make sure that each CASE line has a matching ENDCASE line, with the count
+/// rules of `ProgramLines::next_case_line`. Without this check, a case with
+/// no ENDCASE runs to the end of the program with no error.
+///
+/// A WHEN, OTHERWISE or ENDCASE line with no open CASE structure is also an
+/// error, so that the user sees the mistake before the run.
+fn check_case_blocks(lines: &ProgramLines) -> Result<(), String> {
+    let mut open = Vec::new();
+    for &line in &lines.line_numbers {
+        let word = match lines.first_statement(line) {
+            Some(Statement::When { .. }) => Some("WHEN"),
+            Some(Statement::Otherwise) => Some("OTHERWISE"),
+            Some(Statement::EndCase) => Some("ENDCASE"),
+            _ => None,
+        };
+        if let Some(word) = word {
+            if open.is_empty() {
+                return Err(format!("{} without matching CASE{}", word, at_line(line)));
+            }
+            if word == "ENDCASE" {
+                open.pop();
+            }
+        }
+        if lines.ends_with_case(line) {
+            open.push(line);
+        }
+    }
+    match open.last() {
+        Some(line) => Err(format!("CASE without matching ENDCASE{}", at_line(*line))),
         None => Ok(()),
     }
 }
@@ -781,6 +868,51 @@ fn abort_program(
     Err(BBCBasicError::BadCall)
 }
 
+/// Run `CASE value OF` on `line`. Evaluate the value one time, then go to
+/// the statement after the values of the first WHEN of the structure with an
+/// equal value. With no match, go to the statement after OTHERWISE, or after
+/// ENDCASE.
+///
+/// Numbers compare as numbers and strings as strings. A string and a number
+/// give "Type mismatch".
+fn run_case(
+    executor: &mut Executor,
+    program: &mut Cursor,
+    value: &Expression,
+    line_number: u32,
+) -> Result<(), StepError> {
+    let value = executor.eval_to_literal(value)?;
+    let lines = program.lines;
+    let mut line = line_number;
+    let mut opens = true;
+    loop {
+        line = lines
+            .next_case_line(line, opens)
+            .ok_or_else(|| format!("CASE without matching ENDCASE{}", at_line(line_number)))?;
+        opens = false;
+        if let Some(Statement::When { values }) = lines.first_statement(line) {
+            let mut matched = false;
+            for when_value in values {
+                let equal = Expression::BinaryOp {
+                    left: Box::new(value.clone()),
+                    op: BinaryOperator::Equal,
+                    right: Box::new(when_value.clone()),
+                };
+                if executor.eval_integer(&equal)? != 0 {
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                continue;
+            }
+        }
+        // A matched WHEN, an OTHERWISE or the ENDCASE
+        program.goto(Position { line, index: 1 });
+        return Ok(());
+    }
+}
+
 /// Execute one item at `position` and apply its control flow.
 fn step(
     executor: &mut Executor,
@@ -843,6 +975,30 @@ fn step(
             program.skip_rest_of_line();
             return Ok(Flow::Next);
         }
+        Statement::Case { value } => {
+            run_case(executor, program, value, line_number)?;
+            return Ok(Flow::Jumped);
+        }
+        // The end of the case before: continue after the matching ENDCASE
+        Statement::When { .. } | Statement::Otherwise => {
+            let word = if let Statement::When { .. } = statement {
+                "WHEN"
+            } else {
+                "OTHERWISE"
+            };
+            let lines = program.lines;
+            let mut line = line_number;
+            loop {
+                line = lines.next_case_line(line, false).ok_or_else(|| {
+                    format!("{} without matching CASE{}", word, at_line(line_number))
+                })?;
+                if let Some(Statement::EndCase) = lines.first_statement(line) {
+                    program.goto(Position { line, index: 1 });
+                    return Ok(Flow::Jumped);
+                }
+            }
+        }
+        Statement::EndCase => return Ok(Flow::Next),
         _ => {}
     }
 

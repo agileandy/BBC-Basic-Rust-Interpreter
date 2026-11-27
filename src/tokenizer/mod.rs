@@ -719,6 +719,11 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("OVERLAY", 0xA3),
     ("ENDWHILE", 0xA4),
     ("ENDIF", 0xA5),
+    // The words of CASE ... OF ... WHEN ... OTHERWISE ... ENDCASE
+    ("ENDCASE", 0xA6),
+    ("OF", 0xA7),
+    ("WHEN", 0xA8),
+    ("OTHERWISE", 0xA9),
 ];
 
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
@@ -908,6 +913,37 @@ mod tests {
         assert_eq!(result.line_number, Some(40));
         assert_eq!(result.tokens, vec![Token::ExtendedKeyword(0xC8, 0xA5)]);
         assert_eq!(detokenize(&result).unwrap(), "40 ENDIF");
+    }
+
+    #[test]
+    fn test_tokenize_case_words_and_list_them_again() {
+        let lines = [
+            ("20 CASE X OF", vec![(0xC8, 0x8E), (0xC8, 0xA7)]),
+            ("30 WHEN 1,2:PRINT 1", vec![(0xC8, 0xA8)]),
+            ("40 OTHERWISE PRINT 2", vec![(0xC8, 0xA9)]),
+            ("50 ENDCASE", vec![(0xC8, 0xA6)]),
+        ];
+        for (source, keywords) in lines {
+            let result = tokenize(source).unwrap();
+            let found: Vec<(u8, u8)> = result
+                .tokens
+                .iter()
+                .filter_map(|token| match token {
+                    Token::ExtendedKeyword(prefix, byte) => Some((*prefix, *byte)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(found, keywords, "{}", source);
+            assert_eq!(detokenize(&result).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_tokenize_case_words_not_in_upper_case_are_identifiers() {
+        for word in ["case", "of", "when", "otherwise", "endcase", "When"] {
+            let result = tokenize(&format!("{}=5", word)).unwrap();
+            assert_eq!(result.tokens[0], Token::Identifier(word.to_string()));
+        }
     }
 
     #[test]

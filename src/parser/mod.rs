@@ -220,6 +220,18 @@ pub enum Statement {
     BlockElse,
     /// ENDIF at the start of a line - ends a block IF
     EndIf,
+    /// `CASE expr OF` - the last statement of a line. It starts a CASE
+    /// structure (BBC BASIC V). The WHEN, OTHERWISE and ENDCASE lines of the
+    /// structure follow it.
+    Case { value: Expression },
+    /// `WHEN v1, v2` at the start of a line - starts a case of a CASE
+    /// structure. The statements after it (after a colon) are in the case.
+    When { values: Vec<Expression> },
+    /// OTHERWISE at the start of a line - starts the default case
+    Otherwise,
+    /// ENDCASE - ends a CASE structure. Only an ENDCASE at the start of a
+    /// line counts. Another ENDCASE does nothing.
+    EndCase,
     /// GOTO statement
     Goto { line_number: u16 },
     /// GOSUB statement
@@ -497,18 +509,115 @@ pub enum ExpressionType {
 ///
 /// An ELSE or ENDIF at the start of a line is a line of a block IF. The
 /// statements after it (after an optional colon) follow it.
+///
+/// A WHEN, OTHERWISE or ENDCASE at the start of a line is a line of a CASE
+/// structure. A colon follows the values of a WHEN and an ENDCASE. A
+/// `CASE expr OF` must be the last statement of its line.
 pub fn parse_line(line: &TokenizedLine) -> Result<Vec<Statement>> {
+    let line_number = line.line_number;
     let (marker, rest) = match line.tokens.split_first() {
         Some((Token::Keyword(0x8B), rest)) => (Statement::BlockElse, rest),
         Some((Token::ExtendedKeyword(0xC8, 0xA5), rest)) => (Statement::EndIf, rest),
-        _ => return parse_statements(&line.tokens, line.line_number),
+        Some((Token::ExtendedKeyword(0xC8, 0xA9), rest)) => (Statement::Otherwise, rest),
+        Some((Token::ExtendedKeyword(0xC8, 0xA6), rest)) => {
+            expect_colon_after("ENDCASE", rest, line_number)?;
+            (Statement::EndCase, rest)
+        }
+        Some((Token::ExtendedKeyword(0xC8, 0xA8), rest)) => {
+            let end = rest
+                .iter()
+                .position(|t| matches!(t, Token::Separator(':')))
+                .unwrap_or(rest.len());
+            let values = parse_when_values(&rest[..end], line_number)?;
+            (Statement::When { values }, &rest[end..])
+        }
+        _ => {
+            let statements = parse_statements(&line.tokens, line_number)?;
+            check_case_is_last(&statements, line_number)?;
+            return Ok(statements);
+        }
     };
     let rest = rest.strip_prefix(&[Token::Separator(':')]).unwrap_or(rest);
     let mut statements = vec![marker];
     if !rest.is_empty() {
-        statements.extend(parse_statements(rest, line.line_number)?);
+        statements.extend(parse_statements(rest, line_number)?);
     }
+    check_case_is_last(&statements, line_number)?;
     Ok(statements)
+}
+
+/// A `CASE expr OF` must be the last statement of its line, because the
+/// WHEN lines of the structure follow the line.
+fn check_case_is_last(statements: &[Statement], line_number: Option<u16>) -> Result<()> {
+    let before_last = &statements[..statements.len().saturating_sub(1)];
+    if before_last
+        .iter()
+        .any(|s| matches!(s, Statement::Case { .. }))
+    {
+        return Err(BBCBasicError::SyntaxError {
+            message: "CASE must be the last statement of a line".to_string(),
+            line: line_number,
+        });
+    }
+    Ok(())
+}
+
+/// Only the end of the statement or a colon can follow the word.
+fn expect_colon_after(word: &str, rest: &[Token], line_number: Option<u16>) -> Result<()> {
+    match rest.first() {
+        None | Some(Token::Separator(':')) => Ok(()),
+        Some(token) => Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "Unexpected {} after {}",
+                tokens_text(std::slice::from_ref(token)),
+                word
+            ),
+            line: line_number,
+        }),
+    }
+}
+
+/// Parse the values of a WHEN: one expression or more, with a comma between
+/// two expressions. A comma in the brackets of a function call is part of
+/// the call.
+fn parse_when_values(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Expression>> {
+    let mut values = Vec::new();
+    let mut pos = 0;
+    loop {
+        if pos == tokens.len() {
+            return Err(BBCBasicError::SyntaxError {
+                message: "Expected expression".to_string(),
+                line: line_number,
+            });
+        }
+        values.push(parse_expr_precedence(tokens, &mut pos, 0)?);
+        match tokens.get(pos) {
+            None => return Ok(values),
+            Some(Token::Separator(',')) => pos += 1,
+            Some(token) => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: format!(
+                        "Unexpected {} after expression",
+                        tokens_text(std::slice::from_ref(token))
+                    ),
+                    line: line_number,
+                })
+            }
+        }
+    }
+}
+
+/// Parse `CASE expr OF`. The tokens are the tokens after CASE.
+fn parse_case_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let Some((Token::ExtendedKeyword(0xC8, 0xA7), expression)) = tokens.split_last() else {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected OF after CASE expression".to_string(),
+            line: line_number,
+        });
+    };
+    Ok(Statement::Case {
+        value: parse_expression(expression)?,
+    })
 }
 
 /// Split tokens at each statement separator and parse each part.
@@ -819,6 +928,22 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             // ENDIF that is not at the start of a line: it does nothing, and
             // the block IF scan does not count it (BBC BASIC V)
             0xA5 => Ok(Statement::EndIf),
+            // CASE expr OF
+            0x8E => parse_case_statement(&tokens[1..], line.line_number),
+            // ENDCASE that is not at the start of a line: it does nothing,
+            // and the CASE scan does not count it
+            0xA6 => {
+                expect_colon_after("ENDCASE", &tokens[1..], line.line_number)?;
+                Ok(Statement::EndCase)
+            }
+            // WHEN and OTHERWISE are only at the start of a line (parse_line)
+            0xA8 | 0xA9 => Err(BBCBasicError::SyntaxError {
+                message: format!(
+                    "{} must be the first statement of a line",
+                    tokens_text(&tokens[..1])
+                ),
+                line: line.line_number,
+            }),
             // CIRCLE statement
             0x8F => parse_circle_statement(&tokens[1..], line.line_number),
             // FILL statement
@@ -2828,7 +2953,8 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 /// is a short form of GOTO. The statements after it can never run. Only the
 /// end of the branch or a colon can follow the line number.
 ///
-/// A block IF cannot be in a branch, because the branch ends with its line.
+/// A block IF or a CASE cannot be in a branch, because the branch ends with
+/// its line.
 fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
     let target = match tokens.first() {
         Some(Token::Integer(n) | Token::HexInteger(n)) => literal_line_number(*n, line_number)?,
@@ -2838,6 +2964,15 @@ fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Sta
             if let Some(Statement::IfBlock { .. }) = statements.last() {
                 return Err(BBCBasicError::SyntaxError {
                     message: "Expected statement after THEN".to_string(),
+                    line: line_number,
+                });
+            }
+            if statements
+                .iter()
+                .any(|s| matches!(s, Statement::Case { .. }))
+            {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "CASE must be the last statement of a line".to_string(),
                     line: line_number,
                 });
             }
@@ -4786,6 +4921,141 @@ mod tests {
         assert!(line_statements("20 IF A THEN IF B THEN").is_err());
         assert!(line_statements("20 IF A THEN PRINT 1 ELSE IF B THEN").is_err());
         assert!(line_statements("20 IF A THEN ELSE PRINT 1").is_err());
+    }
+
+    /// The message of a syntax error, or panic.
+    fn syntax_message(result: Result<Vec<Statement>>) -> String {
+        match result {
+            Err(BBCBasicError::SyntaxError { message, .. }) => message,
+            other => panic!("Expected a syntax error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_case_of_at_the_end_of_a_line() {
+        assert_eq!(
+            line_statements("20 CASE X OF"),
+            Ok(vec![Statement::Case {
+                value: Expression::Variable("X".to_string()),
+            }])
+        );
+        assert_eq!(
+            line_statements("20 PRINT 1 : CASE A$ OF"),
+            Ok(vec![
+                print_integer(1),
+                Statement::Case {
+                    value: Expression::Variable("A$".to_string()),
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_case_errors() {
+        assert_eq!(
+            syntax_message(line_statements("20 CASE X OF : PRINT 1")),
+            "CASE must be the last statement of a line"
+        );
+        assert_eq!(
+            syntax_message(line_statements("20 CASE X")),
+            "Expected OF after CASE expression"
+        );
+        assert_eq!(
+            syntax_message(line_statements("20 CASE OF")),
+            "Expected expression"
+        );
+        assert_eq!(
+            syntax_message(line_statements("20 IF A THEN CASE X OF")),
+            "CASE must be the last statement of a line"
+        );
+    }
+
+    #[test]
+    fn test_parse_when_line_with_values_and_statements() {
+        assert_eq!(
+            line_statements("30 WHEN 1"),
+            Ok(vec![Statement::When {
+                values: vec![Expression::Integer(1)],
+            }])
+        );
+        assert_eq!(
+            line_statements("30 WHEN 1, FNa(2, 3), \"x\" : PRINT 1 : PRINT 2"),
+            Ok(vec![
+                Statement::When {
+                    values: vec![
+                        Expression::Integer(1),
+                        Expression::FunctionCall {
+                            name: "FNa".to_string(),
+                            args: vec![Expression::Integer(2), Expression::Integer(3)],
+                        },
+                        Expression::String("x".to_string()),
+                    ],
+                },
+                print_integer(1),
+                print_integer(2),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_when_errors() {
+        assert_eq!(
+            syntax_message(line_statements("30 WHEN")),
+            "Expected expression"
+        );
+        assert_eq!(
+            syntax_message(line_statements("30 WHEN 1,")),
+            "Expected expression"
+        );
+        assert_eq!(
+            syntax_message(line_statements("30 WHEN 1 PRINT 1")),
+            "Unexpected PRINT after expression"
+        );
+        assert_eq!(
+            syntax_message(line_statements("30 PRINT 1 : WHEN 1")),
+            "WHEN must be the first statement of a line"
+        );
+    }
+
+    #[test]
+    fn test_parse_otherwise_line_with_and_without_statements() {
+        assert_eq!(
+            line_statements("40 OTHERWISE"),
+            Ok(vec![Statement::Otherwise])
+        );
+        assert_eq!(
+            line_statements("40 OTHERWISE PRINT 1"),
+            Ok(vec![Statement::Otherwise, print_integer(1)])
+        );
+        assert_eq!(
+            line_statements("40 OTHERWISE : PRINT 1 : PRINT 2"),
+            Ok(vec![
+                Statement::Otherwise,
+                print_integer(1),
+                print_integer(2)
+            ])
+        );
+        assert_eq!(
+            syntax_message(line_statements("40 PRINT 1 : OTHERWISE")),
+            "OTHERWISE must be the first statement of a line"
+        );
+    }
+
+    #[test]
+    fn test_parse_endcase_line_and_endcase_statement() {
+        assert_eq!(line_statements("50 ENDCASE"), Ok(vec![Statement::EndCase]));
+        assert_eq!(
+            line_statements("50 ENDCASE : PRINT 1"),
+            Ok(vec![Statement::EndCase, print_integer(1)])
+        );
+        assert_eq!(
+            line_statements("50 PRINT 1 : ENDCASE"),
+            Ok(vec![print_integer(1), Statement::EndCase])
+        );
+        assert_eq!(
+            syntax_message(line_statements("50 ENDCASE 1")),
+            "Unexpected 1 after ENDCASE"
+        );
     }
 
     /// Parse one IF line and return its THEN part and its ELSE part.
