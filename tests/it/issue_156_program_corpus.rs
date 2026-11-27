@@ -103,9 +103,6 @@ corpus!(on_error_trap);
 corpus!(restore_lookup);
 corpus!(print_separators);
 corpus!(bit_masks_not);
-corpus!(
-    #[ignore = "issue 160 keeps a syntax error for an assignment with no THEN (line 50)"]
-    if_without_then
-);
+corpus!(if_without_then);
 corpus!(graphics_count);
 corpus!(file_records);

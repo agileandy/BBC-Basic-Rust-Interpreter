@@ -3182,47 +3182,37 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     Ok(params)
 }
 
-/// The position of the token after the condition of an IF: the first THEN,
-/// or the first keyword at bracket depth 0 that starts a statement. None if
-/// there is no such token before a colon at depth 0 or the end of the line.
-///
-/// The keywords 0xD4 to 0xFF (SOUND to OSCLI) and the BASIC V statements
-/// (0xC8 prefix) start a statement and cannot be in an expression. PTR, PAGE,
-/// TIME, LOMEM and HIMEM (0xCF to 0xD3) are also values, so they do not end
-/// the condition. A statement that is a name, such as an assignment with no
-/// LET or MKDIR, does not end the condition.
-fn if_condition_end(tokens: &[Token]) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        match token {
-            Token::Keyword(0x8C) => return Some(index),
-            Token::Separator('(') => depth += 1,
-            Token::Separator(')') => depth = depth.saturating_sub(1),
-            Token::Separator(':') if depth == 0 => return None,
-            Token::Keyword(0xD4..=0xFF) | Token::ExtendedKeyword(0xC8, _) if depth == 0 => {
-                return Some(index)
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Parse IF statement
 /// Supports: IF condition [THEN] statement [ELSE statement]
 fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    // The condition ends at THEN, or before a keyword that starts a
-    // statement (issue 160): THEN is optional before a statement.
-    let condition_end = if_condition_end(tokens).ok_or(BBCBasicError::SyntaxError {
+    let expected_then = || BBCBasicError::SyntaxError {
         message: "Expected THEN after IF condition".to_string(),
         line: line_number,
-    })?;
-    let condition = parse_expression(&tokens[..condition_end])?;
-    let branch_start = if matches!(tokens[condition_end], Token::Keyword(0x8C)) {
-        condition_end + 1
-    } else {
-        condition_end
     };
+    if tokens.is_empty() {
+        return Err(expected_then());
+    }
+
+    // The condition is one expression: it ends at the first token that
+    // cannot continue it (issue 160). THEN after it is optional. With no
+    // THEN, a statement or ELSE must follow, and a line number cannot.
+    let mut condition_end = 0;
+    let condition = parse_expr_precedence(tokens, &mut condition_end, 0)?;
+    let has_then = matches!(tokens.get(condition_end), Some(Token::Keyword(0x8C)));
+    if !has_then
+        && matches!(
+            tokens.get(condition_end),
+            None | Some(
+                Token::Separator(':')
+                    | Token::Integer(_)
+                    | Token::HexInteger(_)
+                    | Token::LineNumber(_)
+            )
+        )
+    {
+        return Err(expected_then());
+    }
+    let branch_start = condition_end + usize::from(has_then);
 
     // Find ELSE keyword (if present). A REM or DATA statement uses the rest
     // of the line, so an ELSE after it is part of it. A statement starts
@@ -3261,8 +3251,11 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         return Ok(Statement::IfBlock { condition });
     }
 
-    // Parse THEN part: all the statements up to ELSE or the end of the line
-    let then_part = if then_tokens.is_empty() {
+    // Parse THEN part: all the statements up to ELSE or the end of the line.
+    // With no THEN, ELSE can follow the condition directly.
+    let then_part = if then_tokens.is_empty() && !has_then {
+        Vec::new()
+    } else if then_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected statement after THEN".to_string(),
             line: line_number,

@@ -50,8 +50,104 @@ fn test_then_line_number_and_then_goto_still_jump() {
 }
 
 #[test]
-fn test_assignment_with_no_then_is_a_syntax_error() {
-    let (result, _) = run(&["10 A% = 5", "20 IF A% > 3 A% = 0"]);
+fn test_assignment_with_no_then_runs() {
+    let (result, output) = run(&["10 A% = 5", "20 IF A% > 3 A% = 0", "30 PRINT A%"]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "0\n");
+}
+
+#[test]
+fn test_assignment_with_no_then_before_a_colon_runs_the_line() {
+    let program = |x: &'static str| run(&[x, "20 IF X% > 3 X% = X% + 1 : PRINT \"Now \"; X%"]);
+
+    assert_eq!(program("10 X% = 5"), (Ok(()), "Now 6\n".to_string()));
+    assert_eq!(program("10 X% = 1"), (Ok(()), String::new()));
+}
+
+#[test]
+fn test_assignment_after_a_variable_condition() {
+    let (result, output) = run(&["10 A = 1", "20 IF A B = 1", "30 PRINT B"]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "1\n");
+}
+
+#[test]
+fn test_assignment_with_no_then_and_else() {
+    let program = |a: &'static str| run(&[a, "20 IF A = 1 B = 2 ELSE B = 3", "30 PRINT B"]);
+
+    assert_eq!(program("10 A = 1"), (Ok(()), "2\n".to_string()));
+    assert_eq!(program("10 A = 0"), (Ok(()), "3\n".to_string()));
+}
+
+#[test]
+fn test_string_assignment_with_no_then() {
+    let (result, output) = run(&[
+        "10 A$ = \"x\"",
+        "20 IF A$ = \"x\" B$ = \"y\"",
+        "30 PRINT B$",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "y\n");
+}
+
+#[test]
+fn test_user_function_condition_then_assignment() {
+    let (result, output) = run(&[
+        "10 IF FNt(1) A = 2",
+        "20 PRINT A",
+        "30 END",
+        "40 DEF FNt(X) = X",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "2\n");
+}
+
+#[test]
+fn test_array_element_condition_then_array_assignment() {
+    let (result, output) = run(&[
+        "10 DIM A(2)",
+        "20 A(1) = 2",
+        "30 IF A(1) = 2 A(1) = 3",
+        "40 PRINT A(1)",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "3\n");
+}
+
+#[test]
+fn test_minus_after_a_variable_continues_the_condition() {
+    let program = |a: &'static str| run(&[a, "20 IF A -1 = 0 PRINT 1"]);
+
+    assert_eq!(program("10 A = 1"), (Ok(()), "1\n".to_string()));
+    assert_eq!(program("10 A = 0"), (Ok(()), String::new()));
+}
+
+#[test]
+fn test_bracket_after_a_variable_is_an_array_in_the_condition() {
+    let (result, _) = run(&["10 IF A (B) = 1"]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 10: Expected THEN after IF condition".to_string())
+    );
+}
+
+#[test]
+fn test_else_directly_after_the_condition() {
+    let program = |a: &'static str| run(&[a, "20 IF A ELSE PRINT 2"]);
+
+    assert_eq!(program("10 A = 0"), (Ok(()), "2\n".to_string()));
+    assert_eq!(program("10 A = 1"), (Ok(()), String::new()));
+}
+
+#[test]
+fn test_line_number_with_no_then_is_a_syntax_error() {
+    let (result, _) = run(&["10 A = 1", "20 IF A 100", "100 PRINT \"TARGET\""]);
 
     assert_eq!(
         result,
@@ -60,13 +156,17 @@ fn test_assignment_with_no_then_is_a_syntax_error() {
 }
 
 #[test]
-fn test_assignment_with_no_then_before_a_colon_is_a_syntax_error() {
-    let (result, _) = run(&["10 A% = 5", "20 IF A% > 3 A% = 0 : PRINT A%"]);
+fn test_statement_that_is_a_name_follows_the_condition() {
+    let dir = std::env::temp_dir().join(format!("issue_160_mkdir_{}", std::process::id()));
+    let _ = std::fs::remove_dir(&dir);
+    let line = format!("10 IF 1 MKDIR \"{}\"", dir.display());
 
-    assert_eq!(
-        result,
-        Err("Syntax error at line 20: Expected THEN after IF condition".to_string())
-    );
+    let (result, _) = run(&[line.as_str()]);
+
+    let made = dir.is_dir();
+    let _ = std::fs::remove_dir(&dir);
+    assert_eq!(result, Ok(()));
+    assert!(made, "MKDIR after the condition makes {}", dir.display());
 }
 
 #[test]
