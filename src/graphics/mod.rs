@@ -565,15 +565,13 @@ impl GraphicsSystem {
                     return;
                 }
 
-                // Draw 8 octants
-                self.set_visible_pixel(cx + x, cy + y, source);
-                self.set_visible_pixel(cx + y, cy + x, source);
-                self.set_visible_pixel(cx - y, cy + x, source);
-                self.set_visible_pixel(cx - x, cy + y, source);
-                self.set_visible_pixel(cx - x, cy - y, source);
-                self.set_visible_pixel(cx - y, cy - x, source);
-                self.set_visible_pixel(cx + y, cy - x, source);
-                self.set_visible_pixel(cx + x, cy - y, source);
+                // Draw 8 octants. A mirror point that is the same pixel as
+                // another point is skipped: at y = 0 the mirror in the
+                // axis, and at x = y the mirror in the diagonal.
+                self.plot_ellipse_points(cx, cy, x.into(), y.into(), source);
+                if x != y {
+                    self.plot_ellipse_points(cx, cy, y.into(), x.into(), source);
+                }
             }
             next_row = next_row.max(last + 1);
         }
@@ -696,13 +694,20 @@ impl GraphicsSystem {
     }
 
     /// Helper to plot 4 quadrants of ellipse. A point that is not on the
-    /// canvas is not set.
+    /// canvas is not set. At x = 0 or y = 0, the mirror point is the same
+    /// pixel, so it is not set again.
     fn plot_ellipse_points(&mut self, cx: i64, cy: i64, x: i128, y: i128, source: ColourSource) {
         let (x, y) = (x as i64, y as i64);
         self.set_visible_pixel(cx + x, cy + y, source);
-        self.set_visible_pixel(cx - x, cy + y, source);
-        self.set_visible_pixel(cx + x, cy - y, source);
-        self.set_visible_pixel(cx - x, cy - y, source);
+        if x != 0 {
+            self.set_visible_pixel(cx - x, cy + y, source);
+        }
+        if y != 0 {
+            self.set_visible_pixel(cx + x, cy - y, source);
+            if x != 0 {
+                self.set_visible_pixel(cx - x, cy - y, source);
+            }
+        }
     }
 
     /// Draw the outline of an ellipse with radii above ELLIPSE_STEP_LIMIT.

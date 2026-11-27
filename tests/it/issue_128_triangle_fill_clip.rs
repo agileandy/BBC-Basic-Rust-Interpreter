@@ -150,6 +150,20 @@ fn test_a_large_rectangle_returns_and_fills_the_visible_part() {
 // The functions below are copies of the drawing algorithms before issue 128.
 // Each one gives the points that the old algorithm sent to `set_pixel`, in
 // order. The tests compare the new code with them on a small canvas.
+//
+// Issue 183 corrected the circle and the ellipse outlines: a step does not
+// send a mirror point that is the same pixel as a point that the step already
+// sent. The copies below have the same correction. The set of points does not
+// change.
+
+/// Add the points of one step that are not already in the step
+fn push_once(points: &mut Vec<(i32, i32)>, step: &[(i32, i32)]) {
+    for (index, point) in step.iter().enumerate() {
+        if !step[..index].contains(point) {
+            points.push(*point);
+        }
+    }
+}
 
 fn old_line(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
@@ -178,7 +192,7 @@ fn old_line(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i32)> {
     points
 }
 
-fn old_circle_outline(cx: i32, cy: i32, radius: i32) -> Vec<(i32, i32)> {
+pub(crate) fn old_circle_outline(cx: i32, cy: i32, radius: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
     if radius <= 0 {
         return points;
@@ -187,16 +201,19 @@ fn old_circle_outline(cx: i32, cy: i32, radius: i32) -> Vec<(i32, i32)> {
     let mut y = 0;
     let mut err = 0;
     while x >= y {
-        points.extend([
-            (cx + x, cy + y),
-            (cx + y, cy + x),
-            (cx - y, cy + x),
-            (cx - x, cy + y),
-            (cx - x, cy - y),
-            (cx - y, cy - x),
-            (cx + y, cy - x),
-            (cx + x, cy - y),
-        ]);
+        push_once(
+            &mut points,
+            &[
+                (cx + x, cy + y),
+                (cx + y, cy + x),
+                (cx - y, cy + x),
+                (cx - x, cy + y),
+                (cx - x, cy - y),
+                (cx - y, cy - x),
+                (cx + y, cy - x),
+                (cx + x, cy - y),
+            ],
+        );
         y += 1;
         if err <= 0 {
             err += 2 * y + 1;
@@ -226,18 +243,21 @@ fn old_fill_circle(cx: i32, cy: i32, target_x: i32, target_y: i32) -> Vec<(i32, 
     points
 }
 
-fn old_ellipse(cx: i32, cy: i32, rx: i32, ry: i32) -> Vec<(i32, i32)> {
+pub(crate) fn old_ellipse(cx: i32, cy: i32, rx: i32, ry: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
     if rx <= 0 || ry <= 0 {
         return points;
     }
     let quadrants = |points: &mut Vec<(i32, i32)>, x: i32, y: i32| {
-        points.extend([
-            (cx + x, cy + y),
-            (cx - x, cy + y),
-            (cx + x, cy - y),
-            (cx - x, cy - y),
-        ]);
+        push_once(
+            points,
+            &[
+                (cx + x, cy + y),
+                (cx - x, cy + y),
+                (cx + x, cy - y),
+                (cx - x, cy - y),
+            ],
+        );
     };
     let mut x = 0;
     let mut y = ry;
