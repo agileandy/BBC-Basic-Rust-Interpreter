@@ -74,6 +74,7 @@ fn test_list_shows_hex_literal_in_a_form_that_reads_back() {
     let listed = detokenize(&tokenize("10 PRINT &1F + &FFFFFFFF").unwrap()).unwrap();
     let reread = detokenize(&tokenize(&listed).unwrap()).unwrap();
 
-    assert_eq!(listed, "10 PRINT 31 + -1");
+    // Issue #85: LIST shows the hex form as typed
+    assert_eq!(listed, "10 PRINT &1F + &FFFFFFFF");
     assert_eq!(reread, listed);
 }

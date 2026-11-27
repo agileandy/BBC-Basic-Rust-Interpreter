@@ -118,6 +118,7 @@ fn token_size(token: &Token) -> usize {
         Token::ExtendedKeyword(..) => 2,
         Token::LineNumber(_) => 4, // &8D and 3 encoded bytes
         Token::Integer(value) => value.to_string().len(),
+        Token::HexInteger(value) => format!("&{:X}", *value as u32).len(),
         Token::Real(value) => value.to_string().len(),
         Token::String(text) => text.len() + 2,
         Token::DataText(text) | Token::Identifier(text) => text.len(),
