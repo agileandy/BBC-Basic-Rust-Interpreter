@@ -456,6 +456,12 @@ impl Executor {
             let value = self.eval_integer(expression)?;
             self.variables.set_integer_var(target.to_string(), value);
             Ok(())
+        } else if target == "TIME$" {
+            // Setting the clock with TIME$ is not supported.
+            Err(BBCBasicError::SyntaxError {
+                message: "TIME$ cannot be set".to_string(),
+                line: None,
+            })
         } else if target.ends_with('$') {
             let value = self.eval_string(expression)?;
             self.variables.set_string_var(target.to_string(), value)?;
@@ -1505,6 +1511,14 @@ impl Executor {
     fn eval_string(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::String(val) => Ok(val.clone()),
+            // TIME$ is the date and time in UTC. TIME$ is from the BBC Master, not the Model B.
+            Expression::Variable(name) if name == "TIME$" => {
+                let seconds = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_secs())
+                    .unwrap_or(0);
+                Ok(format_time_string(seconds))
+            }
             Expression::Variable(name) => self
                 .variables
                 .get_string_var(name)
@@ -3040,6 +3054,48 @@ impl Default for Executor {
     }
 }
 
+/// Give the date and time for a count of seconds from 1970 (UTC) in the
+/// form of TIME$, for example "Fri,27 Nov 2026.14:05:09".
+///
+/// TIME$ is from the BBC Master. The BBC Model B has no TIME$.
+fn format_time_string(seconds_since_1970: u64) -> String {
+    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let days = seconds_since_1970 / 86_400;
+    let second_of_day = seconds_since_1970 % 86_400;
+    let day_name = DAYS[(days % 7) as usize];
+
+    // Calendar date from the day count (civil_from_days, Howard Hinnant).
+    // The year starts on 1 March, so that 29 February is the last day of a year.
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let day_of_era = z % 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153; // 0 is March
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + u64::from(month <= 2);
+
+    format!(
+        "{},{:02} {} {:04}.{:02}:{:02}:{:02}",
+        day_name,
+        day,
+        MONTHS[(month - 1) as usize],
+        year,
+        second_of_day / 3600,
+        second_of_day / 60 % 60,
+        second_of_day % 60
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4497,6 +4553,24 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_time_string_at_second_zero_is_the_start_of_1970() {
+        assert_eq!(format_time_string(0), "Thu,01 Jan 1970.00:00:00");
+    }
+
+    #[test]
+    fn test_time_string_on_a_leap_day() {
+        assert_eq!(format_time_string(951_782_400), "Tue,29 Feb 2000.00:00:00");
+    }
+
+    #[test]
+    fn test_time_string_with_a_time_of_day() {
+        assert_eq!(
+            format_time_string(1_795_788_309),
+            "Fri,27 Nov 2026.14:05:09"
+        );
     }
 
     #[test]
