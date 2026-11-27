@@ -537,7 +537,10 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
     // END, STOP, CLS and CLEAR take no argument
     if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8), unexpected, ..] = tokens.as_slice() {
         return Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected {:?} after statement", unexpected),
+            message: format!(
+                "Unexpected {} after statement",
+                tokens_text(std::slice::from_ref(unexpected))
+            ),
             line: line.line_number,
         });
     }
@@ -2609,7 +2612,10 @@ pub fn parse_expression(tokens: &[Token]) -> Result<Expression> {
     let expression = parse_expr_precedence(tokens, &mut pos, 0)?;
     if let Some(token) = tokens.get(pos) {
         return Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected {:?} after expression", token),
+            message: format!(
+                "Unexpected {} after expression",
+                tokens_text(std::slice::from_ref(token))
+            ),
             line: None,
         });
     }

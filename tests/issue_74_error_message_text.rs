@@ -311,6 +311,22 @@ fn test_parse_error_message_of_invalid_assignment() {
     );
 }
 
+#[test]
+fn test_leftover_token_after_expression_shows_as_typed() {
+    assert_eq!(
+        error_of(&["10 X = 1 2"]),
+        "Syntax error at line 10: Unexpected 2 after expression"
+    );
+}
+
+#[test]
+fn test_leftover_token_after_statement_shows_as_typed() {
+    assert_eq!(
+        error_of(&["10 END 5"]),
+        "Syntax error at line 10: Unexpected 5 after statement"
+    );
+}
+
 // Typed lines: the text with no line
 
 #[test]
