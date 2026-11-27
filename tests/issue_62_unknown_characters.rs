@@ -87,3 +87,19 @@ fn test_file_statements_with_hash_still_work() {
     assert_eq!(result, Ok(()));
     assert_eq!(output.trim(), "42");
 }
+
+#[test]
+fn test_print_number_that_starts_with_decimal_point() {
+    let (result, output) = run(&["10 PRINT .5"]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output.trim(), "0.5");
+}
+
+#[test]
+fn test_compare_number_that_starts_with_decimal_point() {
+    let (result, output) = run(&["10 IF .5 < 1 THEN PRINT \"OK\""]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "OK\n");
+}

@@ -165,9 +165,10 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             continue;
         }
 
-        // Numbers (integer or real, including negative)
+        // Numbers (integer or real, including negative). A real number
+        // can start with a decimal point, such as .5
         if ch.is_ascii_digit()
-            || (ch == '-'
+            || ((ch == '-' || ch == '.')
                 && chars
                     .clone()
                     .nth(1)
@@ -1080,5 +1081,32 @@ mod tests {
     fn test_tab_is_white_space() {
         let line = tokenize("10 PRINT\t5").unwrap();
         assert_eq!(line.tokens, vec![Token::Keyword(0xF1), Token::Integer(5)]);
+    }
+
+    #[test]
+    fn test_number_can_start_with_decimal_point() {
+        assert_eq!(tokenize("PRINT .5").unwrap().tokens[1], Token::Real(0.5));
+        assert_eq!(
+            tokenize("PRINT .25E2").unwrap().tokens[1],
+            Token::Real(25.0)
+        );
+        assert_eq!(
+            tokenize("X = .5 + .5").unwrap().tokens,
+            vec![
+                Token::Identifier("X".to_string()),
+                Token::Operator('='),
+                Token::Real(0.5),
+                Token::Operator('+'),
+                Token::Real(0.5),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_decimal_point_before_a_letter_is_not_a_number() {
+        assert!(matches!(
+            tokenize("10 PRINT A.B"),
+            Err(BBCBasicError::SyntaxError { message, .. }) if message == "Unknown character '.'"
+        ));
     }
 }
