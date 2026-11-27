@@ -84,10 +84,7 @@ corpus!(numeric_functions);
 corpus!(recursive_fn);
 corpus!(recursive_proc);
 corpus!(repeat_flag);
-corpus!(
-    #[ignore = "defect F6: PRINT# of two items writes one line, and INPUT# reads it into one item"]
-    file_write_read
-);
+corpus!(file_write_read);
 corpus!(file_input_array);
 corpus!(
     #[ignore = "defect F3: POINT gives -1 for a lit pixel and 0 off the screen"]
