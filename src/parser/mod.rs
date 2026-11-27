@@ -1112,18 +1112,7 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
 
                 // TAB(x) or TAB(x, y): split the values at the commas
                 // outside the inner brackets
-                let inner = &tokens[start_pos..pos - 1];
-                let mut depth = 0;
-                let values: Vec<&[Token]> = inner
-                    .split(|token| {
-                        match token {
-                            Token::Separator('(') => depth += 1,
-                            Token::Separator(')') => depth -= 1,
-                            _ => {}
-                        }
-                        depth == 0 && matches!(token, Token::Separator(','))
-                    })
-                    .collect();
+                let values = split_at_commas(&tokens[start_pos..pos - 1]);
                 match values.as_slice() {
                     [x] => items.push(PrintItem::Tab(parse_expression(x)?)),
                     [x, y] => {
@@ -1801,9 +1790,7 @@ fn parse_print_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     // Format: PRINT# handle, items...
 
     // Find the comma that separates handle from print items
-    let comma_pos = tokens
-        .iter()
-        .position(|t| matches!(t, Token::Separator(',')));
+    let comma_pos = first_comma(tokens);
 
     if comma_pos.is_none() {
         return Err(BBCBasicError::SyntaxError {
@@ -1846,9 +1833,7 @@ fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     // Format: INPUT# handle, var1, var2, ...
 
     // Find the comma that separates handle from variables
-    let comma_pos = tokens
-        .iter()
-        .position(|t| matches!(t, Token::Separator(',')));
+    let comma_pos = first_comma(tokens);
 
     if comma_pos.is_none() {
         return Err(BBCBasicError::SyntaxError {
@@ -1910,13 +1895,10 @@ fn parse_close_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
 /// Parse BPUT# statement (file I/O)
 fn parse_bput_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // Format: BPUT# handle, value
-    let comma_pos = tokens
-        .iter()
-        .position(|t| matches!(t, Token::Separator(',')))
-        .ok_or_else(|| BBCBasicError::SyntaxError {
-            message: "Expected comma after file handle in BPUT#".to_string(),
-            line: line_number,
-        })?;
+    let comma_pos = first_comma(tokens).ok_or_else(|| BBCBasicError::SyntaxError {
+        message: "Expected comma after file handle in BPUT#".to_string(),
+        line: line_number,
+    })?;
 
     let handle = parse_expression(&tokens[..comma_pos])?;
     let value = parse_expression(&tokens[comma_pos + 1..])?;
@@ -1927,22 +1909,10 @@ fn parse_bput_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 /// Parse SAVEJSON file$, json$ (extension, issue #102)
 fn parse_savejson_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     // The comma between the two texts is the first comma outside brackets
-    let mut depth = 0;
-    let comma_pos = tokens
-        .iter()
-        .position(|token| {
-            match token {
-                Token::Separator('(') => depth += 1,
-                Token::Separator(')') => depth -= 1,
-                Token::Separator(',') if depth == 0 => return true,
-                _ => {}
-            }
-            false
-        })
-        .ok_or_else(|| BBCBasicError::SyntaxError {
-            message: "Expected comma after file name in SAVEJSON".to_string(),
-            line: line_number,
-        })?;
+    let comma_pos = first_comma(tokens).ok_or_else(|| BBCBasicError::SyntaxError {
+        message: "Expected comma after file name in SAVEJSON".to_string(),
+        line: line_number,
+    })?;
 
     let file = parse_expression(&tokens[..comma_pos])?;
     let json = parse_expression(&tokens[comma_pos + 1..])?;
@@ -1966,21 +1936,10 @@ fn parse_list_statement(
     tokens: &[Token],
     line_number: Option<u16>,
 ) -> Result<Statement> {
-    let mut args = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-    for (pos, token) in tokens.iter().enumerate() {
-        match token {
-            Token::Separator('(') => depth += 1,
-            Token::Separator(')') => depth -= 1,
-            Token::Separator(',') if depth == 0 => {
-                args.push(parse_expression(&tokens[start..pos])?);
-                start = pos + 1;
-            }
-            _ => {}
-        }
-    }
-    args.push(parse_expression(&tokens[start..])?);
+    let args = split_at_commas(tokens)
+        .into_iter()
+        .map(parse_expression)
+        .collect::<Result<Vec<_>>>()?;
 
     let count = match name {
         "LISTCLEAR" => 1,
@@ -2314,35 +2273,39 @@ fn parse_stereo_statement(tokens: &[Token], line_number: Option<u16>) -> Result<
     }
 }
 
-/// Helper function to parse comma-separated expressions
+/// Split the tokens at each comma that is not in brackets (issue #150). A
+/// comma in a string literal is in the string token, so it does not split.
+fn split_at_commas(tokens: &[Token]) -> Vec<&[Token]> {
+    let mut depth = 0;
+    tokens
+        .split(|token| {
+            match token {
+                Token::Separator('(') => depth += 1,
+                Token::Separator(')') => depth -= 1,
+                _ => {}
+            }
+            depth == 0 && matches!(token, Token::Separator(','))
+        })
+        .collect()
+}
+
+/// The position of the first comma that is not in brackets (issue #150).
+fn first_comma(tokens: &[Token]) -> Option<usize> {
+    let first = split_at_commas(tokens)[0].len();
+    (first < tokens.len()).then_some(first)
+}
+
+/// Parse the expressions between the commas that are not in brackets. An
+/// empty part between 2 commas gives no expression.
 fn parse_comma_separated_expressions(
     tokens: &[Token],
     line_number: Option<u16>,
 ) -> Result<Vec<Expression>> {
-    let mut expressions = Vec::new();
-    let mut start = 0;
-    let mut pos = 0;
-
-    while pos <= tokens.len() {
-        // Check if we hit a comma or end of tokens
-        if pos == tokens.len() || matches!(tokens[pos], Token::Separator(',')) {
-            if start < pos {
-                // Parse the expression between commas
-                let expr = parse_expression(&tokens[start..pos])?;
-                expressions.push(expr);
-            }
-
-            if pos < tokens.len() {
-                // Skip the comma
-                pos += 1;
-                start = pos;
-            } else {
-                break;
-            }
-        } else {
-            pos += 1;
-        }
-    }
+    let expressions = split_at_commas(tokens)
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(parse_expression)
+        .collect::<Result<Vec<_>>>()?;
 
     if expressions.is_empty() {
         return Err(BBCBasicError::SyntaxError {
@@ -6326,5 +6289,51 @@ mod tests {
                 args: vec![Expression::Integer(1)],
             }
         );
+    }
+
+    #[test]
+    fn test_split_at_commas_skips_a_comma_in_brackets() {
+        let tokens = crate::tokenizer::tokenize("P(1,1), FNa(2, (3, 4)), 5")
+            .unwrap()
+            .tokens;
+
+        let parts = split_at_commas(&tokens);
+
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], &tokens[..6]);
+        assert_eq!(parts[2], [Token::Integer(5)]);
+    }
+
+    #[test]
+    fn test_split_at_commas_skips_a_comma_in_a_string() {
+        let tokens = crate::tokenizer::tokenize("\"a,b\", 1").unwrap().tokens;
+
+        let parts = split_at_commas(&tokens);
+
+        assert_eq!(
+            parts,
+            vec![
+                &[Token::String("a,b".to_string())][..],
+                &[Token::Integer(1)][..]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_split_at_commas_gives_one_part_with_no_comma() {
+        let tokens = crate::tokenizer::tokenize("1 + 2").unwrap().tokens;
+
+        assert_eq!(split_at_commas(&tokens), vec![&tokens[..]]);
+    }
+
+    #[test]
+    fn test_comma_separated_expressions_take_an_array_element() {
+        let tokens = crate::tokenizer::tokenize("P(1,1), 100").unwrap().tokens;
+
+        let expressions = parse_comma_separated_expressions(&tokens, Some(20)).unwrap();
+
+        assert_eq!(expressions.len(), 2);
+        assert!(matches!(expressions[0], Expression::ArrayAccess { .. }));
+        assert_eq!(expressions[1], Expression::Integer(100));
     }
 }
