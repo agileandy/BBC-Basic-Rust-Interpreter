@@ -59,6 +59,12 @@ impl ProgramStore {
         self.lines.remove(&line_number);
     }
 
+    /// Delete each line from `start` to `end`, the 2 numbers included (DELETE command)
+    pub fn delete_range(&mut self, start: u16, end: u16) {
+        self.lines
+            .retain(|line_number, _| !(start..=end).contains(line_number));
+    }
+
     /// Get a program line
     pub fn get_line(&self, line_number: u16) -> Option<&TokenizedLine> {
         self.lines.get(&line_number)
@@ -129,6 +135,18 @@ mod tests {
 
         let line_numbers = store.get_line_numbers();
         assert_eq!(line_numbers, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_delete_range_removes_lines_from_start_to_end() {
+        let mut store = ProgramStore::new();
+        for line in ["10 END", "20 END", "30 END", "40 END", "50 END"] {
+            store.store_line(tokenize(line).unwrap());
+        }
+
+        store.delete_range(20, 40);
+
+        assert_eq!(store.get_line_numbers(), vec![10, 50]);
     }
 
     #[test]
