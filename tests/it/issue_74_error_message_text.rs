@@ -136,7 +136,7 @@ fn test_array_not_dimensioned_text_is_array() {
 #[test]
 fn test_illegal_function_text() {
     assert_eq!(
-        error_of(&["10 PRINT SQR(-1)"]),
+        error_of(&["10 PRINT 1 << -1"]),
         "Illegal function at line 10"
     );
 }
