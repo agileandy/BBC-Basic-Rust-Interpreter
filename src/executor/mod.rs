@@ -3106,6 +3106,43 @@ impl Executor {
         self.call_function(name, args, Self::eval_string)
     }
 
+    /// Evaluate the arguments of a PROC or FN call in the caller scope, before
+    /// a parameter hides a caller variable of the same name (for example
+    /// FNfact(N-1)). Each value has the type of its parameter.
+    pub fn evaluate_arguments(
+        &mut self,
+        params: &[String],
+        args: &[Expression],
+    ) -> Result<Vec<Variable>> {
+        let mut values = Vec::with_capacity(args.len());
+        for (param_name, arg_expr) in params.iter().zip(args.iter()) {
+            let value = if param_name.ends_with('%') {
+                Variable::Integer(self.eval_integer(arg_expr)?)
+            } else if param_name.ends_with('$') {
+                Variable::String(self.eval_string(arg_expr)?)
+            } else {
+                Variable::Real(self.eval_real(arg_expr)?)
+            };
+            values.push(value);
+        }
+        Ok(values)
+    }
+
+    /// Declare each parameter as local in the current scope, then assign its
+    /// argument value. ENDPROC or ENDFN restores the caller variable.
+    pub fn bind_parameters(&mut self, params: &[String], values: Vec<Variable>) -> Result<()> {
+        for (param_name, value) in params.iter().zip(values) {
+            self.declare_local(param_name)?;
+            match value {
+                Variable::Integer(v) => self.variables.set_integer_var(param_name.clone(), v),
+                Variable::String(v) => self.variables.set_string_var(param_name.clone(), v)?,
+                Variable::Real(v) => self.variables.set_real_var(param_name.clone(), v),
+                _ => return Err(BBCBasicError::TypeMismatch),
+            }
+        }
+        Ok(())
+    }
+
     /// Call a user-defined function and evaluate its result with `eval`.
     fn call_function<T>(
         &mut self,
@@ -3124,19 +3161,7 @@ impl Executor {
             return Err(BBCBasicError::Arguments);
         }
 
-        // Evaluate all arguments in the caller scope, before a parameter
-        // hides a caller variable of the same name (for example FNfact(N-1))
-        let mut values = Vec::with_capacity(args.len());
-        for (param_name, arg_expr) in func.params.iter().zip(args.iter()) {
-            let value = if param_name.ends_with('%') {
-                Variable::Integer(self.eval_integer(arg_expr)?)
-            } else if param_name.ends_with('$') {
-                Variable::String(self.eval_string(arg_expr)?)
-            } else {
-                Variable::Real(self.eval_real(arg_expr)?)
-            };
-            values.push(value);
-        }
+        let values = self.evaluate_arguments(&func.params, args)?;
 
         let local_depth = self.local_stack.len();
         let return_depth = self.return_stack.len();
@@ -3169,16 +3194,7 @@ impl Executor {
         values: Vec<Variable>,
         eval: fn(&mut Self, &Expression) -> Result<T>,
     ) -> Result<T> {
-        for (param_name, value) in func.params.iter().zip(values) {
-            // Declare parameter as local, then assign the argument value
-            self.declare_local(param_name)?;
-            match value {
-                Variable::Integer(v) => self.variables.set_integer_var(param_name.clone(), v),
-                Variable::String(v) => self.variables.set_string_var(param_name.clone(), v)?,
-                Variable::Real(v) => self.variables.set_real_var(param_name.clone(), v),
-                _ => return Err(BBCBasicError::TypeMismatch),
-            }
-        }
+        self.bind_parameters(&func.params, values)?;
 
         match &func.body {
             FunctionBody::Expression(expression) => eval(self, expression),
