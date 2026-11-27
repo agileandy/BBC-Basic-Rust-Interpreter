@@ -110,3 +110,4 @@ mod issue_104_json_change;
 mod issue_127_circle_in_text_mode;
 mod issue_129_line_number_range;
 mod issue_130_too_many_open_files_err;
+mod issue_122_array_error;

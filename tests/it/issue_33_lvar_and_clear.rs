@@ -23,8 +23,8 @@ fn is_no_such_variable(error: &str, name: &str) -> bool {
 fn test_clear_removes_array() {
     let (result, _) = run(&["10 DIM B(3)", "20 CLEAR", "30 PRINT B(1)"]);
 
-    let error = result.expect_err("an array read after CLEAR fails");
-    assert!(is_no_such_variable(&error, "B"), "error: {error}");
+    // An array that has no DIM gives Array (issue #122).
+    assert_eq!(result, Err("Array at line 30".to_string()));
 }
 
 #[test]

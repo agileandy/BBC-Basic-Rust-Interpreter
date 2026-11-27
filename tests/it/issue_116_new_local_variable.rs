@@ -107,14 +107,9 @@ fn test_read_of_new_local_array_after_endproc_gives_no_dim_error() {
     ]);
     let (no_dim_result, _) = run(&["10 PRINT L(1)", "20 END"]);
 
-    assert_eq!(
-        local_result,
-        Err("No such variable: L at line 20".to_string())
-    );
-    assert_eq!(
-        no_dim_result,
-        Err("No such variable: L at line 10".to_string())
-    );
+    // An array that has no DIM gives Array (issue #122).
+    assert_eq!(local_result, Err("Array at line 20".to_string()));
+    assert_eq!(no_dim_result, Err("Array at line 10".to_string()));
 }
 
 #[test]

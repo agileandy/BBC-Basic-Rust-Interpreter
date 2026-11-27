@@ -118,7 +118,8 @@ fn test_no_such_variable_text_has_the_name() {
 }
 
 #[test]
-fn test_array_not_dimensioned_text_has_the_name() {
+fn test_array_not_dimensioned_text_is_array() {
+    // An array that has no DIM gives Array, with no name (issue #122).
     assert_eq!(
         error_of(&[
             "10 PROCREAD",
@@ -128,7 +129,7 @@ fn test_array_not_dimensioned_text_has_the_name() {
             "120 PRINT A%(0)",
             "130 ENDPROC",
         ]),
-        "Array not dimensioned: A% at line 120"
+        "Array at line 120"
     );
 }
 
