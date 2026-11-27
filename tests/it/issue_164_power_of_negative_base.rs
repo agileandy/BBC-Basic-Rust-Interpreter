@@ -61,7 +61,8 @@ fn test_negative_base_with_whole_exponent_is_valid() {
 fn test_positive_base_powers_do_not_change() {
     for (expression, expected) in [
         ("2 ^ 0.5", "1.41421356\n"),
-        ("2 ^ 30", "1073741824\n"),
+        // A real value with 9 significant digits, as in BBC BASIC (issue #175)
+        ("2 ^ 30", "1.07374182E9\n"),
         ("0 ^ 0", "1\n"),
         ("0 ^ 0.5", "0\n"),
     ] {

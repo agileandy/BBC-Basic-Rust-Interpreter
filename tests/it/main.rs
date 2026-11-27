@@ -153,3 +153,4 @@ mod issue_160_if_with_no_then;
 mod issue_169_ide_frame;
 mod issue_151_call_depth_limit;
 mod issue_177_dim_trailing_tokens;
+mod issue_175_power_always_real;

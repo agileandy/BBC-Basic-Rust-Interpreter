@@ -45,19 +45,6 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
-/// Tell if an expression is a negative integer constant, such as `-2`.
-fn is_negative_integer_constant(expr: &Expression) -> bool {
-    use crate::parser::UnaryOperator;
-    match expr {
-        Expression::Integer(value) => *value < 0,
-        Expression::UnaryOp {
-            op: UnaryOperator::Minus,
-            operand,
-        } => matches!(**operand, Expression::Integer(value) if value > 0),
-        _ => false,
-    }
-}
-
 /// The name of a SWAP target and, for an array element, its index values
 type SwapLocation<'a> = (&'a str, Option<Vec<usize>>);
 
@@ -2229,6 +2216,12 @@ impl Executor {
                     return Ok(if is_true { -1 } else { 0 });
                 }
 
+                // A power always gives a real value, which converts to an
+                // integer or gives "Too big" (issue #175).
+                if let BinaryOperator::Power = op {
+                    return real_to_integer(self.eval_real(expr)?);
+                }
+
                 let left_val = self.eval_integer(left)?;
                 let right_val = self.eval_integer(right)?;
 
@@ -2259,19 +2252,6 @@ impl Executor {
                             Ok(left_val.wrapping_rem(right_val))
                         }
                     }
-                    // A negative exponent or an overflow gives a real result,
-                    // which converts to an integer or gives "Too big".
-                    BinaryOperator::Power => match u32::try_from(right_val)
-                        .ok()
-                        .and_then(|exponent| left_val.checked_pow(exponent))
-                    {
-                        Some(value) => Ok(value),
-                        // Zero to a negative power is 1 / 0.
-                        None if left_val == 0 && right_val < 0 => {
-                            Err(BBCBasicError::DivisionByZero)
-                        }
-                        None => real_to_integer(f64::from(left_val).powf(f64::from(right_val))),
-                    },
                     // Logical operators
                     BinaryOperator::And => Ok(left_val & right_val),
                     BinaryOperator::Or => Ok(left_val | right_val),
@@ -2511,12 +2491,8 @@ impl Executor {
                 BinaryOperator::Add | BinaryOperator::Subtract | BinaryOperator::Multiply => {
                     self.is_real_expr(left) || self.is_real_expr(right)
                 }
-                // A negative constant exponent gives a fraction, as in 2 ^ -1
-                BinaryOperator::Power => {
-                    self.is_real_expr(left)
-                        || self.is_real_expr(right)
-                        || is_negative_integer_constant(right)
-                }
+                // In BBC BASIC, `^` always gives a real value (issue #175)
+                BinaryOperator::Power => true,
                 _ => false,
             },
             Expression::UnaryOp { op, operand } => match op {
