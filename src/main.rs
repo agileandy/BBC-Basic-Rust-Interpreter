@@ -89,6 +89,8 @@ fn main() {
 
         if input.eq_ignore_ascii_case("new") {
             program.clear();
+            // NEW removes the variables, except A% to Z%
+            executor.clear_variables();
             println!("Program cleared");
             continue;
         }
@@ -111,7 +113,7 @@ fn main() {
         if input_upper.starts_with("LOAD ") {
             match extract_filename(input) {
                 Ok(filename) => {
-                    if let Err(e) = load_program(&mut program, &filename) {
+                    if let Err(e) = load_program(&mut executor, &mut program, &filename) {
                         println!("Error: {}", e);
                     }
                 }
@@ -123,7 +125,7 @@ fn main() {
         // CHAIN command (LOAD and RUN)
         if input_upper.starts_with("CHAIN ") {
             match extract_filename(input) {
-                Ok(filename) => match load_program(&mut program, &filename) {
+                Ok(filename) => match load_program(&mut executor, &mut program, &filename) {
                     Ok(_) => match run_program_with_outcome(&mut executor, &mut program) {
                         Ok(RunOutcome::Ended) => {}
                         Ok(RunOutcome::Quit) => {
@@ -288,17 +290,20 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
 }
 
 /// Load program from a file (.bbas added if no extension)
-fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String> {
+fn load_program(
+    executor: &mut Executor,
+    program: &mut ProgramStore,
+    filename: &str,
+) -> Result<(), String> {
     let path = resolve_program_path(filename);
 
     // Read file
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file {}: {}", path, e))?;
 
-    // Clear current program (like NEW command)
+    // Clear the program and the variables, as NEW does. A% to Z% stay.
     program.clear();
-    // Note: We don't reset executor state - variables persist across LOAD
-    // This matches BBC BASIC behavior where LOAD doesn't clear variables
+    executor.clear_variables();
 
     // Parse and add each line
     for (line_num, line) in content.lines().enumerate() {

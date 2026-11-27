@@ -1168,15 +1168,21 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute CLEAR: remove all variables and arrays, close the loops,
-    /// the calls and the LOCAL scopes, and move the DATA pointer to the
-    /// first value. The procedures and the functions stay.
+    /// Execute CLEAR. See `clear_variables`.
     fn execute_clear(&mut self) -> Result<()> {
+        self.clear_variables();
+        Ok(())
+    }
+
+    /// Remove all variables and arrays, close the loops, the calls and the
+    /// LOCAL scopes, and move the DATA pointer to the first value. The
+    /// resident integer variables A% to Z%, the procedures and the
+    /// functions stay. CLEAR, RUN, NEW, LOAD and CHAIN use this.
+    pub fn clear_variables(&mut self) {
         self.variables.clear();
         self.clear_control_stacks();
         self.local_stack.clear();
         self.data_pointer = 0;
-        Ok(())
     }
 
     /// The LVAR text: one line for each scalar variable, then one line for
