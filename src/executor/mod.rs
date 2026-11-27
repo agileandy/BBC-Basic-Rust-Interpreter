@@ -811,14 +811,9 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute DATA statement - stores data values for READ
-    fn execute_data(&mut self, values: &[DataValue]) -> Result<()> {
-        // DATA statements append values to the data pool
-        // Track which line each value came from
-        for value in values {
-            self.data_values.push(value.clone());
-            self.data_line_numbers.push(self.current_line);
-        }
+    /// Execute DATA statement - does nothing when the run reaches it.
+    /// The first pass of `run_program` collects all DATA values with `collect_data`.
+    fn execute_data(&mut self, _values: &[DataValue]) -> Result<()> {
         Ok(())
     }
 
@@ -4015,7 +4010,7 @@ mod tests {
                 DataValue::Integer(30),
             ],
         };
-        executor.execute_statement(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 10).unwrap();
 
         // READ A%, B%, C%
         let read_stmt = Statement::Read {
@@ -4041,7 +4036,7 @@ mod tests {
                 DataValue::String("Test".to_string()),
             ],
         };
-        executor.execute_statement(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 10).unwrap();
 
         // READ A$, B$, C$
         let read_stmt = Statement::Read {
@@ -4067,7 +4062,7 @@ mod tests {
                 DataValue::String("Hello".to_string()),
             ],
         };
-        executor.execute_statement(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 10).unwrap();
 
         // READ A%, B, C$
         let read_stmt = Statement::Read {
@@ -4093,7 +4088,7 @@ mod tests {
                 DataValue::Integer(30),
             ],
         };
-        executor.execute_statement(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 10).unwrap();
 
         // READ A%, B%
         let read_stmt1 = Statement::Read {
@@ -4132,18 +4127,16 @@ mod tests {
         // 50 READ C%, D%
 
         // Line 10: DATA 100, 200
-        executor.set_line_number(Some(10));
         let data_stmt1 = Statement::Data {
             values: vec![DataValue::Integer(100), DataValue::Integer(200)],
         };
-        executor.execute_statement(&data_stmt1).unwrap();
+        executor.collect_data(&data_stmt1, 10).unwrap();
 
         // Line 20: DATA 300, 400
-        executor.set_line_number(Some(20));
         let data_stmt2 = Statement::Data {
             values: vec![DataValue::Integer(300), DataValue::Integer(400)],
         };
-        executor.execute_statement(&data_stmt2).unwrap();
+        executor.collect_data(&data_stmt2, 20).unwrap();
 
         // READ A%, B% (should get 100, 200)
         let read_stmt1 = Statement::Read {
@@ -4179,13 +4172,13 @@ mod tests {
         let data_stmt1 = Statement::Data {
             values: vec![DataValue::Integer(10), DataValue::Integer(20)],
         };
-        executor.execute_statement(&data_stmt1).unwrap();
+        executor.collect_data(&data_stmt1, 10).unwrap();
 
         // DATA 30, 40
         let data_stmt2 = Statement::Data {
             values: vec![DataValue::Integer(30), DataValue::Integer(40)],
         };
-        executor.execute_statement(&data_stmt2).unwrap();
+        executor.collect_data(&data_stmt2, 20).unwrap();
 
         // READ A%, B%, C%, D%
         let read_stmt = Statement::Read {
@@ -4213,7 +4206,7 @@ mod tests {
         let data_stmt = Statement::Data {
             values: vec![DataValue::Integer(10)],
         };
-        executor.execute_statement(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 10).unwrap();
 
         // READ A%, B% - should fail on B%
         let read_stmt = Statement::Read {
