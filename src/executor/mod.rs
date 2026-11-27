@@ -61,6 +61,14 @@ fn json_argument_count_error(name: &str, count: usize) -> BBCBasicError {
     }
 }
 
+/// The error for a name that the string evaluator does not know.
+fn unknown_string_function(name: &str) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message: format!("Unknown string function: {}", name),
+        line: None,
+    }
+}
+
 /// Give a JSON text that a function made, or "String too long" if it is
 /// longer than the string limit.
 fn json_text_in_limit(text: String) -> Result<String> {
@@ -2189,6 +2197,12 @@ impl Executor {
             {
                 self.eval_extension_string_function(name, &[])
             }
+            // A numeric variable or constant in a string context, such as
+            // A$ = PI (issue 146). A variable with no value keeps its error.
+            Expression::Variable(name) if !name.ends_with('$') => {
+                self.eval_number(expr)?;
+                Err(BBCBasicError::TypeMismatch)
+            }
             Expression::Variable(name) => self
                 .variables
                 .get_string_var(name)
@@ -3103,10 +3117,26 @@ impl Executor {
                 Ok(error_msg)
             }
             _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
-            _ => Err(BBCBasicError::SyntaxError {
-                message: format!("Unknown string function: {}", name),
-                line: None,
-            }),
+            // A built-in numeric function in a string context, such as
+            // A$ = SIN(1) (issue 146). The numeric evaluators are the table of
+            // these functions. As on a BBC Micro, the value is made first, so
+            // an error in it comes before Type mismatch.
+            _ if !name.ends_with('$') => {
+                let call = Expression::FunctionCall {
+                    name: name.to_string(),
+                    args: args.to_vec(),
+                };
+                match self.eval_number(&call) {
+                    Ok(_) => Err(BBCBasicError::TypeMismatch),
+                    Err(BBCBasicError::SyntaxError { message, .. })
+                        if message == format!("Unknown function: {}", name) =>
+                    {
+                        Err(unknown_string_function(name))
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            _ => Err(unknown_string_function(name)),
         }
     }
 

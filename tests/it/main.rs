@@ -129,3 +129,4 @@ mod issue_137_large_coordinate_adds;
 mod issue_143_functions_with_no_brackets;
 mod issue_139_lists;
 mod issue_149_list_spaces_after_bracket;
+mod issue_146_number_in_string_context;
