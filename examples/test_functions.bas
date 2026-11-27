@@ -1,10 +1,10 @@
 10 REM Test all mathematical and string functions
 20 REM Mathematical Functions
 30 PRINT "=== Mathematical Functions ==="
-40 PRINT "SIN(90) = "; SIN(90)
+40 PRINT "SIN(RAD(90)) = "; SIN(RAD(90))
 50 PRINT "COS(0) = "; COS(0)
-60 PRINT "TAN(45) = "; TAN(45)
-70 PRINT "ATN(1) = "; ATN(1)
+60 PRINT "TAN(RAD(45)) = "; TAN(RAD(45))
+70 PRINT "DEG(ATN(1)) = "; DEG(ATN(1))
 80 PRINT "SQR(16) = "; SQR(16)
 90 PRINT "ABS(-42) = "; ABS(-42)
 100 PRINT "INT(3.7) = "; INT(3.7)
@@ -30,8 +30,8 @@
 300 REM Combined example
 310 PRINT "=== Combined Example ==="
 320 X = 30
-330 Y = SIN(X) * 10
-340 PRINT "X = "; X; ", Y = SIN(X) * 10 = "; Y
+330 Y = SIN(RAD(X)) * 10
+340 PRINT "X = "; X; ", Y = SIN(RAD(X)) * 10 = "; Y
 350 S$ = "Result: " + STR$(INT(Y))
 360 PRINT S$
 370 END
