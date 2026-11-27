@@ -336,7 +336,8 @@ impl GraphicsSystem {
                 let centre = self.current_pos;
                 let dx = (i64::from(target_x) - i64::from(centre.x)) as f64;
                 let dy = (i64::from(target_y) - i64::from(centre.y)) as f64;
-                let radius = (dx * dx + dy * dy).sqrt().round() as i32;
+                // The radius can be larger than an i32
+                let radius = (dx * dx + dy * dy).sqrt().round() as i64;
                 if mode & 0xF8 == 0x90 {
                     self.circle_outline(centre.x, centre.y, radius);
                 } else {
@@ -376,16 +377,19 @@ impl GraphicsSystem {
     }
 
     /// Fill a circle with a horizontal line for each row. Only the rows and
-    /// the columns on the canvas are visited, so a large radius is fast.
-    fn fill_circle(&mut self, center_x: i32, center_y: i32, radius: i32) {
-        let (cx, cy, r) = (i64::from(center_x), i64::from(center_y), i64::from(radius));
+    /// the columns on the canvas are visited, so a large radius is fast. The
+    /// half width is an exact integer square root, thus a radius larger than
+    /// an i32 does not overflow or round down.
+    fn fill_circle(&mut self, center_x: i32, center_y: i32, radius: i64) {
+        let (cx, cy, r) = (i64::from(center_x), i64::from(center_y), radius);
         let min_x = -i64::from(self.origin.x);
         let max_x = self.width as i64 - 1 - i64::from(self.origin.x);
         let min_y = -i64::from(self.origin.y);
         let max_y = self.height as i64 - 1 - i64::from(self.origin.y);
         for y in (cy - r).max(min_y)..=(cy + r).min(max_y) {
             let dy = y - cy;
-            let half = ((r * r - dy * dy) as f64).sqrt() as i64;
+            let half =
+                (i128::from(r) * i128::from(r) - i128::from(dy) * i128::from(dy)).isqrt() as i64;
             for x in (cx - half).max(min_x)..=(cx + half).min(max_x) {
                 self.set_pixel(x as i32, y as i32);
             }
@@ -396,7 +400,7 @@ impl GraphicsSystem {
     /// algorithm. At octant row y, the algorithm gives the largest x with
     /// x * (x - 1) <= r * (r - 1) + 1 - y * y, and it stops when x < y. Only
     /// the rows that can put a point on the canvas are visited, each 1 time.
-    fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i32) {
+    fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i64) {
         if radius <= 0 {
             return;
         }

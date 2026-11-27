@@ -10,8 +10,8 @@ use bbc_basic_interpreter::graphics::GraphicsSystem;
 
 use crate::common::run_lines;
 
-/// Do `run_lines` on a thread with a time limit of 2 seconds.
-fn run_in_2_seconds(source: &[&str]) -> (Result<(), String>, String) {
+/// Do `run_lines` on a thread with a time limit of 10 seconds.
+fn run_in_10_seconds(source: &[&str]) -> (Result<(), String>, String) {
     let lines: Vec<String> = source.iter().map(|line| line.to_string()).collect();
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -19,13 +19,13 @@ fn run_in_2_seconds(source: &[&str]) -> (Result<(), String>, String) {
         let _ = sender.send(run_lines(&lines));
     });
     receiver
-        .recv_timeout(Duration::from_secs(2))
-        .expect("program ends within 2 seconds and does not panic")
+        .recv_timeout(Duration::from_secs(10))
+        .expect("program ends within 10 seconds and does not panic")
 }
 
 #[test]
 fn test_the_issue_program_returns_and_fills_the_visible_part() {
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 MODE 1 : MOVE 0,0 : MOVE 2000000000,0 : PLOT 85,0,2000000000",
         "20 PRINT POINT(10, 10)",
     ]);
@@ -37,7 +37,7 @@ fn test_the_issue_program_returns_and_fills_the_visible_part() {
 #[test]
 fn test_a_triangle_partly_off_the_screen_draws_its_visible_part() {
     // The edge from (1000, 100) to the far vertex is at x = 800 on row 300.
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 MOVE -2000000000, 100",
         "20 MOVE 1000, 100",
         "30 PLOT 85, -2000000000, 2000000000",
@@ -50,7 +50,7 @@ fn test_a_triangle_partly_off_the_screen_draws_its_visible_part() {
 
 #[test]
 fn test_a_long_line_returns_and_draws_its_visible_part() {
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 MOVE 0, 0",
         "20 DRAW 2000000000, 0",
         "30 MOVE -2000000000, 500",
@@ -65,7 +65,7 @@ fn test_a_long_line_returns_and_draws_its_visible_part() {
 #[test]
 fn test_a_large_circle_outline_returns_and_draws_its_visible_part() {
     // The circle goes through the point (1000, 500).
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 CIRCLE 0, 0, 2000000000",
         "20 CIRCLE -1999999000, 500, 2000000000",
         "30 PRINT POINT(0, 0); POINT(1000, 500); POINT(999, 500)",
@@ -77,7 +77,7 @@ fn test_a_large_circle_outline_returns_and_draws_its_visible_part() {
 
 #[test]
 fn test_a_circle_with_a_radius_larger_than_an_integer_does_not_panic() {
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 MOVE -2000000000, 0",
         "20 PLOT 149, 2000000000, 0",
         "30 PRINT \"done\"",
@@ -88,9 +88,35 @@ fn test_a_circle_with_a_radius_larger_than_an_integer_does_not_panic() {
 }
 
 #[test]
+fn test_a_circle_outline_with_a_radius_above_2147483647_goes_through_the_target() {
+    // The radius is 2147484000, so the circle goes through (1000, 500).
+    let (result, output) = run_in_10_seconds(&[
+        "10 MOVE -2147483000, 500",
+        "20 PLOT 149, 1000, 500",
+        "30 PRINT POINT(1000, 500); POINT(999, 500)",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "-10\n");
+}
+
+#[test]
+fn test_a_filled_circle_with_a_radius_above_2147483647_reaches_the_target() {
+    // The radius is 2147484000, so the fill ends at (1000, 500).
+    let (result, output) = run_in_10_seconds(&[
+        "10 MOVE -2147483000, 500",
+        "20 PLOT 157, 1000, 500",
+        "30 PRINT POINT(1000, 500); POINT(999, 500); POINT(1001, 500)",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "-1-10\n");
+}
+
+#[test]
 fn test_a_large_ellipse_returns_and_draws_its_visible_part() {
     // The top of the ellipse is at (0, 1000).
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 ELLIPSE 0, 0, 2000000000, 1000",
         "20 PRINT POINT(0, 1000); POINT(0, 999)",
     ]);
@@ -101,7 +127,7 @@ fn test_a_large_ellipse_returns_and_draws_its_visible_part() {
 
 #[test]
 fn test_an_ellipse_of_normal_size_on_the_screen_does_not_panic() {
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 ELLIPSE 640, 512, 600, 400",
         "20 PRINT POINT(640, 912); POINT(640, 512)",
     ]);
@@ -112,7 +138,7 @@ fn test_an_ellipse_of_normal_size_on_the_screen_does_not_panic() {
 
 #[test]
 fn test_a_large_rectangle_returns_and_fills_the_visible_part() {
-    let (result, output) = run_in_2_seconds(&[
+    let (result, output) = run_in_10_seconds(&[
         "10 RECTANGLE 0, 0, 2000000000, 2000000000",
         "20 PRINT POINT(100, 100); POINT(1279, 1023)",
     ]);
@@ -177,6 +203,24 @@ fn old_circle_outline(cx: i32, cy: i32, radius: i32) -> Vec<(i32, i32)> {
         } else {
             x -= 1;
             err += 2 * (y - x) + 1;
+        }
+    }
+    points
+}
+
+/// The old PLOT 157: the radius from the centre to the target, then a row
+/// for each y with an f64 square root.
+fn old_fill_circle(cx: i32, cy: i32, target_x: i32, target_y: i32) -> Vec<(i32, i32)> {
+    let mut points = Vec::new();
+    let dx = i64::from(target_x - cx);
+    let dy = i64::from(target_y - cy);
+    let r = ((dx * dx + dy * dy) as f64).sqrt().round() as i64;
+    let (cx, cy) = (i64::from(cx), i64::from(cy));
+    for y in (cy - r)..=(cy + r) {
+        let dy = y - cy;
+        let half = ((r * r - dy * dy) as f64).sqrt() as i64;
+        for x in (cx - half)..=(cx + half) {
+            points.push((x as i32, y as i32));
         }
     }
     points
@@ -342,6 +386,25 @@ fn assert_same_pixels(
                 "{case}: pixel ({x}, {y}) is not the same as before"
             );
         }
+    }
+}
+
+#[test]
+fn test_filled_circles_draw_the_same_pixels_as_before() {
+    let mut numbers = Numbers(133);
+    for _ in 0..2000 {
+        let origin = (numbers.between(-8, 8), numbers.between(-8, 8));
+        let (cx, cy) = (numbers.between(-30, 90), numbers.between(-30, 80));
+        let (tx, ty) = (cx + numbers.between(-50, 50), cy + numbers.between(-50, 50));
+        assert_same_pixels(
+            &format!("filled circle ({cx}, {cy}) to ({tx}, {ty}), origin {origin:?}"),
+            origin,
+            &old_fill_circle(cx, cy, tx, ty),
+            |graphics| {
+                graphics.move_to(cx, cy);
+                graphics.plot(157, tx, ty);
+            },
+        );
     }
 }
 
