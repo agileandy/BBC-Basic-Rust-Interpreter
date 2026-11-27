@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **501 tests** covering all major components
+- **642 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -206,22 +206,22 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 - **Pixel Reading**: POINT(x,y) function returns pixel state
 - **File I/O**: OPENIN, OPENOUT, OPENUP, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
 - **Error Handling**: ON ERROR GOTO, ERR, ERL, REPORT, ERROR statement
-- **Memory**: PEEK, POKE, ?, !, $ indirection operators
 - **Other**: DATA, READ, RESTORE, DIM, LOCAL, END, STOP, QUIT, CLS, LIST, NEW, OLD, SAVE, LOAD, CHAIN
 
 ### 📊 Test Results
 
-- **501 total tests** - All passing (224 library + 29 graphics + 248 program and binary)
+- **642 total tests** - All passing (256 library + 29 graphics + 357 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **FOR**: a `STEP` of 0 runs one time or loops without end.
 - **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. Hex output (`PRINT ~X`) is not supported.
-- **Operators**: the characters `~ ? ! # @ |` are ignored, so `@%` and the `?` and `!` memory operators do not work.
-- **Immediate mode**: a loop on a typed line with no line number does not loop, and a nested `IF` uses an older `ELSE` rule.
+- **Memory**: the `?`, `!` and `$` memory operators and the `@%` print format variable are not supported. They give an "Unknown character" error.
+- **Editing**: a line number typed alone does not delete the line.
+- **Immediate mode**: a loop typed on more than one line with no line numbers does not work. A typed line is one unit.
+- **Errors**: an error message shows an internal name, such as `DivisionByZero`, not the BBC BASIC text.
 
 ### Non-Standard Extensions
 
