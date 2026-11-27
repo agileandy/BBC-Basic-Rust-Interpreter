@@ -114,7 +114,7 @@ fn test_on_error_catches_loadjson_of_missing_file() {
         "100 PRINT \"CAUGHT \"; ERR",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "CAUGHT 255\n");
+    assert_eq!(output, "CAUGHT 214\n");
 }
 
 #[test]

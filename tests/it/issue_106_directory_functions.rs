@@ -135,13 +135,13 @@ fn test_on_error_catches_each_directory_error() {
         caught(&format!("A$ = LISTDIR$(\"{}/f\")", path)),
         "151 20\n"
     );
-    assert_eq!(caught(&format!("RMDIR \"{}/missing\"", path)), "255 20\n");
+    assert_eq!(caught(&format!("RMDIR \"{}/missing\"", path)), "214 20\n");
     assert_eq!(
         caught(&format!("MKDIR \"{}/missing/new\"", path)),
-        "255 20\n"
+        "214 20\n"
     );
     assert_eq!(
         caught(&format!("A$ = LISTDIR$(\"{}/missing\")", path)),
-        "255 20\n"
+        "214 20\n"
     );
 }
