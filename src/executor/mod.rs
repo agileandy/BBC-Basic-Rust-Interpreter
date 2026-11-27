@@ -736,6 +736,12 @@ impl Executor {
                     }
                     self.print_output(&" ".repeat(pos - self.column));
                 }
+                PrintItem::TabXY(x, y) => {
+                    // The same as VDU 31, x, y: each value is one byte
+                    let x = self.eval_integer(x)? as u8;
+                    let y = self.eval_integer(y)? as u8;
+                    self.move_text_cursor(x, y);
+                }
                 PrintItem::Spc(expr) => {
                     // SPC evaluates its value one time and truncates a real
                     let count = self.eval_number(expr)?.floor().max(0.0) as usize;
@@ -3517,9 +3523,8 @@ impl Executor {
                 PrintItem::Expression(expr) => {
                     output.push_str(&self.format_print_item(expr, hex)?);
                 }
-                PrintItem::Tab(_) | PrintItem::Spc(_) => {
-                    // TAB and SPC not typically used in file I/O, but we can support them
-                    // For simplicity, ignore them in file output
+                PrintItem::Tab(_) | PrintItem::TabXY(..) | PrintItem::Spc(_) => {
+                    // The parser does not permit TAB and SPC in PRINT#
                 }
                 PrintItem::Hex => hex = true,
                 PrintItem::Semicolon => {

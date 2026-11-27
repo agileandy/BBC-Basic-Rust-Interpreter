@@ -127,11 +127,12 @@ pub enum Expression {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintItem {
     Expression(Expression),
-    Tab(Expression), // TAB(n)
-    Spc(Expression), // SPC(n)
-    Hex,             // ~ : the numeric items up to the next , or ; print in hex
-    Semicolon,       // ;
-    Comma,           // ,
+    Tab(Expression),               // TAB(n)
+    TabXY(Expression, Expression), // TAB(x, y): the same as VDU 31, x, y
+    Spc(Expression),               // SPC(n)
+    Hex,                           // ~ : the numeric items up to the next , or ; print in hex
+    Semicolon,                     // ;
+    Comma,                         // ,
 }
 
 /// Item of a VDU statement. A semicolon after the item sends it as 2 bytes,
@@ -901,8 +902,32 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
                     });
                 }
 
-                let expr = parse_expression(&tokens[start_pos..pos - 1])?;
-                items.push(PrintItem::Tab(expr));
+                // TAB(x) or TAB(x, y): split the values at the commas
+                // outside the inner brackets
+                let inner = &tokens[start_pos..pos - 1];
+                let mut depth = 0;
+                let values: Vec<&[Token]> = inner
+                    .split(|token| {
+                        match token {
+                            Token::Separator('(') => depth += 1,
+                            Token::Separator(')') => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0 && matches!(token, Token::Separator(','))
+                    })
+                    .collect();
+                match values.as_slice() {
+                    [x] => items.push(PrintItem::Tab(parse_expression(x)?)),
+                    [x, y] => {
+                        items.push(PrintItem::TabXY(parse_expression(x)?, parse_expression(y)?))
+                    }
+                    _ => {
+                        return Err(BBCBasicError::SyntaxError {
+                            message: "TAB takes 1 or 2 values".to_string(),
+                            line: None,
+                        })
+                    }
+                }
             }
             // Handle SPC(expr)
             Token::Keyword(0x89) => {
@@ -1590,6 +1615,20 @@ fn parse_print_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     } else {
         Vec::new()
     };
+
+    // BBC BASIC writes only values to a file, and has no column for TAB or SPC
+    // there, so it does not permit them in PRINT#
+    if items.iter().any(|item| {
+        matches!(
+            item,
+            PrintItem::Tab(_) | PrintItem::TabXY(..) | PrintItem::Spc(_)
+        )
+    }) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "TAB and SPC are not permitted in PRINT#".to_string(),
+            line: line_number,
+        });
+    }
 
     Ok(Statement::PrintFile { handle, items })
 }
@@ -3773,18 +3812,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_print_file_spc_gives_spc_item() {
-        assert_eq!(
-            parse_print_file_text("PRINT#F%, SPC(3);\"A\""),
-            vec![
-                PrintItem::Spc(Expression::Integer(3)),
-                PrintItem::Semicolon,
-                PrintItem::Expression(Expression::String("A".to_string())),
-            ]
-        );
-    }
-
-    #[test]
     fn test_parse_print_file_tan_is_a_function_call() {
         assert!(matches!(
             parse_print_file_text("PRINT#F%, TAN(0)").as_slice(),
@@ -3868,6 +3895,50 @@ mod tests {
                 PrintItem::Expression(Expression::String("X".to_string())),
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_print_tab_with_2_values() {
+        assert_eq!(
+            parse_print_text("PRINT TAB(5, 3); \"X\""),
+            vec![
+                PrintItem::TabXY(Expression::Integer(5), Expression::Integer(3)),
+                PrintItem::Semicolon,
+                PrintItem::Expression(Expression::String("X".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_tab_with_2_values_with_brackets_in_a_value() {
+        let items = parse_print_text("PRINT TAB(FNa(1, 2), (3))");
+        assert!(
+            matches!(
+                items.as_slice(),
+                [PrintItem::TabXY(
+                    Expression::FunctionCall { .. },
+                    Expression::Integer(3)
+                )]
+            ),
+            "items: {:?}",
+            items
+        );
+    }
+
+    #[test]
+    fn test_parse_print_file_rejects_tab_and_spc() {
+        use crate::tokenizer::tokenize;
+        for source in ["PRINT#1, TAB(2)", "PRINT#1, TAB(2, 3)", "PRINT#1, SPC(2)"] {
+            let error = parse_statement(&tokenize(source).unwrap()).unwrap_err();
+            assert!(
+                matches!(
+                    &error,
+                    BBCBasicError::SyntaxError { message, .. }
+                        if message == "TAB and SPC are not permitted in PRINT#"
+                ),
+                "{source}: {error:?}"
+            );
+        }
     }
 
     #[test]

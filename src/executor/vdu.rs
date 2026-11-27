@@ -78,14 +78,21 @@ impl Executor {
                 &word(parameters[2], parameters[3]),
             )?,
             30 => self.column = 0,
-            // TAB(x, y): the executor keeps only a print column, so y has no effect
-            31 => self.column = parameters[0] as usize,
+            31 => self.move_text_cursor(parameters[0], parameters[1]),
             32..=126 => self.print_output(&char::from(code).to_string()),
             // 7 (bell), 127 (delete), the
             // other control codes and the codes from 128 to 255 do nothing
             _ => {}
         }
         Ok(())
+    }
+
+    /// Move the text cursor to column `x` and row `y` (VDU 31 and TAB(x, y)).
+    /// The executor keeps only a print column, so `y` has no effect. No
+    /// cursor code goes to the output buffer or to standard output, as for
+    /// colour (issue #101).
+    pub(super) fn move_text_cursor(&mut self, x: u8, _y: u8) {
+        self.column = x as usize;
     }
 
     /// Send a control character to the display. It does not change the
