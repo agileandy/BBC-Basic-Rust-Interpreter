@@ -2078,12 +2078,18 @@ impl Executor {
                         line: None,
                     });
                 }
-                let count = self.eval_integer(&args[0])? as usize;
+                let count = self.eval_integer(&args[0])?;
                 let s = self.eval_string(&args[1])?;
 
                 // STRING$(n, string) repeats first character n times
                 if let Some(first_char) = s.chars().next() {
-                    Ok(first_char.to_string().repeat(count))
+                    // A count below 0 gives an empty string. A result longer
+                    // than the 255 characters of BBC BASIC gives an error before
+                    // the string is made.
+                    if count > 255 {
+                        return Err(BBCBasicError::StringTooLong);
+                    }
+                    Ok(first_char.to_string().repeat(count.max(0) as usize))
                 } else {
                     Ok(String::new())
                 }
