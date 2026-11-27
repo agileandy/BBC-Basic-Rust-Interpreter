@@ -21,6 +21,8 @@ pub enum Token {
     Real(f64),
     /// String literal
     String(String),
+    /// The text after DATA to the end of the line, as typed
+    DataText(String),
     /// Variable or procedure name
     Identifier(String),
     /// Operators (+, -, *, etc.)
@@ -298,6 +300,13 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             // Check if it's a keyword
             if let Some(&token_byte) = keyword_map.get(&upper_word) {
                 tokens.push(Token::Keyword(token_byte));
+                // DATA uses the rest of the line. Keep that text as typed.
+                if token_byte == 0xDC {
+                    let text: String = chars.by_ref().collect();
+                    if !text.is_empty() {
+                        tokens.push(Token::DataText(text));
+                    }
+                }
             } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word) {
                 tokens.push(Token::ExtendedKeyword(prefix, token_byte));
             } else if let Some((keyword, name)) = split_proc_or_fn(&word) {
@@ -385,6 +394,8 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Operator('<'), Token::Operator('=')) => false,
                 (Token::Operator('>'), Token::Operator('=')) => false,
                 (Token::Operator('<'), Token::Operator('>')) => false,
+                // The DATA text holds its own spaces
+                (_, Token::DataText(_)) => false,
                 // Need space between most tokens
                 _ => true,
             };
@@ -427,6 +438,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             }
             Token::Identifier(name) => {
                 result.push_str(name);
+            }
+            Token::DataText(text) => {
+                result.push_str(text);
             }
             Token::Operator(op) => {
                 result.push(*op);
@@ -1135,5 +1149,29 @@ mod tests {
             assert!(listed.contains(&format!(" {op} ")), "{listed}");
             assert_eq!(tokenize(&listed).unwrap(), line, "{listed}");
         }
+    }
+
+    #[test]
+    fn test_data_keeps_rest_of_line_as_one_text_token() {
+        let line = tokenize("10 DATA 1 : REM x ELSE ~").unwrap();
+        assert_eq!(
+            line.tokens,
+            vec![
+                Token::Keyword(0xDC),
+                Token::DataText(" 1 : REM x ELSE ~".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_data_with_no_text_gives_only_the_keyword() {
+        let line = tokenize("10 DATA").unwrap();
+        assert_eq!(line.tokens, vec![Token::Keyword(0xDC)]);
+    }
+
+    #[test]
+    fn test_detokenize_data_line_lists_as_typed() {
+        let source = "10 DATA  \"A,B\" ,C:D";
+        assert_eq!(detokenize(&tokenize(source).unwrap()).unwrap(), source);
     }
 }
