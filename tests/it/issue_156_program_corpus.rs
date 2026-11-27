@@ -86,10 +86,7 @@ corpus!(recursive_proc);
 corpus!(repeat_flag);
 corpus!(file_write_read);
 corpus!(file_input_array);
-corpus!(
-    #[ignore = "defect F3: POINT gives -1 for a lit pixel and 0 off the screen"]
-    graphics_points
-);
+corpus!(graphics_points);
 corpus!(tab_columns);
 corpus!(
     #[ignore = "defect F1: @% is not a variable, so a program cannot set the number format"]
