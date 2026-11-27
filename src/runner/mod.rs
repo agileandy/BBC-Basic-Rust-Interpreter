@@ -335,6 +335,8 @@ pub fn run_program_with_outcome(
     executor.clear_functions();
     // RUN starts with no variables, except A% to Z%
     executor.clear_variables();
+    // RUN starts with no ON ERROR handler. CLEAR keeps the handler.
+    executor.clear_error_handler();
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
