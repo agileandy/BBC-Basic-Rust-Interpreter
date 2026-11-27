@@ -3303,7 +3303,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 
 /// Parse a THEN or an ELSE branch. A line number at the start of the branch
 /// is a short form of GOTO. The statements after it can never run. Only the
-/// end of the branch or a colon can follow the line number.
+/// end of the branch, a colon or a comment can follow the line number.
 ///
 /// A block IF or a CASE cannot be in a branch, because the branch ends with
 /// its line.
@@ -3331,15 +3331,24 @@ fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Sta
             return Ok(statements);
         }
     };
-    match tokens.get(1) {
-        None | Some(Token::Separator(':')) => Ok(vec![Statement::Goto {
+    let rest = &tokens[1..];
+    if rest.is_empty() || rest[0] == Token::Separator(':') || starts_comment(rest) {
+        Ok(vec![Statement::Goto {
             line_number: target,
-        }]),
-        Some(_) => Err(BBCBasicError::SyntaxError {
+        }])
+    } else {
+        Err(BBCBasicError::SyntaxError {
             message: "Expected end of statement after line number".to_string(),
             line: line_number,
-        }),
+        })
     }
+}
+
+/// True if the tokens start a comment. Both REM and an apostrophe comment
+/// start with the REM token. A comment ends a branch, as the end of the line
+/// does (issue 180).
+fn starts_comment(tokens: &[Token]) -> bool {
+    matches!(tokens.first(), Some(Token::Keyword(0xF4)))
 }
 
 /// Parse a sequence of tokens into an expression

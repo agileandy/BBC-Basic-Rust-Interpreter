@@ -156,3 +156,4 @@ mod issue_177_dim_trailing_tokens;
 mod issue_175_power_always_real;
 mod issue_178_apostrophe_comment_text;
 mod issue_176_canvas_colour_store;
+mod issue_180_comment_after_then_line;
