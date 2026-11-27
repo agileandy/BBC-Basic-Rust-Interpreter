@@ -6,6 +6,7 @@ use crate::error::{BBCBasicError, Result};
 use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, Expression, Statement};
+use crate::program::Position;
 use crate::variables::{Variable, VariableStore};
 use rand::Rng;
 use std::cell::RefCell;
@@ -129,7 +130,7 @@ impl LocalFrame {
 /// Procedure definition
 #[derive(Debug, Clone)]
 pub struct ProcedureDefinition {
-    pub line_number: u16,
+    pub position: Position,
     pub params: Vec<String>,
 }
 
@@ -145,8 +146,8 @@ pub struct FunctionDefinition {
 pub enum FunctionBody {
     /// Single-line function: `DEF FNname(params) = expr`
     Expression(Expression),
-    /// Multi-line function: the body starts on the line after this DEF line
-    Lines(u16),
+    /// Multi-line function: the body starts after the DEF statement at this position
+    Lines(Position),
 }
 
 /// Evaluates the `=expr` result of a multi-line function in the type that
@@ -158,7 +159,7 @@ pub type ResultEvaluator<'a> = &'a mut dyn FnMut(&mut Executor, &Expression) -> 
 /// At the `=expr` line that ends the body, it calls the evaluator with the
 /// expression. The function scope is still active at that time, and an error
 /// in the expression has the line number of the `=expr` line.
-pub type FunctionBodyRunner = Rc<dyn Fn(&mut Executor, u16, ResultEvaluator) -> Result<()>>;
+pub type FunctionBodyRunner = Rc<dyn Fn(&mut Executor, Position, ResultEvaluator) -> Result<()>>;
 
 /// Holds the optional function body runner, so that `Executor` can derive `Debug`.
 #[derive(Clone, Default)]
@@ -192,13 +193,13 @@ pub struct Executor {
     memory: MemoryManager,
     graphics: GraphicsSystem,
     // Control flow stack for GOSUB/RETURN
-    return_stack: Vec<u16>,
-    // FOR loop state: (variable, end_value, step_value, loop_line)
-    for_loops: Vec<(String, i32, i32, u16)>,
-    // REPEAT loop stack: stores line numbers of REPEAT statements
-    repeat_stack: Vec<u16>,
-    // WHILE loop stack: stores line numbers of WHILE statements
-    while_stack: Vec<u16>,
+    return_stack: Vec<Position>,
+    // FOR loop state: (variable, end_value, step_value, FOR position)
+    for_loops: Vec<(String, i32, i32, Position)>,
+    // REPEAT loop stack: stores the positions of REPEAT statements
+    repeat_stack: Vec<Position>,
+    // WHILE loop stack: stores the positions of WHILE statements
+    while_stack: Vec<Position>,
     // DATA storage: stores all DATA values in program order
     data_values: Vec<DataValue>,
     // DATA line numbers: tracks which line each DATA value came from (parallel to data_values)
@@ -225,8 +226,8 @@ pub struct Executor {
     open_files: HashMap<i32, FileHandle>,
     // Next file handle number to allocate
     next_file_handle: i32,
-    // FOR line to jump back to after the last NEXT (None = that loop is complete)
-    next_loop_line: Option<u16>,
+    // FOR position to jump back to after the last NEXT (None = that loop is complete)
+    next_loop_line: Option<Position>,
     // Start instant: TIME counts centiseconds from here
     start_time: std::time::Instant,
     // Replies for INPUT, used before stdin (for testing)
@@ -606,10 +607,14 @@ impl Executor {
         self.variables
             .set_integer_var(variable.to_string(), start_val);
 
-        // Store loop state: (variable, end_value, step_value, loop_line)
-        // loop_line would be the line number in a real program
-        self.for_loops
-            .push((variable.to_string(), end_val, step_val, 0));
+        // Store loop state: (variable, end_value, step_value, FOR position)
+        // The run loop sets the FOR position (set_for_loop_line)
+        self.for_loops.push((
+            variable.to_string(),
+            end_val,
+            step_val,
+            Position::line_start(0),
+        ));
 
         Ok(())
     }
@@ -2055,31 +2060,31 @@ impl Executor {
     }
 
     /// Check if the last NEXT caused a loop to continue (not complete)
-    /// Returns Some(line_number) if should loop back, None if loop completed
-    pub fn should_loop_back(&self) -> Option<u16> {
+    /// Returns Some(FOR position) if should loop back, None if loop completed
+    pub fn should_loop_back(&self) -> Option<Position> {
         self.next_loop_line
     }
 
-    /// Set the line number for a FOR loop (called when FOR is executed)
-    pub fn set_for_loop_line(&mut self, line_number: u16) {
+    /// Set the position of a FOR loop (called when FOR is executed)
+    pub fn set_for_loop_line(&mut self, position: Position) {
         if let Some(loop_state) = self.for_loops.last_mut() {
-            loop_state.3 = line_number;
+            loop_state.3 = position;
         }
     }
 
-    /// Push a REPEAT line number onto the repeat stack
-    pub fn push_repeat(&mut self, line_number: u16) {
-        self.repeat_stack.push(line_number);
+    /// Push a REPEAT position onto the repeat stack
+    pub fn push_repeat(&mut self, position: Position) {
+        self.repeat_stack.push(position);
     }
 
-    /// Evaluate UNTIL condition and return the REPEAT line if we should loop back
-    pub fn check_until(&mut self, condition: &Expression) -> Result<Option<u16>> {
+    /// Evaluate UNTIL condition and return the REPEAT position if we should loop back
+    pub fn check_until(&mut self, condition: &Expression) -> Result<Option<Position>> {
         // Evaluate the condition
         let result = self.eval_integer(condition)?;
 
         if result == 0 {
             // Condition is false - loop back to REPEAT
-            // Return the REPEAT line number but keep it on stack (don't pop yet)
+            // Return the REPEAT position but keep it on stack (don't pop yet)
             Ok(self.repeat_stack.last().copied())
         } else {
             // Condition is true - exit loop
@@ -2088,31 +2093,35 @@ impl Executor {
         }
     }
 
-    /// Push a WHILE line number onto the while stack and check condition
-    /// Returns Some(line_number) if condition is TRUE (continue to loop body)
+    /// Push a WHILE position onto the while stack and check condition
+    /// Returns Some(position) if condition is TRUE (continue to loop body)
     /// Returns None if condition is FALSE (skip loop body)
-    pub fn push_while(&mut self, line_number: u16, condition: &Expression) -> Result<Option<u16>> {
+    pub fn push_while(
+        &mut self,
+        position: Position,
+        condition: &Expression,
+    ) -> Result<Option<Position>> {
         // Evaluate the condition
         let result = self.eval_integer(condition)?;
 
         if result != 0 {
             // Condition is true - enter loop body
-            self.while_stack.push(line_number);
-            Ok(Some(line_number))
+            self.while_stack.push(position);
+            Ok(Some(position))
         } else {
             // Condition is false - skip loop body
             Ok(None)
         }
     }
 
-    /// Handle ENDWHILE - return the WHILE line if we should loop back
-    pub fn check_endwhile(&mut self, condition: &Expression) -> Result<Option<u16>> {
+    /// Handle ENDWHILE - return the WHILE position if we should loop back
+    pub fn check_endwhile(&mut self, condition: &Expression) -> Result<Option<Position>> {
         // Evaluate the condition
         let result = self.eval_integer(condition)?;
 
         if result != 0 {
             // Condition is still true - loop back to WHILE
-            // Return the WHILE line number but keep it on stack (don't pop yet)
+            // Return the WHILE position but keep it on stack (don't pop yet)
             Ok(self.while_stack.last().copied())
         } else {
             // Condition is false - exit loop
@@ -2121,30 +2130,25 @@ impl Executor {
         }
     }
 
-    /// Get the current WHILE line number without popping (for ENDWHILE to retrieve condition)
-    pub fn check_endwhile_get_while_line(&self) -> Option<u16> {
+    /// Get the current WHILE position without popping (for ENDWHILE to retrieve condition)
+    pub fn check_endwhile_get_while_line(&self) -> Option<Position> {
         self.while_stack.last().copied()
     }
 
     /// Push a return address onto the GOSUB stack
-    pub fn push_gosub_return(&mut self, line_number: u16) {
-        self.return_stack.push(line_number);
+    pub fn push_gosub_return(&mut self, position: Position) {
+        self.return_stack.push(position);
     }
 
     /// Pop a return address from the GOSUB stack
-    pub fn pop_gosub_return(&mut self) -> Result<u16> {
+    pub fn pop_gosub_return(&mut self) -> Result<Position> {
         self.return_stack.pop().ok_or(BBCBasicError::BadCall)
     }
 
-    /// Define a procedure
-    pub fn define_procedure(&mut self, name: String, line_number: u16, params: Vec<String>) {
-        self.procedures.insert(
-            name,
-            ProcedureDefinition {
-                line_number,
-                params,
-            },
-        );
+    /// Define a procedure at the position of its DEF PROC statement
+    pub fn define_procedure(&mut self, name: String, position: Position, params: Vec<String>) {
+        self.procedures
+            .insert(name, ProcedureDefinition { position, params });
     }
 
     /// Get procedure definition
@@ -2437,15 +2441,15 @@ impl Executor {
 
         match &func.body {
             FunctionBody::Expression(expression) => eval(self, expression),
-            FunctionBody::Lines(def_line) => {
+            FunctionBody::Lines(def_position) => {
                 let runner = self.function_body_runner.0.clone().ok_or_else(|| {
                     BBCBasicError::SyntaxError {
                         message: "A multi-line function needs a running program".to_string(),
-                        line: Some(*def_line),
+                        line: Some(def_position.line),
                     }
                 })?;
                 let mut result = None;
-                runner(self, *def_line, &mut |executor, expression| {
+                runner(self, *def_position, &mut |executor, expression| {
                     result = Some(eval(executor, expression)?);
                     Ok(())
                 })?;
@@ -4428,7 +4432,7 @@ mod tests {
         executor.execute_statement(&init_stmt).unwrap();
 
         // REPEAT at line 20
-        executor.push_repeat(20);
+        executor.push_repeat(Position::line_start(20));
 
         // Loop several times
         for expected in 1..=5 {
@@ -4454,7 +4458,11 @@ mod tests {
 
             if expected < 5 {
                 // Should loop back
-                assert_eq!(result, Some(20), "Should loop back to REPEAT at line 20");
+                assert_eq!(
+                    result,
+                    Some(Position::line_start(20)),
+                    "Should loop back to REPEAT at line 20"
+                );
             } else {
                 // Should exit loop
                 assert_eq!(result, None, "Should exit loop when X% = 5");
@@ -4493,7 +4501,7 @@ mod tests {
         // 110 RETURN      (should return to line AFTER 20, which is 30)
 
         // Push return address for line 20
-        executor.push_gosub_return(20);
+        executor.push_gosub_return(Position::line_start(20));
 
         // Verify return address was saved
         assert_eq!(executor.return_stack.len(), 1);
@@ -4503,7 +4511,8 @@ mod tests {
 
         // Should return to line 20 (caller will advance to next line)
         assert_eq!(
-            return_line, 20,
+            return_line,
+            Position::line_start(20),
             "RETURN should pop the line number that called GOSUB"
         );
 
@@ -4523,14 +4532,20 @@ mod tests {
         // 110 RETURN
         // 200 RETURN
 
-        executor.push_gosub_return(10);
-        executor.push_gosub_return(100);
+        executor.push_gosub_return(Position::line_start(10));
+        executor.push_gosub_return(Position::line_start(100));
 
         // First RETURN should go back to 100
-        assert_eq!(executor.pop_gosub_return().unwrap(), 100);
+        assert_eq!(
+            executor.pop_gosub_return().unwrap(),
+            Position::line_start(100)
+        );
 
         // Second RETURN should go back to 10
-        assert_eq!(executor.pop_gosub_return().unwrap(), 10);
+        assert_eq!(
+            executor.pop_gosub_return().unwrap(),
+            Position::line_start(10)
+        );
     }
 
     #[test]
@@ -4539,12 +4554,12 @@ mod tests {
         let mut executor = Executor::new();
 
         // Define a simple procedure
-        executor.define_procedure("greet".to_string(), 100, vec![]);
+        executor.define_procedure("greet".to_string(), Position::line_start(100), vec![]);
 
         // Should be able to retrieve it
         let proc = executor.get_procedure("greet");
         assert!(proc.is_some());
-        assert_eq!(proc.unwrap().line_number, 100);
+        assert_eq!(proc.unwrap().position, Position::line_start(100));
         assert_eq!(proc.unwrap().params.len(), 0);
     }
 
@@ -4556,14 +4571,14 @@ mod tests {
         // Define procedure with parameters
         executor.define_procedure(
             "add".to_string(),
-            200,
+            Position::line_start(200),
             vec!["X".to_string(), "Y".to_string()],
         );
 
         // Should be able to retrieve it
         let proc = executor.get_procedure("add");
         assert!(proc.is_some());
-        assert_eq!(proc.unwrap().line_number, 200);
+        assert_eq!(proc.unwrap().position, Position::line_start(200));
         assert_eq!(proc.unwrap().params, vec!["X", "Y"]);
     }
 
@@ -4581,8 +4596,8 @@ mod tests {
         // RED: Test clearing all procedures
         let mut executor = Executor::new();
 
-        executor.define_procedure("proc1".to_string(), 100, vec![]);
-        executor.define_procedure("proc2".to_string(), 200, vec![]);
+        executor.define_procedure("proc1".to_string(), Position::line_start(100), vec![]);
+        executor.define_procedure("proc2".to_string(), Position::line_start(200), vec![]);
 
         // Both should exist
         assert!(executor.get_procedure("proc1").is_some());
@@ -5082,8 +5097,14 @@ mod tests {
         };
 
         // First check - X% = 0, should enter loop
-        let result = executor.push_while(20, &condition).unwrap();
-        assert_eq!(result, Some(20), "Should enter loop when X% = 0");
+        let result = executor
+            .push_while(Position::line_start(20), &condition)
+            .unwrap();
+        assert_eq!(
+            result,
+            Some(Position::line_start(20)),
+            "Should enter loop when X% = 0"
+        );
 
         // Loop several times
         for expected in 1..=5 {
@@ -5102,7 +5123,12 @@ mod tests {
             if expected < 5 {
                 // Should loop back (X% < 5)
                 let result = executor.check_endwhile(&condition).unwrap();
-                assert_eq!(result, Some(20), "Should loop back when X% = {}", expected);
+                assert_eq!(
+                    result,
+                    Some(Position::line_start(20)),
+                    "Should loop back when X% = {}",
+                    expected
+                );
             } else {
                 // Should exit loop (X% = 5)
                 let result = executor.check_endwhile(&condition).unwrap();
@@ -5134,7 +5160,9 @@ mod tests {
             right: Box::new(Expression::Integer(5)),
         };
 
-        let result = executor.push_while(20, &condition).unwrap();
+        let result = executor
+            .push_while(Position::line_start(20), &condition)
+            .unwrap();
         assert_eq!(
             result, None,
             "Should not enter loop when condition is false"
@@ -5158,7 +5186,9 @@ mod tests {
         };
 
         // Enter outer loop
-        executor.push_while(10, &outer_condition).unwrap();
+        executor
+            .push_while(Position::line_start(10), &outer_condition)
+            .unwrap();
         assert_eq!(executor.while_stack.len(), 1);
 
         // Inner: WHILE J% < 2
@@ -5170,7 +5200,9 @@ mod tests {
         };
 
         // Enter inner loop
-        executor.push_while(20, &inner_condition).unwrap();
+        executor
+            .push_while(Position::line_start(20), &inner_condition)
+            .unwrap();
         assert_eq!(executor.while_stack.len(), 2);
 
         // Exit inner loop

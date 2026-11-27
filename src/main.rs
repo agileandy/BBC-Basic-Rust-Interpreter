@@ -1,6 +1,6 @@
 use bbc_basic_interpreter::{
     executor::Executor,
-    parser::parse_statement,
+    parser::parse_line,
     program::ProgramStore,
     runner::run_program,
     tokenizer::{detokenize, tokenize},
@@ -146,12 +146,14 @@ fn process_line(
         }
         Ok(())
     } else {
-        // Immediate mode: execute immediately
-        let statement = parse_statement(&tokenized).map_err(|e| format!("Parse error: {:?}", e))?;
+        // Immediate mode: execute each statement of the line, in order
+        let statements = parse_line(&tokenized).map_err(|e| format!("Parse error: {:?}", e))?;
 
-        executor
-            .execute_statement(&statement)
-            .map_err(|e| format!("Runtime error: {:?}", e))?;
+        for statement in &statements {
+            executor
+                .execute_statement(statement)
+                .map_err(|e| format!("Runtime error: {:?}", e))?;
+        }
 
         Ok(())
     }
