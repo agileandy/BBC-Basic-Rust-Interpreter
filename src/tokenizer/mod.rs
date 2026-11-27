@@ -89,6 +89,14 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 }
             }
 
+            // A line of only digits is a line number with no statement. The
+            // line is trimmed, so trailing spaces are already gone.
+            if temp_chars.peek().is_none() {
+                if let Ok(num) = num_str.parse::<u16>() {
+                    return Ok(TokenizedLine::new(Some(num), Vec::new()));
+                }
+            }
+
             // Line numbers must be followed by whitespace AND start of statement
             let has_whitespace = temp_chars
                 .peek()
@@ -771,11 +779,11 @@ mod tests {
 
     #[test]
     fn test_tokenize_integer_literal() {
-        // RED: Test tokenizing a simple integer
-        let result = tokenize("42").unwrap();
+        // A bare number is a line number (issue #71), so put it in a statement
+        let result = tokenize("PRINT 42").unwrap();
         assert_eq!(result.line_number, None);
-        assert_eq!(result.tokens.len(), 1);
-        assert_eq!(result.tokens[0], Token::Integer(42));
+        assert_eq!(result.tokens.len(), 2);
+        assert_eq!(result.tokens[1], Token::Integer(42));
     }
 
     #[test]
@@ -959,6 +967,34 @@ mod tests {
         assert_eq!(result.tokens[0], Token::Identifier("A%".to_string()));
         assert_eq!(result.tokens[1], Token::Operator('='));
         assert_eq!(result.tokens[2], Token::Integer(42));
+    }
+
+    #[test]
+    fn test_tokenize_line_number_alone_has_no_tokens() {
+        let result = tokenize("10").unwrap();
+        assert_eq!(result.line_number, Some(10));
+        assert!(result.tokens.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_line_number_alone_with_spaces_has_no_tokens() {
+        let result = tokenize(" 10 ").unwrap();
+        assert_eq!(result.line_number, Some(10));
+        assert!(result.tokens.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_line_number_then_statement_is_unchanged() {
+        let result = tokenize("10 PRINT 1").unwrap();
+        assert_eq!(result.line_number, Some(10));
+        assert_eq!(result.tokens, vec![Token::Keyword(0xF1), Token::Integer(1)]);
+    }
+
+    #[test]
+    fn test_tokenize_number_alone_out_of_line_range_is_not_a_line_number() {
+        let result = tokenize("99999").unwrap();
+        assert_eq!(result.line_number, None);
+        assert_eq!(result.tokens, vec![Token::Integer(99999)]);
     }
 
     #[test]
