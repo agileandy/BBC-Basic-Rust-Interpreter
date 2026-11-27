@@ -873,29 +873,22 @@ fn step(
                 return Err(BBCBasicError::Arguments.into());
             }
 
-            // Clone procedure data before entering local scope
+            // Clone procedure data before evaluating the arguments
             let proc_position = proc.position;
-            let params_and_args: Vec<_> = proc
-                .params
-                .iter()
-                .zip(args.iter())
-                .map(|(p, a)| (p.clone(), a.clone()))
-                .collect();
+            let params = proc.params.clone();
 
+            // Evaluate all arguments in the scope of the caller. An error
+            // here changes no variable, and the PROC scope is not open.
+            let values = executor.evaluate_arguments(&params, args)?;
+
+            // Each parameter is local to the PROC: ENDPROC restores the
+            // caller variable of the same name
             executor.enter_local_scope();
-
-            // Bind arguments to parameters (as global variables)
-            for (param_name, arg_expr) in params_and_args {
-                let bound = executor.execute_statement(&Statement::Assignment {
-                    target: param_name,
-                    expression: arg_expr,
-                });
-                if let Err(error) = bound {
-                    // The PROC did not start: close its scope, so that the
-                    // ON ERROR handler runs in the scope of the caller
-                    executor.exit_local_scope()?;
-                    return Err(error.into());
-                }
+            if let Err(error) = executor.bind_parameters(&params, values) {
+                // The PROC did not start: close its scope, so that the
+                // ON ERROR handler runs in the scope of the caller
+                executor.exit_local_scope()?;
+                return Err(error.into());
             }
 
             executor.push_gosub_return(position);
