@@ -45,6 +45,19 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
+/// Tell if an expression is a negative integer constant, such as `-2`.
+fn is_negative_integer_constant(expr: &Expression) -> bool {
+    use crate::parser::UnaryOperator;
+    match expr {
+        Expression::Integer(value) => *value < 0,
+        Expression::UnaryOp {
+            op: UnaryOperator::Minus,
+            operand,
+        } => matches!(**operand, Expression::Integer(value) if value > 0),
+        _ => false,
+    }
+}
+
 /// The error of a list function with the wrong count of arguments (issue #139).
 fn list_arguments_error(name: &str, count: usize) -> BBCBasicError {
     BBCBasicError::SyntaxError {
@@ -1971,6 +1984,10 @@ impl Executor {
                         .and_then(|exponent| left_val.checked_pow(exponent))
                     {
                         Some(value) => Ok(value),
+                        // Zero to a negative power is 1 / 0.
+                        None if left_val == 0 && right_val < 0 => {
+                            Err(BBCBasicError::DivisionByZero)
+                        }
                         None => real_to_integer(f64::from(left_val).powf(f64::from(right_val))),
                     },
                     // Logical operators
@@ -2107,19 +2124,34 @@ impl Executor {
                 let left_val = self.eval_real(left)?;
                 let right_val = self.eval_real(right)?;
 
-                match op {
-                    BinaryOperator::Add => Ok(left_val + right_val),
-                    BinaryOperator::Subtract => Ok(left_val - right_val),
-                    BinaryOperator::Multiply => Ok(left_val * right_val),
+                let value = match op {
+                    BinaryOperator::Add => left_val + right_val,
+                    BinaryOperator::Subtract => left_val - right_val,
+                    BinaryOperator::Multiply => left_val * right_val,
                     BinaryOperator::Divide => {
                         if right_val == 0.0 {
-                            Err(BBCBasicError::DivisionByZero)
-                        } else {
-                            Ok(left_val / right_val)
+                            return Err(BBCBasicError::DivisionByZero);
                         }
+                        left_val / right_val
                     }
-                    BinaryOperator::Power => Ok(left_val.powf(right_val)),
-                    _ => Err(BBCBasicError::IllegalFunction),
+                    // A negative base to a power with a fraction has no real result.
+                    BinaryOperator::Power if left_val < 0.0 && right_val.fract() != 0.0 => {
+                        return Err(BBCBasicError::LogRange);
+                    }
+                    // Zero to a negative whole power is 1 / 0.
+                    BinaryOperator::Power
+                        if left_val == 0.0 && right_val < 0.0 && right_val.fract() == 0.0 =>
+                    {
+                        return Err(BBCBasicError::DivisionByZero);
+                    }
+                    BinaryOperator::Power => left_val.powf(right_val),
+                    _ => return Err(BBCBasicError::IllegalFunction),
+                };
+                // A result that is not finite is out of range.
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(BBCBasicError::TooBig)
                 }
             }
             Expression::UnaryOp { op, operand } => {
@@ -2194,10 +2226,15 @@ impl Executor {
             Expression::BinaryOp { op, left, right } => match op {
                 // In BBC BASIC, `/` always gives a real value
                 BinaryOperator::Divide => true,
-                BinaryOperator::Add
-                | BinaryOperator::Subtract
-                | BinaryOperator::Multiply
-                | BinaryOperator::Power => self.is_real_expr(left) || self.is_real_expr(right),
+                BinaryOperator::Add | BinaryOperator::Subtract | BinaryOperator::Multiply => {
+                    self.is_real_expr(left) || self.is_real_expr(right)
+                }
+                // A negative constant exponent gives a fraction, as in 2 ^ -1
+                BinaryOperator::Power => {
+                    self.is_real_expr(left)
+                        || self.is_real_expr(right)
+                        || is_negative_integer_constant(right)
+                }
                 _ => false,
             },
             Expression::UnaryOp { op, operand } => match op {
