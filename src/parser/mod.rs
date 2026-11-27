@@ -46,6 +46,27 @@ pub enum UnaryOperator {
     Plus,
     Minus,
     Not,
+    /// `?addr` or `!addr`: the value in memory at the address
+    Indirect(Indirection),
+}
+
+/// The width of a memory operator
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Indirection {
+    /// `?`: one byte, 0 to 255
+    Byte,
+    /// `!`: four bytes, low byte first, as a signed integer
+    Word,
+}
+
+impl Indirection {
+    fn from_operator(token: Option<&Token>) -> Option<Self> {
+        match token {
+            Some(Token::Operator('?')) => Some(Indirection::Byte),
+            Some(Token::Operator('!')) => Some(Indirection::Word),
+            _ => None,
+        }
+    }
 }
 
 /// BBC BASIC expressions
@@ -129,6 +150,13 @@ pub enum Statement {
     ArrayAssignment {
         name: String,
         indices: Vec<Expression>,
+        expression: Expression,
+    },
+    /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
+    /// or `base!offset = value`. The address includes the offset.
+    MemoryAssignment {
+        width: Indirection,
+        address: Expression,
         expression: Expression,
     },
     /// PRINT statement
@@ -380,7 +408,7 @@ impl Expression {
             },
             Expression::UnaryOp { op, .. } => match op {
                 UnaryOperator::Plus | UnaryOperator::Minus => ExpressionType::Numeric,
-                UnaryOperator::Not => ExpressionType::Integer,
+                UnaryOperator::Not | UnaryOperator::Indirect(_) => ExpressionType::Integer,
             },
         }
     }
@@ -491,8 +519,11 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             parse_assignment(&tokens[1..], line.line_number)
         }
 
-        // Variable assignment (without LET keyword)
-        Token::Identifier(_) => parse_assignment(tokens, line.line_number),
+        // Variable assignment (without LET keyword), or a memory write
+        // such as ?A = 5
+        Token::Identifier(_) | Token::Operator('?' | '!') => {
+            parse_assignment(tokens, line.line_number)
+        }
 
         // FOR loop
         Token::Keyword(0xE3) => parse_for_statement(&tokens[1..], line.line_number),
@@ -837,6 +868,12 @@ fn starts_print_item(token: &Token) -> bool {
 
 /// Parse assignment statement (A% = 42 or LET A% = 42, or array assignment like arr(i) = 5)
 fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if Indirection::from_operator(tokens.first()).is_some()
+        || Indirection::from_operator(tokens.get(1)).is_some()
+    {
+        return parse_memory_assignment(tokens, line_number);
+    }
+
     if tokens.len() < 3 {
         return Err(BBCBasicError::SyntaxError {
             message: "Invalid assignment".to_string(),
@@ -915,6 +952,35 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
     let expression = parse_expression(&tokens[2..])?;
 
     Ok(Statement::Assignment { target, expression })
+}
+
+/// Parse a memory write such as `?A = 5` or `A!4 = 5`. The left side is one
+/// primary that must be a memory read, and `=` must follow it.
+fn parse_memory_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mut pos = 0;
+    let target = parse_primary(tokens, &mut pos)?;
+    let Expression::UnaryOp {
+        op: UnaryOperator::Indirect(width),
+        operand,
+    } = target
+    else {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected '?' or '!'".to_string(),
+            line: line_number,
+        });
+    };
+    if !matches!(tokens.get(pos), Some(Token::Operator('='))) {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected '='".to_string(),
+            line: line_number,
+        });
+    }
+    let expression = parse_expression(&tokens[pos + 1..])?;
+    Ok(Statement::MemoryAssignment {
+        width,
+        address: *operand,
+        expression,
+    })
 }
 
 /// Parse FOR statement
@@ -2561,8 +2627,28 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
     Ok(left)
 }
 
-/// Parse a primary expression (literal, variable, function call, or parenthesized expression)
+/// Parse a primary expression: an operand, then each binary memory form
+/// `base?offset` or `base!offset`. A memory form binds more than every
+/// arithmetic operator, and a chain reads from left to right (issue 76).
 fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
+    let mut expr = parse_operand(tokens, pos)?;
+    while let Some(width) = Indirection::from_operator(tokens.get(*pos)) {
+        *pos += 1;
+        let offset = parse_operand(tokens, pos)?;
+        expr = Expression::UnaryOp {
+            op: UnaryOperator::Indirect(width),
+            operand: Box::new(Expression::BinaryOp {
+                left: Box::new(expr),
+                op: BinaryOperator::Add,
+                right: Box::new(offset),
+            }),
+        };
+    }
+    Ok(expr)
+}
+
+/// Parse an operand (literal, variable, function call, or parenthesized expression)
+fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
     if *pos >= tokens.len() {
         return Err(BBCBasicError::SyntaxError {
             message: "Unexpected end of expression".to_string(),
@@ -2650,6 +2736,20 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
             Ok(Expression::UnaryOp {
                 op: UnaryOperator::Plus,
                 operand: Box::new(operand),
+            })
+        }
+        // ?addr and !addr read memory
+        Token::Operator(ch @ ('?' | '!')) => {
+            let width = if *ch == '?' {
+                Indirection::Byte
+            } else {
+                Indirection::Word
+            };
+            *pos += 1;
+            let address = parse_operand(tokens, pos)?;
+            Ok(Expression::UnaryOp {
+                op: UnaryOperator::Indirect(width),
+                operand: Box::new(address),
             })
         }
 
@@ -4640,6 +4740,145 @@ mod tests {
     #[test]
     fn test_parse_unsigned_right_shift_gives_error() {
         assert!(parse_text("1 >>> 2").is_err());
+    }
+
+    fn indirect(width: Indirection, address: Expression) -> Expression {
+        Expression::UnaryOp {
+            op: UnaryOperator::Indirect(width),
+            operand: Box::new(address),
+        }
+    }
+
+    fn var(name: &str) -> Expression {
+        Expression::Variable(name.to_string())
+    }
+
+    #[test]
+    fn test_parse_unary_memory_reads() {
+        assert_eq!(
+            parse_text("?A").unwrap(),
+            indirect(Indirection::Byte, var("A"))
+        );
+        assert_eq!(
+            parse_text("!A").unwrap(),
+            indirect(Indirection::Word, var("A"))
+        );
+    }
+
+    #[test]
+    fn test_parse_binary_memory_reads_add_the_offset() {
+        assert_eq!(
+            parse_text("A?1").unwrap(),
+            indirect(
+                Indirection::Byte,
+                binary(var("A"), BinaryOperator::Add, Expression::Integer(1))
+            )
+        );
+        assert_eq!(
+            parse_text("A!I").unwrap(),
+            indirect(
+                Indirection::Word,
+                binary(var("A"), BinaryOperator::Add, var("I"))
+            )
+        );
+    }
+
+    #[test]
+    fn test_memory_operators_bind_more_than_arithmetic() {
+        // A?1+2 is (A?1)+2
+        assert_eq!(
+            parse_text("A?1 + 2").unwrap(),
+            binary(
+                indirect(
+                    Indirection::Byte,
+                    binary(var("A"), BinaryOperator::Add, Expression::Integer(1))
+                ),
+                BinaryOperator::Add,
+                Expression::Integer(2)
+            )
+        );
+        // ?A-1 is (?A)-1
+        assert_eq!(
+            parse_text("?A - 1").unwrap(),
+            binary(
+                indirect(Indirection::Byte, var("A")),
+                BinaryOperator::Subtract,
+                Expression::Integer(1)
+            )
+        );
+        // 2^A!0 is 2^(A!0)
+        assert_eq!(
+            parse_text("2 ^ A!0").unwrap(),
+            binary(
+                Expression::Integer(2),
+                BinaryOperator::Power,
+                indirect(
+                    Indirection::Word,
+                    binary(var("A"), BinaryOperator::Add, Expression::Integer(0))
+                )
+            )
+        );
+        // ?(A+1) reads the bracketed address
+        assert_eq!(
+            parse_text("?(A + 1)").unwrap(),
+            indirect(
+                Indirection::Byte,
+                binary(var("A"), BinaryOperator::Add, Expression::Integer(1))
+            )
+        );
+    }
+
+    fn parse_one(source: &str) -> Statement {
+        let line = crate::tokenizer::tokenize(source).unwrap();
+        parse_statement(&line).unwrap()
+    }
+
+    #[test]
+    fn test_parse_memory_writes() {
+        let a_plus = |offset: Expression| binary(var("A"), BinaryOperator::Add, offset);
+        let cases = [
+            ("?A = 5", Indirection::Byte, var("A")),
+            ("!A = 5", Indirection::Word, var("A")),
+            ("A?1 = 5", Indirection::Byte, a_plus(Expression::Integer(1))),
+            ("A!I = 5", Indirection::Word, a_plus(var("I"))),
+            ("LET ?A = 5", Indirection::Byte, var("A")),
+            (
+                "?(A + 1) = 5",
+                Indirection::Byte,
+                a_plus(Expression::Integer(1)),
+            ),
+        ];
+        for (source, width, address) in cases {
+            assert_eq!(
+                parse_one(source),
+                Statement::MemoryAssignment {
+                    width,
+                    address,
+                    expression: Expression::Integer(5),
+                },
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_memory_write_value_is_a_full_expression() {
+        assert_eq!(
+            parse_one("?A = B = 1"),
+            Statement::MemoryAssignment {
+                width: Indirection::Byte,
+                address: var("A"),
+                expression: binary(var("B"), BinaryOperator::Equal, Expression::Integer(1)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_memory_write_without_equals_gives_error() {
+        for source in ["?A", "A?1 5", "!A + 1 = 5"] {
+            let line = crate::tokenizer::tokenize(source).unwrap();
+            assert!(parse_statement(&line).is_err(), "{source}");
+        }
     }
 
     fn data_items(source: &str) -> Vec<DataValue> {

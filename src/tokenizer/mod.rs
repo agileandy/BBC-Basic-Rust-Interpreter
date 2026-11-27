@@ -147,10 +147,11 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                     temp_chars.next();
                 }
                 // Check if what follows looks like a statement (keyword or identifier, not
-                // operator). A `=expr` line ends a multi-line function.
+                // operator). A `=expr` line ends a multi-line function. A
+                // `?addr=v` or `!addr=v` line writes to memory.
                 let next_is_statement = temp_chars
                     .peek()
-                    .map(|c| c.is_alphabetic() || *c == '_' || *c == '=')
+                    .map(|c| c.is_alphabetic() || matches!(c, '_' | '=' | '?' | '!'))
                     .unwrap_or(false);
 
                 if next_is_statement {
@@ -373,7 +374,8 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
             }
             // # starts the channel of a file statement, such as PRINT#
             // ~ selects hex output, as in PRINT ~X and STR$~(X)
-            '+' | '*' | '/' | '^' | '<' | '>' | '=' | '#' | '~' => {
+            // ? and ! read and write memory, as in ?A=5 and B!4 (issue 76)
+            '+' | '*' | '/' | '^' | '<' | '>' | '=' | '#' | '~' | '?' | '!' => {
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
@@ -453,6 +455,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // The hex forms ~X and STR$~(X) list as typed
                 (Token::Operator('~'), _) => false,
                 (Token::Keyword(0xC3), Token::Operator('~')) => false,
+                // The memory forms ?A, !A, A?1 and A!1 list as typed
+                (Token::Operator('?' | '!'), _) => false,
+                (Token::Identifier(_), Token::Operator('?' | '!')) => false,
                 // Need space between most tokens
                 _ => true,
             };
@@ -1186,7 +1191,7 @@ mod tests {
     }
 
     /// The characters that the tokenizer does not know (issue 62).
-    const UNKNOWN_CHARACTERS: [char; 10] = ['?', '!', '@', '|', '\\', '[', ']', '{', '}', '`'];
+    const UNKNOWN_CHARACTERS: [char; 8] = ['@', '|', '\\', '[', ']', '{', '}', '`'];
 
     #[test]
     fn test_unknown_character_in_statement_gives_syntax_error() {
@@ -1252,6 +1257,38 @@ mod tests {
     #[test]
     fn test_detokenize_shows_tilde_as_typed() {
         for source in ["10 PRINT ~X", "10 PRINT STR$~(X)", "10 PRINT ~-1;~A%"] {
+            let line = tokenize(source).unwrap();
+            assert_eq!(detokenize(&line).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_query_and_pling_are_memory_operators() {
+        let line = tokenize("10 ?A=B!4").unwrap();
+        assert_eq!(
+            line.tokens,
+            vec![
+                Token::Operator('?'),
+                Token::Identifier("A".to_string()),
+                Token::Operator('='),
+                Token::Identifier("B".to_string()),
+                Token::Operator('!'),
+                Token::Integer(4),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_minus_after_memory_operator_is_part_of_the_number() {
+        let line = tokenize("10 PRINT ?-1").unwrap();
+        assert_eq!(line.tokens[2], Token::Integer(-1));
+        let line = tokenize("10 PRINT ?A-1").unwrap();
+        assert_eq!(line.tokens[3], Token::Operator('-'));
+    }
+
+    #[test]
+    fn test_detokenize_shows_memory_operators_as_typed() {
+        for source in ["10 ?A = 5", "10 A!4 = B?1", "10 PRINT ?A;!B"] {
             let line = tokenize(source).unwrap();
             assert_eq!(detokenize(&line).unwrap(), source);
         }
