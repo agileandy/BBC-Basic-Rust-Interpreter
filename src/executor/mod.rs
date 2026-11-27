@@ -685,10 +685,16 @@ impl Executor {
                 .variables
                 .get_integer_var(&var_name)
                 .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
-            // The step of an integer loop is a whole value
-            let next_val = current_val + step_val as i32;
-            self.variables.set_integer_var(var_name.clone(), next_val);
-            f64::from(next_val)
+            // The step of an integer loop is an i32 value (see execute_for).
+            // If the next value overflows, it is past the end value. The loop
+            // ends and the variable keeps its last value.
+            match current_val.checked_add(step_val as i32) {
+                Some(next_val) => {
+                    self.variables.set_integer_var(var_name.clone(), next_val);
+                    f64::from(next_val)
+                }
+                None => f64::from(current_val) + step_val,
+            }
         } else {
             let current_val = self
                 .variables

@@ -17,6 +17,20 @@ fn run(source: &[&str]) -> (Result<(), String>, String) {
     (result, executor.get_output().to_string())
 }
 
+/// Run the program in a separate thread with a time limit of 5 seconds, so that
+/// a loop with no end fails the test and does not stop the test run.
+fn run_with_limit(source: &[&str]) -> (Result<(), String>, String) {
+    let source: Vec<String> = source.iter().map(|line| line.to_string()).collect();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let lines: Vec<&str> = source.iter().map(String::as_str).collect();
+        let _ = sender.send(run(&lines));
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("program ends within 5 seconds and does not panic")
+}
+
 /// Run one statement after `ON ERROR` and return the output: the value of ERR,
 /// or "NO ERROR" when the statement gives no error.
 fn err_of(statement: &str) -> String {
@@ -163,4 +177,43 @@ fn test_largest_and_smallest_integers_work_with_no_overflow() {
 #[test]
 fn test_abs_of_smallest_integer_is_caught_by_on_error() {
     assert_eq!(err_of("A% = -2147483647 - 1 : B% = ABS(A%)"), "20\n");
+}
+
+#[test]
+fn test_for_loop_to_largest_integer_ends_after_last_value() {
+    let (result, output) = run_with_limit(&[
+        "10 FOR I% = 2147483646 TO 2147483647",
+        "20 PRINT I%",
+        "30 NEXT I%",
+        "40 PRINT \"DONE \"; I%",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "2147483646\n2147483647\nDONE 2147483647\n");
+}
+
+#[test]
+fn test_for_loop_down_to_smallest_integer_ends_after_last_value() {
+    let (result, output) = run_with_limit(&[
+        "10 FOR I% = -2147483647 TO -2147483647 - 1 STEP -1",
+        "20 PRINT I%",
+        "30 NEXT I%",
+        "40 PRINT \"DONE \"; I%",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "-2147483647\n-2147483648\nDONE -2147483648\n");
+}
+
+#[test]
+fn test_for_loop_with_step_past_largest_integer_ends() {
+    let (result, output) = run_with_limit(&[
+        "10 FOR I% = 2147483640 TO 2147483647 STEP 5",
+        "20 PRINT I%",
+        "30 NEXT I%",
+        "40 PRINT \"DONE \"; I%",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "2147483640\n2147483645\nDONE 2147483645\n");
 }
