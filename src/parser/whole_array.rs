@@ -167,3 +167,60 @@ pub(super) fn parse_whole_array_statement(
         value: ArrayExpression { first, rest, list },
     })
 }
+
+/// The keyword code of DIM, and the extended keyword of SUM
+const DIM: u8 = 0xDE;
+const SUM: Token = Token::ExtendedKeyword(0xC6, 0x8E);
+
+/// Parse an array function at `pos` (issue #188): `SUM(a())`, `SUMLEN(a$())`,
+/// `MOD(a())`, `DIM(a())` or `DIM(a(), n)`. The reference is the manual of
+/// BBC BASIC for Windows, page bbcwin2.html, "Array functions".
+///
+/// The new form applies only with `(` and an array reference after the
+/// keyword. For other tokens, give `None` and do not move `pos`: `MOD` and
+/// `DIM` keep their old meaning, and `SUMLEN` is a variable or an array.
+/// `SUM` with another argument is a call, which gives Type mismatch when it
+/// runs, as in BBC BASIC.
+///
+/// The first argument of the call is the array as `ArrayAccess` with no
+/// indices, the same form as the parse of `a()` in other places.
+pub(super) fn parse_array_function(
+    tokens: &[Token],
+    pos: &mut usize,
+) -> Result<Option<Expression>> {
+    let name = match tokens.get(*pos) {
+        Some(token) if *token == SUM => "SUM",
+        Some(Token::Identifier(word)) if word == "SUMLEN" => "SUMLEN",
+        Some(Token::Keyword(MOD)) => "MOD",
+        Some(Token::Keyword(DIM)) => "DIM",
+        _ => return Ok(None),
+    };
+    if tokens.get(*pos + 1) != Some(&Token::Separator('(')) {
+        return Ok(None);
+    }
+    let mut next = *pos + 2;
+    let first = match parse_array_reference(tokens, next) {
+        Some(array) => {
+            next += 3;
+            Expression::ArrayAccess {
+                name: array.to_string(),
+                indices: Vec::new(),
+            }
+        }
+        None if name == "SUM" => parse_expr_precedence(tokens, &mut next, 0)?,
+        None => return Ok(None),
+    };
+    let mut args = vec![first];
+    if name == "DIM" && tokens.get(next) == Some(&Token::Separator(',')) {
+        next += 1;
+        args.push(parse_expr_precedence(tokens, &mut next, 0)?);
+    }
+    if tokens.get(next) != Some(&Token::Separator(')')) {
+        return Err(syntax_error(format!("Expected ')' after {name}"), None));
+    }
+    *pos = next + 1;
+    Ok(Some(Expression::FunctionCall {
+        name: name.to_string(),
+        args,
+    }))
+}

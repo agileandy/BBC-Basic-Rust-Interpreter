@@ -3608,6 +3608,11 @@ fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> 
         });
     }
 
+    // SUM(a()), SUMLEN(a$()), MOD(a()) and DIM(a()) (issue #188)
+    if let Some(call) = whole_array::parse_array_function(tokens, pos)? {
+        return Ok(call);
+    }
+
     let token = &tokens[*pos];
 
     match token {
