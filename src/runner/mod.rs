@@ -957,7 +957,7 @@ fn step(
                 return Err(error.into());
             }
 
-            executor.push_gosub_return(position);
+            executor.push_proc_return(position);
 
             // Continue with the statement after DEF PROC
             program.goto(proc_position);
@@ -973,8 +973,9 @@ fn step(
                 .exit_local_scope()
                 .map_err(|_| BBCBasicError::NoProc)?;
 
+            // The GOSUBs that the PROC left open go too
             let return_position = executor
-                .pop_gosub_return()
+                .pop_proc_return()
                 .map_err(|_| BBCBasicError::NoProc)?;
             // Go back to the PROC call, then continue with the statement after it
             program.goto(return_position);
