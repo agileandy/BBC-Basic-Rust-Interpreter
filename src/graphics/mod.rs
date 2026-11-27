@@ -2,7 +2,12 @@
 //!
 //! Handles display modes and graphics operations.
 
+use std::collections::BTreeSet;
 use std::fmt;
+
+/// The largest sum of the 2 radii of an ellipse that the midpoint algorithm
+/// draws step by step. Each step is 1 pixel, thus this limit keeps it fast.
+const ELLIPSE_STEP_LIMIT: i64 = 1 << 16;
 
 /// Default canvas width (1280 pixels matching BBC Micro MODE 0)
 const DEFAULT_WIDTH: usize = 1280;
@@ -185,6 +190,30 @@ impl GraphicsSystem {
         }
     }
 
+    /// The lowest and the highest x on the canvas, with the origin offset
+    fn visible_x(&self) -> (i64, i64) {
+        let min_x = -i64::from(self.origin.x);
+        (min_x, min_x + self.width as i64 - 1)
+    }
+
+    /// The lowest and the highest y on the canvas, with the origin offset
+    fn visible_y(&self) -> (i64, i64) {
+        let min_y = -i64::from(self.origin.y);
+        (min_y, min_y + self.height as i64 - 1)
+    }
+
+    /// Set a pixel if it is on the canvas. The coordinates are i64, thus a
+    /// drawing function can give a point that is not an i32.
+    fn set_visible_pixel(&mut self, x: i64, y: i64) {
+        let (min_x, max_x) = self.visible_x();
+        let (min_y, max_y) = self.visible_y();
+        if (min_x..=max_x).contains(&x) && (min_y..=max_y).contains(&y) {
+            if let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) {
+                self.set_pixel(x, y);
+            }
+        }
+    }
+
     /// Get pixel state at given coordinates
     pub fn get_pixel(&self, x: i32, y: i32) -> Option<bool> {
         self.to_canvas_coords(x, y)
@@ -221,31 +250,40 @@ impl GraphicsSystem {
         self.draw_line_to(target_x, target_y);
     }
 
-    /// Draw a line using Bresenham's algorithm
+    /// Draw a line with the pixels of Bresenham's algorithm. Each step moves
+    /// 1 pixel along the major axis. At step i, the algorithm gives the minor
+    /// offset (2 * minor * i + major - 1) / (2 * major). Thus only the steps
+    /// on the canvas are visited, and a long line is fast.
     fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
-        let dx = (x1 - x0).abs();
-        let dy = (y1 - y0).abs();
+        let (x0, y0) = (i64::from(x0), i64::from(y0));
+        let (x1, y1) = (i64::from(x1), i64::from(y1));
+        let (dx, dy) = ((x1 - x0).abs(), (y1 - y0).abs());
         let sx = if x0 < x1 { 1 } else { -1 };
         let sy = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx - dy;
-        let mut x = x0;
-        let mut y = y0;
+        let x_major = dx >= dy;
+        let (major, minor) = if x_major { (dx, dy) } else { (dy, dx) };
+        let (start, step, (low, high)) = if x_major {
+            (x0, sx, self.visible_x())
+        } else {
+            (y0, sy, self.visible_y())
+        };
+        let (first, last) = if step > 0 {
+            (low - start, high - start)
+        } else {
+            (start - high, start - low)
+        };
 
-        loop {
-            self.set_pixel(x, y);
-
-            if x == x1 && y == y1 {
-                break;
-            }
-
-            let e2 = 2 * err;
-            if e2 > -dy {
-                err -= dy;
-                x += sx;
-            }
-            if e2 < dx {
-                err += dx;
-                y += sy;
+        for i in first.max(0)..=last.min(major) {
+            let offset = if major == 0 {
+                0
+            } else {
+                let (major, minor, i) = (i128::from(major), i128::from(minor), i128::from(i));
+                ((2 * minor * i + major - 1) / (2 * major)) as i64
+            };
+            if x_major {
+                self.set_visible_pixel(x0 + sx * i, y0 + sy * offset);
+            } else {
+                self.set_visible_pixel(x0 + sx * offset, y0 + sy * i);
             }
         }
     }
@@ -296,9 +334,9 @@ impl GraphicsSystem {
             // the last point and the target is a point on the circle
             0x90 | 0x98 if draws => {
                 let centre = self.current_pos;
-                let dx = i64::from(target_x - centre.x);
-                let dy = i64::from(target_y - centre.y);
-                let radius = ((dx * dx + dy * dy) as f64).sqrt().round() as i32;
+                let dx = (i64::from(target_x) - i64::from(centre.x)) as f64;
+                let dy = (i64::from(target_y) - i64::from(centre.y)) as f64;
+                let radius = (dx * dx + dy * dy).sqrt().round() as i32;
                 if mode & 0xF8 == 0x90 {
                     self.circle_outline(centre.x, centre.y, radius);
                 } else {
@@ -354,34 +392,51 @@ impl GraphicsSystem {
         }
     }
 
-    /// Draw a circle outline using midpoint circle algorithm
+    /// Draw a circle outline with the pixels of the midpoint circle
+    /// algorithm. At octant row y, the algorithm gives the largest x with
+    /// x * (x - 1) <= r * (r - 1) + 1 - y * y, and it stops when x < y. Only
+    /// the rows that can put a point on the canvas are visited, each 1 time.
     fn circle_outline(&mut self, center_x: i32, center_y: i32, radius: i32) {
         if radius <= 0 {
             return;
         }
 
-        let mut x = radius;
-        let mut y = 0;
-        let mut err = 0;
+        let (cx, cy, r) = (i64::from(center_x), i64::from(center_y), i128::from(radius));
+        let (min_x, max_x) = self.visible_x();
+        let (min_y, max_y) = self.visible_y();
+        // The rows y that put a point at row cy + y, row cy - y, column
+        // cx + y or column cx - y on the canvas
+        let mut row_ranges = [
+            (min_y - cy, max_y - cy),
+            (cy - max_y, cy - min_y),
+            (min_x - cx, max_x - cx),
+            (cx - max_x, cx - min_x),
+        ];
+        row_ranges.sort_unstable();
 
-        while x >= y {
-            // Draw 8 octants
-            self.set_pixel(center_x + x, center_y + y);
-            self.set_pixel(center_x + y, center_y + x);
-            self.set_pixel(center_x - y, center_y + x);
-            self.set_pixel(center_x - x, center_y + y);
-            self.set_pixel(center_x - x, center_y - y);
-            self.set_pixel(center_x - y, center_y - x);
-            self.set_pixel(center_x + y, center_y - x);
-            self.set_pixel(center_x + x, center_y - y);
+        let mut next_row = 0;
+        for (first, last) in row_ranges {
+            for y in first.max(next_row)..=last {
+                let limit = r * (r - 1) + 1 - i128::from(y) * i128::from(y);
+                if limit < 0 {
+                    return;
+                }
+                let x = ((limit * 4 + 1).isqrt() + 1) as i64 / 2;
+                if x < y {
+                    return;
+                }
 
-            y += 1;
-            if err <= 0 {
-                err += 2 * y + 1;
-            } else {
-                x -= 1;
-                err += 2 * (y - x) + 1;
+                // Draw 8 octants
+                self.set_visible_pixel(cx + x, cy + y);
+                self.set_visible_pixel(cx + y, cy + x);
+                self.set_visible_pixel(cx - y, cy + x);
+                self.set_visible_pixel(cx - x, cy + y);
+                self.set_visible_pixel(cx - x, cy - y);
+                self.set_visible_pixel(cx - y, cy - x);
+                self.set_visible_pixel(cx + y, cy - x);
+                self.set_visible_pixel(cx + x, cy - y);
             }
+            next_row = next_row.max(last + 1);
         }
     }
 
@@ -416,14 +471,20 @@ impl GraphicsSystem {
     }
 
     /// Draw an ellipse outline using midpoint ellipse algorithm. The terms
-    /// are i128, so a large radius does not overflow.
+    /// are i128, so a large radius does not overflow. The algorithm visits
+    /// each step from the top to the side. If the radii are too large for
+    /// that, only the rows and the columns on the canvas are visited.
     fn ellipse_outline(&mut self, center_x: i32, center_y: i32, rx: i64, ry: i64) {
         if rx <= 0 || ry <= 0 {
             return;
         }
 
+        let (cx, cy) = (i64::from(center_x), i64::from(center_y));
+        if rx + ry > ELLIPSE_STEP_LIMIT {
+            self.large_ellipse_outline(cx, cy, rx, ry);
+            return;
+        }
         let (rx, ry) = (i128::from(rx), i128::from(ry));
-        let (center_x, center_y) = (i128::from(center_x), i128::from(center_y));
 
         // Region 1
         let mut x = 0;
@@ -437,7 +498,7 @@ impl GraphicsSystem {
         let mut py = two_rx_sq * y;
 
         // Plot initial points
-        self.plot_ellipse_points(center_x, center_y, x, y);
+        self.plot_ellipse_points(cx, cy, x, y);
 
         // Region 1
         let mut p = ry_sq - (rx_sq * ry) + (rx_sq / 4);
@@ -452,7 +513,7 @@ impl GraphicsSystem {
                 py -= two_rx_sq;
                 p += ry_sq + px - py;
             }
-            self.plot_ellipse_points(center_x, center_y, x, y);
+            self.plot_ellipse_points(cx, cy, x, y);
         }
 
         // Region 2
@@ -468,48 +529,76 @@ impl GraphicsSystem {
                 px += two_ry_sq;
                 p += rx_sq - py + px;
             }
-            self.plot_ellipse_points(center_x, center_y, x, y);
+            self.plot_ellipse_points(cx, cy, x, y);
         }
     }
 
-    /// Helper to plot 4 quadrants of ellipse. A point outside the i32 range
-    /// is not on the canvas, so it is not set.
-    fn plot_ellipse_points(&mut self, cx: i128, cy: i128, x: i128, y: i128) {
-        for (px, py) in [
-            (cx + x, cy + y),
-            (cx - x, cy + y),
-            (cx + x, cy - y),
-            (cx - x, cy - y),
-        ] {
-            if let (Ok(px), Ok(py)) = (i32::try_from(px), i32::try_from(py)) {
-                self.set_pixel(px, py);
-            }
+    /// Helper to plot 4 quadrants of ellipse. A point that is not on the
+    /// canvas is not set.
+    fn plot_ellipse_points(&mut self, cx: i64, cy: i64, x: i128, y: i128) {
+        let (x, y) = (x as i64, y as i64);
+        self.set_visible_pixel(cx + x, cy + y);
+        self.set_visible_pixel(cx - x, cy + y);
+        self.set_visible_pixel(cx + x, cy - y);
+        self.set_visible_pixel(cx - x, cy - y);
+    }
+
+    /// Draw the outline of an ellipse with radii above ELLIPSE_STEP_LIMIT.
+    /// Visit only the rows and the columns on the canvas, and set the 2 edge
+    /// points of each. Each point is set 1 time.
+    fn large_ellipse_outline(&mut self, cx: i64, cy: i64, rx: i64, ry: i64) {
+        let (min_x, max_x) = self.visible_x();
+        let (min_y, max_y) = self.visible_y();
+        // The half width of the ellipse at the offset from the centre
+        let half = |radius: i64, other_radius: i64, offset: i64| {
+            let part = offset as f64 / other_radius as f64;
+            (radius as f64 * (1.0 - part * part).max(0.0).sqrt()).round() as i64
+        };
+
+        let mut points = BTreeSet::new();
+        for y in (cy - ry).max(min_y)..=(cy + ry).min(max_y) {
+            let x = half(rx, ry, y - cy);
+            points.insert((cx - x, y));
+            points.insert((cx + x, y));
+        }
+        for x in (cx - rx).max(min_x)..=(cx + rx).min(max_x) {
+            let y = half(ry, rx, x - cx);
+            points.insert((x, cy - y));
+            points.insert((x, cy + y));
+        }
+        for (x, y) in points {
+            self.set_visible_pixel(x, y);
         }
     }
 
-    /// Draw a filled rectangle
+    /// Draw a filled rectangle. Only the rows and the columns on the canvas
+    /// are visited, so a large rectangle is fast.
     pub fn draw_rectangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, filled: bool) {
-        let min_x = x1.min(x2);
-        let max_x = x1.max(x2);
-        let min_y = y1.min(y2);
-        let max_y = y1.max(y2);
+        let min_x = i64::from(x1.min(x2));
+        let max_x = i64::from(x1.max(x2));
+        let min_y = i64::from(y1.min(y2));
+        let max_y = i64::from(y1.max(y2));
+        let (visible_min_x, visible_max_x) = self.visible_x();
+        let (visible_min_y, visible_max_y) = self.visible_y();
+        let columns = min_x.max(visible_min_x)..=max_x.min(visible_max_x);
+        let rows = min_y.max(visible_min_y)..=max_y.min(visible_max_y);
 
         if filled {
             // Fill the rectangle
-            for y in min_y..=max_y {
-                for x in min_x..=max_x {
-                    self.set_pixel(x, y);
+            for y in rows {
+                for x in columns.clone() {
+                    self.set_visible_pixel(x, y);
                 }
             }
         } else {
             // Draw outline
-            for x in min_x..=max_x {
-                self.set_pixel(x, min_y);
-                self.set_pixel(x, max_y);
+            for x in columns {
+                self.set_visible_pixel(x, min_y);
+                self.set_visible_pixel(x, max_y);
             }
-            for y in min_y..=max_y {
-                self.set_pixel(min_x, y);
-                self.set_pixel(max_x, y);
+            for y in rows {
+                self.set_visible_pixel(min_x, y);
+                self.set_visible_pixel(max_x, y);
             }
         }
 
@@ -543,17 +632,25 @@ impl GraphicsSystem {
         self.current_pos = Point { x: x3, y: y3 };
     }
 
-    /// Fill a triangle using scanline algorithm
+    /// Fill a triangle using scanline algorithm. Only the rows and the
+    /// columns on the canvas are visited, and the products are i128, so
+    /// large coordinates are fast and do not overflow.
     fn fill_triangle(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32) {
         // Sort vertices by y-coordinate
-        let mut verts = [(x1, y1), (x2, y2), (x3, y3)];
+        let mut verts = [(x1, y1), (x2, y2), (x3, y3)].map(|(x, y)| (i64::from(x), i64::from(y)));
         verts.sort_by_key(|v| v.1);
         let (x1, y1) = verts[0];
         let (x2, y2) = verts[1];
         let (x3, y3) = verts[2];
+        // The x on the edge from (xa, ya) to (xb, yb) at row y
+        let edge_x = |xa: i64, ya: i64, xb: i64, yb: i64, y: i64| {
+            xa + (i128::from(xb - xa) * i128::from(y - ya) / i128::from(yb - ya)) as i64
+        };
+        let (min_x, max_x) = self.visible_x();
+        let (min_y, max_y) = self.visible_y();
 
         // Fill scanlines
-        for y in y1..=y3 {
+        for y in y1.max(min_y)..=y3.min(max_y) {
             let mut x_left = x1;
             let mut x_right = x1;
 
@@ -561,18 +658,18 @@ impl GraphicsSystem {
             if y <= y2 {
                 // Upper part of triangle
                 if y2 != y1 {
-                    x_left = x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+                    x_left = edge_x(x1, y1, x2, y2, y);
                 }
                 if y3 != y1 {
-                    x_right = x1 + (x3 - x1) * (y - y1) / (y3 - y1);
+                    x_right = edge_x(x1, y1, x3, y3, y);
                 }
             } else {
                 // Lower part of triangle
                 if y3 != y2 {
-                    x_left = x2 + (x3 - x2) * (y - y2) / (y3 - y2);
+                    x_left = edge_x(x2, y2, x3, y3, y);
                 }
                 if y3 != y1 {
-                    x_right = x1 + (x3 - x1) * (y - y1) / (y3 - y1);
+                    x_right = edge_x(x1, y1, x3, y3, y);
                 }
             }
 
@@ -582,8 +679,8 @@ impl GraphicsSystem {
             }
 
             // Draw horizontal line
-            for x in x_left..=x_right {
-                self.set_pixel(x, y);
+            for x in x_left.max(min_x)..=x_right.min(max_x) {
+                self.set_visible_pixel(x, y);
             }
         }
     }
