@@ -157,3 +157,4 @@ mod issue_175_power_always_real;
 mod issue_178_apostrophe_comment_text;
 mod issue_176_canvas_colour_store;
 mod issue_180_comment_after_then_line;
+mod issue_181_str_of_large_number;
