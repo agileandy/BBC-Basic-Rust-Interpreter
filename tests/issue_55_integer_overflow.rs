@@ -50,7 +50,7 @@ fn err_of(statement: &str) -> String {
 fn test_add_overflow_gives_too_big() {
     let (result, _) = run(&["10 A% = 2147483647 + 1"]);
 
-    assert_eq!(result, Err("Runtime error at line 10: TooBig".to_string()));
+    assert_eq!(result, Err("Too big at line 10".to_string()));
 }
 
 #[test]

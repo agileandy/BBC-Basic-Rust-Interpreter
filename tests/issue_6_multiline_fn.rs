@@ -136,10 +136,7 @@ fn test_error_in_function_body_stops_program_with_body_line() {
         "110 = X / 0",
     ]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 110: DivisionByZero".to_string())
-    );
+    assert_eq!(result, Err("Division by zero at line 110".to_string()));
     assert_eq!(output, "");
 }
 
@@ -285,10 +282,7 @@ fn test_removed_function_is_unknown_on_next_run() {
 
     assert_eq!(
         result,
-        Err(
-            "Runtime error at line 10: SyntaxError { message: \"Unknown function: a\", line: None }"
-                .to_string()
-        )
+        Err("Syntax error at line 10: Unknown function: a".to_string())
     );
 }
 

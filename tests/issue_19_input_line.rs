@@ -71,16 +71,10 @@ fn test_input_line_reads_one_line_for_each_variable() {
 #[test]
 fn test_input_line_numeric_variable_gives_type_mismatch() {
     let (result, _) = run_with_replies(&["10 INPUT LINE A"], &["12"]);
-    assert_eq!(
-        result,
-        Err("Runtime error at line 10: TypeMismatch".to_string())
-    );
+    assert_eq!(result, Err("Type mismatch at line 10".to_string()));
 
     let (result, _) = run_with_replies(&["10 INPUT LINE A%"], &["12"]);
-    assert_eq!(
-        result,
-        Err("Runtime error at line 10: TypeMismatch".to_string())
-    );
+    assert_eq!(result, Err("Type mismatch at line 10".to_string()));
 }
 
 #[test]

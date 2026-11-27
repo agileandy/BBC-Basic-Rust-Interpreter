@@ -19,8 +19,7 @@ fn run(source: &[&str]) -> (Result<(), String>, String) {
 /// Assert that the run stopped with "Out of DATA" at the given line.
 fn assert_out_of_data_at(result: Result<(), String>, line: u16) {
     let error = result.expect_err("READ past the last DATA value fails");
-    assert!(error.contains(&format!("line {line}:")), "error: {error}");
-    assert!(error.contains("Out of DATA"), "error: {error}");
+    assert_eq!(error, format!("Out of DATA at line {line}"));
 }
 
 #[test]

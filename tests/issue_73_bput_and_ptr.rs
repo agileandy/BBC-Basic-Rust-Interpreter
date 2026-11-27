@@ -93,11 +93,7 @@ fn test_negative_ptr_gives_error() {
     let (result, _) = run(&[&open_out, "20 PTR#F% = -1"]);
 
     let message = result.expect_err("a negative position gives an error");
-    assert!(
-        message.contains("IllegalFunction"),
-        "unexpected error: {}",
-        message
-    );
+    assert_eq!(message, "Illegal function at line 20");
 }
 
 #[test]
@@ -105,11 +101,7 @@ fn test_bput_with_closed_channel_gives_channel_error() {
     let (result, _) = run(&["10 BPUT#99, 65"]);
 
     let message = result.expect_err("a closed channel gives an error");
-    assert!(
-        message.contains("ChannelNotOpen(99)"),
-        "unexpected error: {}",
-        message
-    );
+    assert_eq!(message, "Channel at line 10");
 }
 
 #[test]
@@ -117,9 +109,5 @@ fn test_ptr_assignment_with_closed_channel_gives_channel_error() {
     let (result, _) = run(&["10 PTR#99 = 0"]);
 
     let message = result.expect_err("a closed channel gives an error");
-    assert!(
-        message.contains("ChannelNotOpen(99)"),
-        "unexpected error: {}",
-        message
-    );
+    assert_eq!(message, "Channel at line 10");
 }

@@ -97,10 +97,7 @@ fn test_until_with_string_comparison() {
 fn test_string_compared_with_number_gives_type_mismatch() {
     let (result, output) = run(&["10 A$ = \"X\"", "20 IF A$ = 5 THEN PRINT \"T\""]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: TypeMismatch".to_string())
-    );
+    assert_eq!(result, Err("Type mismatch at line 20".to_string()));
     assert_eq!(output, "");
 }
 
@@ -108,10 +105,7 @@ fn test_string_compared_with_number_gives_type_mismatch() {
 fn test_number_compared_with_string_gives_type_mismatch() {
     let (result, _) = run(&["10 A$ = \"X\"", "20 IF 5 = A$ THEN PRINT \"T\""]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: TypeMismatch".to_string())
-    );
+    assert_eq!(result, Err("Type mismatch at line 20".to_string()));
 }
 
 #[test]

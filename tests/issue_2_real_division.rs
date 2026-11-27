@@ -32,8 +32,7 @@ fn test_integer_variable_keeps_fraction_until_assignment() {
 #[test]
 fn test_print_division_by_zero_reports_division_by_zero() {
     let (result, _) = run(&["10 PRINT 1 / 0"]);
-    let message = result.expect_err("division by zero stops the program");
-    assert!(message.contains("DivisionByZero"), "message: {}", message);
+    assert_eq!(result, Err("Division by zero at line 10".to_string()));
 }
 
 #[test]

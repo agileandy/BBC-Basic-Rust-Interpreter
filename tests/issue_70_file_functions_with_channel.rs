@@ -93,11 +93,7 @@ fn test_bget_with_closed_channel_gives_channel_error() {
     let (result, _) = run(&["10 X% = BGET#99"]);
 
     let message = result.expect_err("a closed channel gives an error");
-    assert!(
-        message.contains("ChannelNotOpen(99)"),
-        "unexpected error: {}",
-        message
-    );
+    assert_eq!(message, "Channel at line 10");
 }
 
 #[test]
@@ -105,9 +101,5 @@ fn test_eof_with_closed_channel_gives_channel_error() {
     let (result, _) = run(&["10 X% = EOF#99"]);
 
     let message = result.expect_err("a closed channel gives an error");
-    assert!(
-        message.contains("ChannelNotOpen(99)"),
-        "unexpected error: {}",
-        message
-    );
+    assert_eq!(message, "Channel at line 10");
 }

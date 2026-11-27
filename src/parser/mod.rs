@@ -5,7 +5,17 @@
 
 use crate::error::BBCBasicError;
 use crate::error::Result;
-use crate::tokenizer::{create_reverse_keyword_maps, Token, TokenizedLine};
+use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
+
+/// The tokens as the user typed them, for an error message. An empty list
+/// shows as "end of line".
+fn tokens_text(tokens: &[Token]) -> String {
+    let line = TokenizedLine::new(None, tokens.to_vec());
+    match detokenize(&line) {
+        Ok(text) if !text.is_empty() => text,
+        _ => "end of line".to_string(),
+    }
+}
 
 /// Binary operators in BBC BASIC
 #[derive(Debug, Clone, PartialEq)]
@@ -243,6 +253,8 @@ pub enum Statement {
     EndWhile,
     /// CLS statement - clear screen
     Cls,
+    /// REPORT statement - print the text of the last error
+    Report,
     /// CLEAR statement - remove all variables and close the loops and calls
     Clear,
     /// TRACE statement - show the number of each line that runs
@@ -650,6 +662,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // CLS statement
         Token::Keyword(0xDB) => Ok(Statement::Cls),
 
+        // REPORT statement
+        Token::Keyword(0xF6) => Ok(Statement::Report),
+
         // CLEAR statement
         Token::Keyword(0xD8) => Ok(Statement::Clear),
 
@@ -739,13 +754,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             // QUIT statement
             0x98 => Ok(Statement::Quit),
             _ => Err(BBCBasicError::SyntaxError {
-                message: format!("Unknown extended statement: {:?}", tokens[0]),
+                message: format!("Unknown extended statement: {}", tokens_text(&tokens[..1])),
                 line: line.line_number,
             }),
         },
 
         _ => Err(BBCBasicError::SyntaxError {
-            message: format!("Unknown statement: {:?}", tokens[0]),
+            message: format!("Unknown statement: {}", tokens_text(&tokens[..1])),
             line: line.line_number,
         }),
     }
@@ -1956,7 +1971,7 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
         [Token::DataText(text)] => text,
         _ => {
             return Err(BBCBasicError::SyntaxError {
-                message: format!("Invalid DATA value: {:?}", tokens),
+                message: format!("Invalid DATA value: {}", tokens_text(tokens)),
                 line: line_number,
             });
         }
@@ -2983,7 +2998,10 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
         }
 
         _ => Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected token in expression: {:?}", token),
+            message: format!(
+                "Unexpected token in expression: {}",
+                tokens_text(std::slice::from_ref(token))
+            ),
             line: None,
         }),
     }

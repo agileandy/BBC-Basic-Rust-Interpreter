@@ -52,6 +52,14 @@ pub mod error {
         TooBig,
         // ON GOTO or ON GOSUB index out of range, with no ELSE
         OnRange,
+        // READ with no DATA left
+        OutOfData,
+        // NEXT with no open FOR loop
+        NoFor,
+        // NEXT with a name that no open FOR loop has
+        CantMatchFor,
+        // LOCAL outside a procedure or function
+        NotLocal,
 
         // Variable and array errors
         NoSuchVariable(String),
@@ -91,11 +99,15 @@ pub mod error {
                 BBCBasicError::TypeMismatch => write!(f, "Type mismatch"),
                 BBCBasicError::NoRoom => write!(f, "No room"),
                 BBCBasicError::BadDim => write!(f, "Bad DIM"),
-                BBCBasicError::SubscriptOutOfRange => write!(f, "Subscript out of range"),
+                BBCBasicError::SubscriptOutOfRange => write!(f, "Subscript"),
                 BBCBasicError::DivisionByZero => write!(f, "Division by zero"),
                 BBCBasicError::StringTooLong => write!(f, "String too long"),
                 BBCBasicError::TooBig => write!(f, "Too big"),
                 BBCBasicError::OnRange => write!(f, "ON range"),
+                BBCBasicError::OutOfData => write!(f, "Out of DATA"),
+                BBCBasicError::NoFor => write!(f, "No FOR"),
+                BBCBasicError::CantMatchFor => write!(f, "Can't match FOR"),
+                BBCBasicError::NotLocal => write!(f, "Not LOCAL"),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
                 BBCBasicError::ArrayNotDimensioned(name) => {
                     write!(f, "Array not dimensioned: {}", name)
@@ -104,7 +116,7 @@ pub mod error {
                 BBCBasicError::MemoryExhausted => write!(f, "Memory exhausted"),
                 BBCBasicError::FileNotFound(name) => write!(f, "File not found: {}", name),
                 BBCBasicError::DiskError(msg) => write!(f, "Disk error: {}", msg),
-                BBCBasicError::ChannelNotOpen(handle) => write!(f, "Channel {} not open", handle),
+                BBCBasicError::ChannelNotOpen(_) => write!(f, "Channel"),
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),

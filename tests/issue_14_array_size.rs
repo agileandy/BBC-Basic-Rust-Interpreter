@@ -34,10 +34,7 @@ fn test_real_array_holds_index_0_to_top_index() {
 fn test_real_array_index_above_top_index_gives_subscript_error() {
     let (result, _) = run(&["10 DIM A(2)", "20 A(3) = 1"]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]
@@ -58,10 +55,7 @@ fn test_integer_array_holds_index_0_to_top_index() {
 fn test_integer_array_index_above_top_index_gives_subscript_error() {
     let (result, _) = run(&["10 DIM B%(2)", "20 B%(3) = 1"]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]
@@ -82,10 +76,7 @@ fn test_string_array_holds_index_0_to_top_index() {
 fn test_string_array_index_above_top_index_gives_subscript_error() {
     let (result, _) = run(&["10 DIM N$(2)", "20 N$(3) = \"X\""]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]
@@ -100,20 +91,14 @@ fn test_two_dimension_array_holds_top_index_in_each_dimension() {
 fn test_two_dimension_array_first_index_above_top_gives_subscript_error() {
     let (result, _) = run(&["10 DIM M(2, 3)", "20 M(3, 0) = 1"]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]
 fn test_two_dimension_array_second_index_above_top_gives_subscript_error() {
     let (result, _) = run(&["10 DIM M(2, 3)", "20 M(0, 4) = 1"]);
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]
@@ -123,10 +108,7 @@ fn test_dim_zero_makes_one_element() {
     assert_eq!(output, "5\n");
 
     let (result, _) = run(&["10 DIM A%(0)", "20 A%(1) = 5"]);
-    assert_eq!(
-        result,
-        Err("Runtime error at line 20: SubscriptOutOfRange".to_string())
-    );
+    assert_eq!(result, Err("Subscript at line 20".to_string()));
 }
 
 #[test]

@@ -66,11 +66,9 @@ fn test_clear_in_program_removes_variable() {
     assert!(error.contains("line 40"), "error: {error}");
 }
 
-/// True if the error is the no such variable error for `name`. The error
-/// shows the internal name today (issue #74), so accept both forms.
+/// True if the error is the no such variable error for `name`.
 fn is_no_such_variable(error: &str, name: &str) -> bool {
-    error.contains(&format!("No such variable: {name}"))
-        || error.contains(&format!("NoSuchVariable(\"{name}\")"))
+    error.contains(&format!("No such variable: {name} at line "))
 }
 
 #[test]
@@ -123,7 +121,7 @@ fn test_clear_inside_procedure_closes_scope() {
 
     assert_eq!(output, "");
     let error = result.expect_err("ENDPROC after CLEAR has no open scope");
-    assert!(error.contains("No local scope to exit"), "error: {error}");
+    assert_eq!(error, "No PROC at line 60");
 }
 
 #[test]
@@ -165,7 +163,7 @@ fn test_lvar_in_program_line_is_parse_error() {
     let (result, _) = run(&["10 LVAR"]);
 
     let error = result.expect_err("LVAR is not a program statement");
-    assert!(error.contains("Parse error at line 10"), "error: {error}");
+    assert_eq!(error, "Syntax error at line 10: Unknown statement: LVAR");
 }
 
 #[test]

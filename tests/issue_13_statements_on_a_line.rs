@@ -300,7 +300,7 @@ fn test_second_run_has_no_gosub_return_from_first_run() {
         &["10 RETURN", "20 PRINT \"X\""],
     ]);
 
-    assert_eq!(result, Err("RETURN without GOSUB".to_string()));
+    assert_eq!(result, Err("No GOSUB at line 10".to_string()));
     assert_eq!(output, "");
 }
 
