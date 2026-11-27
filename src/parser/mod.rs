@@ -195,6 +195,8 @@ pub enum Statement {
     EndWhile,
     /// CLS statement - clear screen
     Cls,
+    /// CLEAR statement - remove all variables and close the loops and calls
+    Clear,
     /// ON GOTO statement - computed GOTO based on expression value
     OnGoto {
         expression: Expression,
@@ -537,6 +539,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // CLS statement
         Token::Keyword(0xDB) => Ok(Statement::Cls),
+
+        // CLEAR statement
+        Token::Keyword(0xD8) => Ok(Statement::Clear),
 
         // DEF statement (DEF PROC or DEF FN)
         Token::Keyword(0xDD) => parse_def_statement(&tokens[1..], line.line_number),

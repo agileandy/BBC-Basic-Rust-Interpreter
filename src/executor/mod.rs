@@ -381,6 +381,7 @@ impl Executor {
                 Ok(())
             }
             Statement::Cls => self.execute_cls(),
+            Statement::Clear => self.execute_clear(),
             // Graphics statements
             Statement::Plot { mode, x, y } => self.execute_plot(mode, x, y),
             Statement::Move { x, y } => self.execute_move(x, y),
@@ -1050,6 +1051,42 @@ impl Executor {
             self.data_pointer = 0;
         }
         Ok(())
+    }
+
+    /// Execute CLEAR: remove all variables and arrays, close the loops,
+    /// the calls and the LOCAL scopes, and move the DATA pointer to the
+    /// first value. The procedures and the functions stay.
+    fn execute_clear(&mut self) -> Result<()> {
+        self.variables.clear();
+        self.clear_control_stacks();
+        self.local_stack.clear();
+        self.data_pointer = 0;
+        Ok(())
+    }
+
+    /// The LVAR text: one line for each scalar variable, then one line for
+    /// each array with its top index in each dimension, in name order
+    pub fn variable_listing(&self) -> Vec<String> {
+        let scalars = self
+            .variables
+            .scalars()
+            .into_iter()
+            .map(|(name, variable)| match variable {
+                Variable::Integer(value) => format!("{} = {}", name, value),
+                Variable::Real(value) => format!("{} = {}", name, format_number(*value)),
+                Variable::String(value) => format!("{} = \"{}\"", name, value),
+                _ => name.to_string(),
+            });
+        let arrays = self.variables.arrays().into_iter().map(|(name, array)| {
+            let top_indices: Vec<String> = array
+                .dimensions()
+                .unwrap_or_default()
+                .iter()
+                .map(|size| (size - 1).to_string())
+                .collect();
+            format!("{}({})", name, top_indices.join(","))
+        });
+        scalars.chain(arrays).collect()
     }
 
     /// Execute CLS statement - clear screen

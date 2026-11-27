@@ -313,6 +313,28 @@ impl VariableStore {
         }
     }
 
+    /// The scalar variables, in name order
+    pub fn scalars(&self) -> Vec<(&str, &Variable)> {
+        let mut scalars: Vec<_> = self
+            .variables
+            .iter()
+            .map(|(name, variable)| (name.as_str(), variable))
+            .collect();
+        scalars.sort_by_key(|(name, _)| *name);
+        scalars
+    }
+
+    /// The dimensioned arrays, in name order. A LOCAL array with no DIM is not included.
+    pub fn arrays(&self) -> Vec<(&str, &Variable)> {
+        let mut arrays: Vec<_> = self
+            .arrays
+            .iter()
+            .filter_map(|(name, array)| array.as_ref().map(|array| (name.as_str(), array)))
+            .collect();
+        arrays.sort_by_key(|(name, _)| *name);
+        arrays
+    }
+
     /// Clear all variables and arrays
     pub fn clear(&mut self) {
         self.variables.clear();
