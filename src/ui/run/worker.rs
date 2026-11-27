@@ -18,7 +18,7 @@
 //! only if the canvas, the mode or the size changed: during a run at most
 //! 30 times in one second, and at the end of each command.
 
-use crate::commands::run_command;
+use crate::commands::{run_command, CommandOutcome};
 use crate::executor::{Console, Executor, Interrupt};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::program::ProgramStore;
@@ -78,9 +78,11 @@ pub(super) enum FromWorker {
     /// The command ended, and the prompt shows. `error_line` is the line
     /// number of an error of the editor program (a run with Ctrl-R, or a
     /// typed RUN). `changed` is true if the command changed the program.
+    /// `quit` is true after EXIT, QUIT or a program that ran QUIT.
     Ready {
         error_line: Option<u16>,
         changed: bool,
+        quit: bool,
     },
     /// The picture of the canvas, or None if the mode has no graphics
     Picture(Option<Picture>),
@@ -300,12 +302,16 @@ impl Link {
 
     /// Read one typed line, with its echo. Enter ends the line, and the
     /// Delete key removes the last character. Give None if the wait stops.
+    /// At the prompt, the line end of the echo waits for the answer of the
+    /// pane: a refused line is removed, and the prompt stays (issue #199).
     fn read_line(&mut self, at_prompt: bool, view: View) -> Option<String> {
         let mut line = String::new();
         loop {
             match self.next_key(None, at_prompt, view) {
                 KeyWait::Key(ENTER) => {
-                    self.write("\n");
+                    if !at_prompt {
+                        self.write("\n");
+                    }
                     return Some(line);
                 }
                 KeyWait::Key(DELETE | '\x08') => {
@@ -398,6 +404,10 @@ fn next_command(link: &mut Link, program: &mut ProgramStore, view: View) -> Opti
         let line = link.read_line(true, view);
         if let Some(run) = link.run.take() {
             *program = run;
+            if line.is_some() {
+                // The line end of the typed line
+                link.write("\n");
+            }
             link.write("RUN\n");
             return Some(Command {
                 line: "RUN".to_string(),
@@ -408,6 +418,7 @@ fn next_command(link: &mut Link, program: &mut ProgramStore, view: View) -> Opti
         link.send(FromWorker::Line(line.clone()));
         match link.wait_for_answer()? {
             Answer::Run(editor_program) => {
+                link.write("\n");
                 if let Some(editor_program) = editor_program {
                     *program = editor_program;
                 }
@@ -417,8 +428,8 @@ fn next_command(link: &mut Link, program: &mut ProgramStore, view: View) -> Opti
                 });
             }
             Answer::Skip => {
-                link.new_line();
-                link.write(PROMPT);
+                // Remove the echo of the line: the prompt before it stays
+                link.write(&"\x08 \x08".repeat(line.chars().count()));
             }
         }
     }
@@ -444,6 +455,8 @@ pub(super) fn run_worker(link: Link) {
         let before = program.clone();
         let result = run_command(&mut executor, &mut program, command.line.trim());
         let changed = before.list() != program.list();
+        // The IDE stays open after a quit: only Ctrl-Q leaves it
+        let quit = result == Ok(CommandOutcome::Quit);
 
         let mut link = link.borrow_mut();
         let error = result.err();
@@ -464,6 +477,7 @@ pub(super) fn run_worker(link: Link) {
         link.send(FromWorker::Ready {
             error_line,
             changed,
+            quit,
         });
     }
 }

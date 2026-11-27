@@ -50,6 +50,8 @@ const DEFAULT_PAGE: usize = 20;
 const CHANGED: &str = "The RUN program changed. The editor text is the source";
 /// The status message for Ctrl-R during a run.
 const RUNNING: &str = "A program runs. Press Escape to stop it";
+/// The status message after EXIT, QUIT or a program that ran QUIT.
+const QUIT: &str = "The program asked to quit: press Ctrl-Q to leave the IDE";
 
 /// The key codes of a BBC Micro for the cursor keys.
 const LEFT: char = '\u{88}';
@@ -491,6 +493,7 @@ impl RunPane {
             FromWorker::Ready {
                 error_line,
                 changed,
+                quit,
             } => {
                 self.busy = false;
                 self.error_line = error_line;
@@ -499,6 +502,9 @@ impl RunPane {
                     // next typed line gets the editor program again
                     self.synced = None;
                     ctx.message = CHANGED.to_string();
+                }
+                if quit {
+                    ctx.message = QUIT.to_string();
                 }
             }
         }
