@@ -148,3 +148,4 @@ mod issue_161_point_colour_value;
 mod issue_141_for_each;
 mod issue_165_single_line_function_error_line;
 mod issue_162_swap;
+mod issue_169_ide_frame;

@@ -20,6 +20,7 @@ pub mod program;
 pub mod runner;
 pub mod sound;
 pub mod tokenizer;
+pub mod ui;
 pub mod variables;
 
 // Re-export core types for convenience
