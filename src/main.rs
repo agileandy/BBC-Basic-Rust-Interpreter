@@ -586,6 +586,7 @@ fn print_help() {
     println!("  PROC name(args)          - Call procedure");
     println!("  ENDPROC                  - End procedure");
     println!("  REM comment              - Comment");
+    println!("  TRACE ON / OFF / n       - Show each line number (below n) as it runs");
     println!("  END                      - End program");
     println!();
     println!("Examples:");

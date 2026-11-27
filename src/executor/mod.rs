@@ -5,8 +5,8 @@
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
-use crate::parser::{DataValue, Expression, InputItem, Statement};
-use crate::program::Position;
+use crate::parser::{DataValue, Expression, InputItem, Statement, TraceMode};
+use crate::program::{Position, TYPED_LINE};
 use crate::variables::{Variable, VariableStore};
 use rand::Rng;
 use std::cell::RefCell;
@@ -249,6 +249,8 @@ pub struct Executor {
     local_stack: Vec<LocalFrame>,
     // Error handler: line number to jump to on error (None = no handler)
     error_handler: Option<u16>,
+    // TRACE: the run prints each stored line number below this limit (None = off)
+    trace_limit: Option<u32>,
     // Last error information (for ERL and ERR functions)
     last_error: Option<ErrorInfo>,
     // Open file handles: handle number -> FileHandle
@@ -290,6 +292,7 @@ impl Executor {
             function_body_runner: BodyRunnerSlot::default(),
             local_stack: Vec::new(),
             error_handler: None,
+            trace_limit: None,
             last_error: None,
             open_files: HashMap::new(),
             next_file_handle: 1,
@@ -431,6 +434,7 @@ impl Executor {
                 self.clear_error_handler();
                 Ok(())
             }
+            Statement::Trace { mode } => self.execute_trace(mode),
             Statement::PrintFile { handle, items } => self.execute_print_file(handle, items),
             Statement::InputFile { handle, variables } => {
                 self.execute_input_file(handle, variables)
@@ -2597,6 +2601,27 @@ impl Executor {
     /// Get error handler line number (returns None if no handler set)
     pub fn get_error_handler(&self) -> Option<u16> {
         self.error_handler
+    }
+
+    /// Execute a TRACE statement. The trace stays on between runs.
+    fn execute_trace(&mut self, mode: &TraceMode) -> Result<()> {
+        self.trace_limit = match mode {
+            // Each stored line number is below the typed line key
+            TraceMode::On => Some(TYPED_LINE),
+            TraceMode::Off => None,
+            TraceMode::Below(limit) => Some(self.eval_integer(limit)?.max(0) as u32),
+        };
+        Ok(())
+    }
+
+    /// Print `[line] ` if the trace is on for this stored line
+    pub fn trace_line(&mut self, line: u16) {
+        if self
+            .trace_limit
+            .is_some_and(|limit| u32::from(line) < limit)
+        {
+            self.print_output(&format!("[{}] ", line));
+        }
     }
 
     /// Set last error information
