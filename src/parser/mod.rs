@@ -2326,25 +2326,32 @@ fn first_comma(tokens: &[Token]) -> Option<usize> {
 }
 
 /// Parse the expressions between the commas that are not in brackets. An
-/// empty part between 2 commas gives no expression.
+/// empty part (2 commas together, or a comma at the start or at the end)
+/// gives a syntax error (issue #155).
 fn parse_comma_separated_expressions(
     tokens: &[Token],
     line_number: Option<u16>,
 ) -> Result<Vec<Expression>> {
-    let expressions = split_at_commas(tokens)
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .map(parse_expression)
-        .collect::<Result<Vec<_>>>()?;
-
-    if expressions.is_empty() {
+    if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected at least one expression".to_string(),
             line: line_number,
         });
     }
 
-    Ok(expressions)
+    split_at_commas(tokens)
+        .into_iter()
+        .map(|part| {
+            if part.is_empty() {
+                Err(BBCBasicError::SyntaxError {
+                    message: "Missing value at a comma".to_string(),
+                    line: line_number,
+                })
+            } else {
+                parse_expression(part)
+            }
+        })
+        .collect()
 }
 
 /// Parse DIM statement
@@ -6365,5 +6372,37 @@ mod tests {
         assert_eq!(expressions.len(), 2);
         assert!(matches!(expressions[0], Expression::ArrayAccess { .. }));
         assert_eq!(expressions[1], Expression::Integer(100));
+    }
+
+    #[test]
+    fn test_comma_separated_expressions_reject_an_empty_value() {
+        for source in ["100,,200", "100,", ",1", "69,,"] {
+            let tokens = crate::tokenizer::tokenize(source).unwrap().tokens;
+
+            let result = parse_comma_separated_expressions(&tokens, Some(20));
+
+            assert_eq!(
+                result,
+                Err(BBCBasicError::SyntaxError {
+                    message: "Missing value at a comma".to_string(),
+                    line: Some(20),
+                }),
+                "{}",
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn test_comma_separated_expressions_keep_the_error_for_no_tokens() {
+        let result = parse_comma_separated_expressions(&[], Some(20));
+
+        assert_eq!(
+            result,
+            Err(BBCBasicError::SyntaxError {
+                message: "Expected at least one expression".to_string(),
+                line: Some(20),
+            })
+        );
     }
 }
