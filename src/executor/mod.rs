@@ -26,32 +26,18 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
-/// Convert a DATA text item for a READ into a numeric variable. A `&` item is a
-/// hex number. Other text gives its leading number, as `VAL` does, or 0.
-fn data_item_number(text: &str) -> f64 {
-    match text.trim_start().strip_prefix('&') {
-        Some(hex) => {
-            let digits = hex
-                .find(|c: char| !c.is_ascii_hexdigit())
-                .unwrap_or(hex.len());
-            u32::from_str_radix(&hex[..digits], 16).map_or(0.0, |v| v as i32 as f64)
-        }
-        None => parse_leading_number(text),
-    }
-}
-
 /// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
+/// VAL, INPUT and READ of a DATA text item use it.
 /// The number has an optional sign, digits with one optional decimal point, and an
-/// optional exponent. If there is no number, the result is 0.
+/// optional exponent. A `&` and hex digits is a 32-bit hex number, as in `&1F`.
+/// If there is no number, the result is 0.
 fn parse_leading_number(text: &str) -> f64 {
     let text = text.trim_start();
-    // A hex number is & and hex digits, as in VAL("&1F"). It is a 32-bit integer.
     if let Some(hex) = text.strip_prefix('&') {
-        let value = hex
-            .chars()
-            .map_while(|ch| ch.to_digit(16).filter(|_| !ch.is_ascii_lowercase()))
-            .fold(0u32, |acc, digit| acc.wrapping_shl(4) | digit);
-        return f64::from(value as i32);
+        let digits = hex
+            .find(|c: char| !c.is_ascii_hexdigit())
+            .unwrap_or(hex.len());
+        return u32::from_str_radix(&hex[..digits], 16).map_or(0.0, |v| v as i32 as f64);
     }
     let bytes = text.as_bytes();
     let digits_from = |mut i: usize| {
@@ -956,7 +942,7 @@ impl Executor {
                 let int_val = match data_value {
                     DataValue::Integer(v) => *v,
                     DataValue::Real(v) => *v as i32,
-                    DataValue::String(s) => data_item_number(s) as i32,
+                    DataValue::String(s) => parse_leading_number(s) as i32,
                 };
                 self.variables.set_integer_var(var_name.clone(), int_val);
             } else if var_name.ends_with('$') {
@@ -972,7 +958,7 @@ impl Executor {
                 let real_val = match data_value {
                     DataValue::Real(v) => *v,
                     DataValue::Integer(v) => *v as f64,
-                    DataValue::String(s) => data_item_number(s),
+                    DataValue::String(s) => parse_leading_number(s),
                 };
                 self.variables.set_real_var(var_name.clone(), real_val);
             }
