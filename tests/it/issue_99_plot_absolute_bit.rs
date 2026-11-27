@@ -12,7 +12,7 @@ fn test_plot_69_sets_an_absolute_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn test_plot_65_sets_a_point_relative_to_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn test_plot_5_draws_an_absolute_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_plot_1_draws_a_line_relative_to_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_plot_85_fills_an_absolute_triangle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-10\n");
+    assert_eq!(output, "110\n");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_plot_81_fills_a_triangle_relative_to_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_a_relative_move_updates_the_two_last_points() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn test_a_triangle_updates_the_two_last_points() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn test_plot_132_moves_the_cursor_to_an_absolute_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_plot_128_moves_the_cursor_relative_to_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -162,5 +162,5 @@ fn test_a_move_only_group_reads_bit_2_as_absolute() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }

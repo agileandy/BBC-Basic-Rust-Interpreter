@@ -42,7 +42,7 @@ fn test_vdu_22_selects_a_mode() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert!(output.ends_with("-1\n"), "output: {:?}", output);
+    assert!(output.ends_with("1\n"), "output: {:?}", output);
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_vdu_25_moves_then_draws_a_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_plot_4_moves_and_plot_5_draws_a_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_plot_0_and_plot_1_are_relative() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn test_vdu_25_with_negative_coordinates() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_vdu_29_sets_the_origin() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_vdu_command_split_over_2_statements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]

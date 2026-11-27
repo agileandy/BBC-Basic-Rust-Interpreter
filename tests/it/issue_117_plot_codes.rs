@@ -26,7 +26,7 @@ fn test_plot_68_moves_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn test_plot_64_moves_relative_and_sets_no_pixel() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n-1\n");
+    assert_eq!(output, "0\n1\n");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_plot_133_moves_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_plot_145_draws_a_circle_outline_round_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-10\n");
+    assert_eq!(output, "1110\n");
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn test_plot_149_draws_a_circle_through_an_absolute_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-10\n");
+    assert_eq!(output, "110\n");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_plot_153_draws_a_filled_circle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-10\n");
+    assert_eq!(output, "110\n");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn test_a_line_after_circle_starts_at_the_point_on_the_circle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -161,5 +161,5 @@ fn test_a_triangle_after_circle_uses_the_centre_and_the_point_on_the_circle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }

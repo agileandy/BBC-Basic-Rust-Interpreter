@@ -12,7 +12,7 @@ fn test_the_issue_program_fills_the_flat_bottom_edge() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n");
+    assert_eq!(output, "1111\n");
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn test_a_flat_bottom_edge_stops_at_the_corners() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0-100\n");
+    assert_eq!(output, "0100\n");
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_a_flat_top_edge_is_filled_from_corner_to_corner() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1\n000-1\n");
+    assert_eq!(output, "111\n0001\n");
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_a_flat_edge_with_the_target_as_a_corner_is_filled() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n");
+    assert_eq!(output, "1111\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_3_corners_on_one_row_fill_from_the_lowest_x_to_the_highest_x() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n0000\n");
+    assert_eq!(output, "1111\n0000\n");
 }
 
 #[test]
@@ -75,5 +75,5 @@ fn test_a_triangle_with_no_flat_edge_draws_the_same_pixels_as_before() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n0-1-1-1\n");
+    assert_eq!(output, "1111\n0111\n");
 }

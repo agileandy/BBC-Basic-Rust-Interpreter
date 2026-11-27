@@ -23,7 +23,7 @@ fn test_move_and_draw_take_an_array_element() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1 0\n");
+    assert_eq!(without_clear(&output), "1 0\n");
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_plot_takes_array_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1 0\n");
+    assert_eq!(without_clear(&output), "1 0\n");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_origin_takes_a_function_with_a_string_argument() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1 0\n");
+    assert_eq!(without_clear(&output), "1 0\n");
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn test_circle_ellipse_and_rectangle_take_array_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1 -1 -1 0\n");
+    assert_eq!(without_clear(&output), "1 1 1 0\n");
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_fill_takes_array_elements() {
     let (result, output) = run_lines(&[TABLE, "20 FILL P(1,1), P(1,2)", "30 PRINT POINT(100,100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1\n");
+    assert_eq!(without_clear(&output), "1\n");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_a_comma_in_a_string_literal_does_not_split_the_values() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1\n");
+    assert_eq!(without_clear(&output), "1\n");
 }
 
 #[test]

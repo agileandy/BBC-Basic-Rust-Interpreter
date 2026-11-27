@@ -31,7 +31,7 @@ fn test_the_issue_program_returns_and_fills_the_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_a_triangle_partly_off_the_screen_draws_its_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-100\n");
+    assert_eq!(output, "100\n");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_a_long_line_returns_and_draws_its_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-10\n");
+    assert_eq!(output, "110\n");
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_a_large_circle_outline_returns_and_draws_its_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0-10\n");
+    assert_eq!(output, "010\n");
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_a_circle_outline_with_a_radius_above_2147483647_goes_through_the_target(
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_a_filled_circle_with_a_radius_above_2147483647_reaches_the_target() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-10\n");
+    assert_eq!(output, "110\n");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_a_large_ellipse_returns_and_draws_its_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn test_an_ellipse_of_normal_size_on_the_screen_does_not_panic() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn test_a_large_rectangle_returns_and_fills_the_visible_part() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }
 
 // The functions below are copies of the drawing algorithms before issue 128.
