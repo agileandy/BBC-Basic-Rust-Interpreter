@@ -408,12 +408,17 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 chars.next();
                 tokens.push(Token::Separator(ch));
             }
+            // An apostrophe after REM is part of the REM text (issue 178)
+            '\'' if tokens.contains(&Token::Keyword(0xF4)) => {
+                chars.next();
+                tokens.push(Token::Separator(ch));
+            }
             '\'' => {
-                // Apostrophe is shorthand for REM - rest of line is a comment
-                chars.next(); // consume apostrophe
-                tokens.push(Token::Keyword(0xF4)); // REM token
-                                                   // Consume rest of line (don't tokenize comment text)
-                while chars.next().is_some() {}
+                // An apostrophe comment is REM and the rest of the line as
+                // typed. A REM with a DataText after it lists as `'` (issue 178).
+                chars.next();
+                tokens.push(Token::Keyword(0xF4));
+                tokens.push(Token::DataText(chars.by_ref().collect()));
             }
             // # starts the channel of a file statement, such as PRINT#
             // ~ selects hex output, as in PRINT ~X and STR$~(X)
@@ -527,6 +532,12 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
         }
 
         match token {
+            // An apostrophe comment lists as typed (issue 178)
+            Token::Keyword(0xF4)
+                if matches!(tokenized_line.tokens.get(i + 1), Some(Token::DataText(_))) =>
+            {
+                result.push('\'');
+            }
             Token::Keyword(byte) => {
                 if let Some(keyword) = main_reverse.get(byte) {
                     result.push_str(keyword);
@@ -1293,14 +1304,17 @@ mod tests {
         // PRINT it is a new line item (issue 159).
         let line = tokenize("10 GOTO 42 ' This is a comment").unwrap();
 
-        // Should tokenize as: LineNumber(10), Keyword(GOTO), Integer(42), Keyword(REM)
+        // GOTO, 42, REM and the comment text as typed (issue 178)
         assert_eq!(line.line_number, Some(10));
-        assert_eq!(line.tokens.len(), 3); // GOTO, 42, REM
-
-        // Check tokens
-        assert!(matches!(line.tokens[0], Token::Keyword(0xE5))); // GOTO
-        assert!(matches!(line.tokens[1], Token::Integer(42)));
-        assert!(matches!(line.tokens[2], Token::Keyword(0xF4))); // REM
+        assert_eq!(
+            line.tokens,
+            vec![
+                Token::Keyword(0xE5), // GOTO
+                Token::Integer(42),
+                Token::Keyword(0xF4), // REM
+                Token::DataText(" This is a comment".to_string()),
+            ]
+        );
     }
 
     /// The characters that the tokenizer does not know (issue 62).
