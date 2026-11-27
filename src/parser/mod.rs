@@ -328,6 +328,12 @@ pub enum Statement {
     Fill { x: Expression, y: Expression },
     /// ORIGIN statement - set graphics origin
     Origin { x: Expression, y: Expression },
+    /// STEREO statement - set the stereo position of a sound channel.
+    /// It has no effect until sound exists (issue #9).
+    Stereo {
+        channel: Expression,
+        position: Expression,
+    },
     /// Empty statement
     Empty,
 }
@@ -710,6 +716,8 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x91 => parse_origin_statement(&tokens[1..], line.line_number),
             // RECTANGLE statement
             0x93 => parse_rectangle_statement(&tokens[1..], line.line_number),
+            // STEREO statement
+            0xA2 => parse_stereo_statement(&tokens[1..], line.line_number),
             // ELLIPSE statement
             0x9D => parse_ellipse_statement(&tokens[1..], line.line_number),
             // QUIT statement
@@ -1751,6 +1759,26 @@ fn parse_origin_statement(tokens: &[Token], line_number: Option<u16>) -> Result<
         x: args[0].clone(),
         y: args[1].clone(),
     })
+}
+
+/// Parse STEREO channel, position
+fn parse_stereo_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let args = if tokens.is_empty() {
+        Vec::new()
+    } else {
+        parse_comma_separated_expressions(tokens, line_number)?
+    };
+
+    match <[Expression; 2]>::try_from(args) {
+        Ok([channel, position]) => Ok(Statement::Stereo { channel, position }),
+        Err(args) => Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "STEREO requires 2 parameters (channel, position), got {}",
+                args.len()
+            ),
+            line: line_number,
+        }),
+    }
 }
 
 /// Helper function to parse comma-separated expressions
@@ -4972,6 +5000,52 @@ mod tests {
             then_part[1],
             Statement::Data {
                 values: texts(&["1", "2 ELSE PRINT \"z\""])
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_stereo_gives_channel_and_position() {
+        use crate::tokenizer::tokenize;
+        let stmt = parse_statement(&tokenize("STEREO 1, -50").unwrap()).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::Stereo {
+                channel: Expression::Integer(1),
+                position: Expression::Integer(-50),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_stereo_with_wrong_argument_count_gives_syntax_error() {
+        use crate::tokenizer::tokenize;
+        for source in ["STEREO", "STEREO 1", "STEREO 1, 2, 3"] {
+            let result = parse_statement(&tokenize(source).unwrap());
+            assert!(
+                matches!(result, Err(BBCBasicError::SyntaxError { .. })),
+                "{source} gave {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_adval_gives_function_call_with_one_argument() {
+        // ADVAL 0x96
+        let tokens = [
+            Token::Keyword(0x96),
+            Token::Separator('('),
+            Token::Integer(1),
+            Token::Separator(')'),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::FunctionCall {
+                name: "ADVAL".to_string(),
+                args: vec![Expression::Integer(1)],
             }
         );
     }

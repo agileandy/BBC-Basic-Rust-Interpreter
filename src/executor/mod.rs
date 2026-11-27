@@ -445,6 +445,13 @@ impl Executor {
             } => self.execute_rectangle(x1, y1, width, height, *filled),
             Statement::Fill { x, y } => self.execute_fill(x, y),
             Statement::Origin { x, y } => self.execute_origin(x, y),
+            // STEREO evaluates its arguments and has no other effect until
+            // sound exists (issue #9).
+            Statement::Stereo { channel, position } => {
+                self.eval_integer(channel)?;
+                self.eval_integer(position)?;
+                Ok(())
+            }
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -2031,6 +2038,19 @@ impl Executor {
             "POS" | "COUNT" if args.is_empty() => Ok(self.column as i32),
             // VPOS gives the print row. There is no screen model yet, so it gives 0.
             "VPOS" if args.is_empty() => Ok(0),
+            // ADVAL(0) gives the fire buttons, ADVAL(n) with n > 0 gives an
+            // analogue channel, and ADVAL(n) with n < 0 gives the state of a
+            // buffer. This build has no analogue hardware, so each one gives 0.
+            "ADVAL" => {
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "ADVAL requires 1 argument".to_string(),
+                        line: None,
+                    });
+                }
+                self.eval_integer(&args[0])?;
+                Ok(0)
+            }
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
