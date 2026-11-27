@@ -113,3 +113,4 @@ mod issue_130_too_many_open_files_err;
 mod issue_122_array_error;
 mod issue_124_print_function_string_result;
 mod issue_131_tab_two_values;
+mod issue_126_ellipse_last_point;

@@ -256,7 +256,7 @@ impl GraphicsSystem {
         // and clear is relative to the last point. The low 2 bits select the
         // action: 0 moves, 1 draws in the foreground colour, 2 and 3 draw in
         // the inverse and background colours. Those 2 colours are not
-        // modelled, so the line, triangle and circle groups only move for 2
+        // modelled, so the line, triangle, circle and ellipse groups only move for 2
         // and 3. The point group (64-71) sets the point for 2 and 3 also.
         //
         // These codes from 128 to 191 are not supported. They draw nothing,
@@ -303,6 +303,23 @@ impl GraphicsSystem {
                     self.circle_outline(centre.x, centre.y, radius);
                 } else {
                     self.fill_circle(centre.x, centre.y, radius);
+                }
+            }
+            // 192-199: Ellipse outline. 200-207: Filled ellipse. The BBC
+            // BASIC for Windows manual gives: "the previous two points visited
+            // correspond to the centre of the ellipse and a point on a vertical
+            // tangent to the ellipse (i.e. the horizontal radius). The
+            // specified X,Y position lies anywhere on a horizontal tangent to
+            // the ellipse (i.e. the vertical radius)."
+            // (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin3.html)
+            0xC0 | 0xC8 if draws => {
+                let centre = self.previous_pos;
+                let rx = (i64::from(self.current_pos.x) - i64::from(centre.x)).abs();
+                let ry = (i64::from(target_y) - i64::from(centre.y)).abs();
+                if mode & 0xF8 == 0xC0 {
+                    self.ellipse_outline(centre.x, centre.y, rx, ry);
+                } else {
+                    self.fill_ellipse(centre.x, centre.y, rx, ry);
                 }
             }
             // Default: just move cursor
@@ -368,14 +385,45 @@ impl GraphicsSystem {
         }
     }
 
-    /// Draw an ellipse using midpoint ellipse algorithm
+    /// ELLIPSE x, y, a, b. The BBC BASIC for Windows manual gives the rule:
+    /// "ELLIPSE x,y,a,b is equivalent to MOVE x,y : PLOT 0,a,0 : PLOT 193,0,b"
+    /// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin4.html). Thus the point
+    /// before the last point is (x + a, y), and the last point is (x + a, y + b).
     pub fn draw_ellipse(&mut self, center_x: i32, center_y: i32, rx: i32, ry: i32) {
+        self.move_to(center_x, center_y);
+        self.plot(0, rx, 0);
+        self.plot(193, 0, ry);
+    }
+
+    /// Fill an ellipse with a horizontal line for each row. Only the rows and
+    /// the columns on the canvas are visited, so a large radius is fast.
+    fn fill_ellipse(&mut self, center_x: i32, center_y: i32, rx: i64, ry: i64) {
+        if rx <= 0 || ry <= 0 {
+            return;
+        }
+        let (cx, cy) = (i64::from(center_x), i64::from(center_y));
+        let min_x = -i64::from(self.origin.x);
+        let max_x = self.width as i64 - 1 - i64::from(self.origin.x);
+        let min_y = -i64::from(self.origin.y);
+        let max_y = self.height as i64 - 1 - i64::from(self.origin.y);
+        for y in (cy - ry).max(min_y)..=(cy + ry).min(max_y) {
+            let dy = (y - cy) as f64 / ry as f64;
+            let half = (rx as f64 * (1.0 - dy * dy).sqrt()) as i64;
+            for x in (cx - half).max(min_x)..=(cx + half).min(max_x) {
+                self.set_pixel(x as i32, y as i32);
+            }
+        }
+    }
+
+    /// Draw an ellipse outline using midpoint ellipse algorithm. The terms
+    /// are i128, so a large radius does not overflow.
+    fn ellipse_outline(&mut self, center_x: i32, center_y: i32, rx: i64, ry: i64) {
         if rx <= 0 || ry <= 0 {
             return;
         }
 
-        let rx = rx.abs();
-        let ry = ry.abs();
+        let (rx, ry) = (i128::from(rx), i128::from(ry));
+        let (center_x, center_y) = (i128::from(center_x), i128::from(center_y));
 
         // Region 1
         let mut x = 0;
@@ -422,20 +470,21 @@ impl GraphicsSystem {
             }
             self.plot_ellipse_points(center_x, center_y, x, y);
         }
-
-        // Update current position to ellipse center
-        self.current_pos = Point {
-            x: center_x,
-            y: center_y,
-        };
     }
 
-    /// Helper to plot 4 quadrants of ellipse
-    fn plot_ellipse_points(&mut self, cx: i32, cy: i32, x: i32, y: i32) {
-        self.set_pixel(cx + x, cy + y);
-        self.set_pixel(cx - x, cy + y);
-        self.set_pixel(cx + x, cy - y);
-        self.set_pixel(cx - x, cy - y);
+    /// Helper to plot 4 quadrants of ellipse. A point outside the i32 range
+    /// is not on the canvas, so it is not set.
+    fn plot_ellipse_points(&mut self, cx: i128, cy: i128, x: i128, y: i128) {
+        for (px, py) in [
+            (cx + x, cy + y),
+            (cx - x, cy + y),
+            (cx + x, cy - y),
+            (cx - x, cy - y),
+        ] {
+            if let (Ok(px), Ok(py)) = (i32::try_from(px), i32::try_from(py)) {
+                self.set_pixel(px, py);
+            }
+        }
     }
 
     /// Draw a filled rectangle
