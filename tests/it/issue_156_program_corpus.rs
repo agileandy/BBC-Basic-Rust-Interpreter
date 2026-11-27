@@ -104,7 +104,7 @@ corpus!(restore_lookup);
 corpus!(print_separators);
 corpus!(bit_masks_not);
 corpus!(
-    #[ignore = "defect F5: IF with no THEN gives a syntax error"]
+    #[ignore = "issue 160 keeps a syntax error for an assignment with no THEN (line 50)"]
     if_without_then
 );
 corpus!(graphics_count);

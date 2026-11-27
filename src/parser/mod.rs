@@ -3184,7 +3184,7 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
 
 /// The position of the token after the condition of an IF: the first THEN,
 /// or the first keyword at bracket depth 0 that starts a statement. None if
-/// there is no such token.
+/// there is no such token before a colon at depth 0 or the end of the line.
 ///
 /// The keywords 0xD4 to 0xFF (SOUND to OSCLI) and the BASIC V statements
 /// (0xC8 prefix) start a statement and cannot be in an expression. PTR, PAGE,
@@ -3193,19 +3193,19 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
 /// LET or MKDIR, does not end the condition.
 fn if_condition_end(tokens: &[Token]) -> Option<usize> {
     let mut depth = 0usize;
-    tokens.iter().position(|token| match token {
-        Token::Keyword(0x8C) => true,
-        Token::Separator('(') => {
-            depth += 1;
-            false
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Keyword(0x8C) => return Some(index),
+            Token::Separator('(') => depth += 1,
+            Token::Separator(')') => depth = depth.saturating_sub(1),
+            Token::Separator(':') if depth == 0 => return None,
+            Token::Keyword(0xD4..=0xFF) | Token::ExtendedKeyword(0xC8, _) if depth == 0 => {
+                return Some(index)
+            }
+            _ => {}
         }
-        Token::Separator(')') => {
-            depth = depth.saturating_sub(1);
-            false
-        }
-        Token::Keyword(0xD4..=0xFF) | Token::ExtendedKeyword(0xC8, _) => depth == 0,
-        _ => false,
-    })
+    }
+    None
 }
 
 /// Parse IF statement

@@ -60,6 +60,16 @@ fn test_assignment_with_no_then_is_a_syntax_error() {
 }
 
 #[test]
+fn test_assignment_with_no_then_before_a_colon_is_a_syntax_error() {
+    let (result, _) = run(&["10 A% = 5", "20 IF A% > 3 A% = 0 : PRINT A%"]);
+
+    assert_eq!(
+        result,
+        Err("Syntax error at line 20: Expected THEN after IF condition".to_string())
+    );
+}
+
+#[test]
 fn test_if_with_no_then_else_runs_the_correct_branch() {
     let program = |a: &'static str| run(&[a, "20 IF A PRINT 1 ELSE PRINT 2"]);
 
