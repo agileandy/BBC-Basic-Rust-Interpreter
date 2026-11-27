@@ -1018,6 +1018,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::Arguments => 31,
         BBCBasicError::NoProc => 13,
         BBCBasicError::NoSuchFnProc(_) => 29,
+        BBCBasicError::FileNotFound(_) => 214,
         BBCBasicError::ChannelNotOpen(_) => 222,
         BBCBasicError::BadCall => 30,
         BBCBasicError::NoSuchVariable(_) => 26,
