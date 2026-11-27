@@ -56,6 +56,10 @@ pub mod error {
         OutOfData,
         // NEXT with no open FOR loop
         NoFor,
+        // UNTIL with no open REPEAT loop
+        NoRepeat,
+        // ENDWHILE with no open WHILE loop
+        NoWhile,
         // NEXT with a name that no open FOR loop has
         CantMatchFor,
         // LOCAL outside a procedure or function
@@ -106,6 +110,8 @@ pub mod error {
                 BBCBasicError::OnRange => write!(f, "ON range"),
                 BBCBasicError::OutOfData => write!(f, "Out of DATA"),
                 BBCBasicError::NoFor => write!(f, "No FOR"),
+                BBCBasicError::NoRepeat => write!(f, "No REPEAT"),
+                BBCBasicError::NoWhile => write!(f, "No WHILE"),
                 BBCBasicError::CantMatchFor => write!(f, "Can't match FOR"),
                 BBCBasicError::NotLocal => write!(f, "Not LOCAL"),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),

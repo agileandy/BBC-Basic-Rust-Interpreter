@@ -948,7 +948,11 @@ fn step(
         Statement::Until { condition } => {
             let repeat_position = executor
                 .check_until(condition)
-                .map_err(StepError::FatalError)?;
+                .map_err(|error| match error {
+                    // No open REPEAT loop: ON ERROR can catch this error
+                    BBCBasicError::NoRepeat => StepError::Runtime(error),
+                    _ => StepError::FatalError(error),
+                })?;
             if let Some(repeat_position) = repeat_position {
                 // Condition false: loop back to the statement after REPEAT
                 program.goto(repeat_position);
@@ -985,9 +989,9 @@ fn step(
         }
         Statement::EndWhile => {
             // The condition is in the matching WHILE statement
-            let while_position = executor.check_endwhile_get_while_line().ok_or_else(|| {
-                format!("ENDWHILE without matching WHILE{}", at_line(line_number))
-            })?;
+            let while_position = executor
+                .check_endwhile_get_while_line()
+                .ok_or(BBCBasicError::NoWhile)?;
             let Some(Statement::While { condition }) = program.lines.statement(while_position)
             else {
                 return Err(format!(
@@ -1023,6 +1027,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::OnRange => 40,
         BBCBasicError::OutOfData => 42,
         BBCBasicError::NoFor => 32,
+        BBCBasicError::NoRepeat => 43,
+        BBCBasicError::NoWhile => 46,
         BBCBasicError::CantMatchFor => 33,
         BBCBasicError::NotLocal => 12,
         BBCBasicError::NoSuchVariable(_) => 26,

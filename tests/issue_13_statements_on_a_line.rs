@@ -289,8 +289,9 @@ fn test_second_run_has_no_repeat_from_first_run() {
         &["10 PRINT \"B\"", "20 UNTIL 0", "30 PRINT \"DONE\""],
     ]);
 
-    assert_eq!(result, Ok(()));
-    assert_eq!(output, "B\nDONE\n");
+    // The REPEAT of the first run is gone, so UNTIL has no open loop (#96)
+    assert_eq!(result, Err("No REPEAT at line 20".to_string()));
+    assert_eq!(output, "B\n");
 }
 
 #[test]

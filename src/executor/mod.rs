@@ -2687,6 +2687,11 @@ impl Executor {
 
     /// Evaluate UNTIL condition and return the REPEAT position if we should loop back
     pub fn check_until(&mut self, condition: &Expression) -> Result<Option<Position>> {
+        // UNTIL must have an open REPEAT loop
+        if self.repeat_stack.is_empty() {
+            return Err(BBCBasicError::NoRepeat);
+        }
+
         // Evaluate the condition
         let result = self.eval_integer(condition)?;
 
