@@ -101,7 +101,8 @@ fn each_mode_shows_its_placeholder_pane() {
     // Issue #170 gives the edit mode the editor in place of a placeholder.
     assert!(screen_text(&draw(&app, 80, 24)).contains("Ln 1 Col 1"));
     app.key(press(KeyCode::Tab));
-    assert!(screen_text(&draw(&app, 80, 24)).contains("RUN mode"));
+    // Issue #171 gives the run mode its pane, with "ready" in the status line.
+    assert!(screen_text(&draw(&app, 80, 24)).contains("ready"));
     // Issue #172 gives the files mode the file list.
     app.key(press(KeyCode::Tab));
     assert!(screen_text(&draw(&app, 80, 24)).contains("Enter open"));
@@ -220,16 +221,8 @@ fn changed_mark_shows_in_the_status_line() {
     assert!(status.contains("hello.bbas *"), "{status:?}");
 }
 
-#[test]
-fn ctrl_r_is_not_available_yet() {
-    // Issue #172 gives Ctrl-S and Ctrl-O their action.
-    let mut app = App::new(None);
-    app.key(ctrl('r'));
-    assert_eq!(app.message(), "not available yet");
-    assert!(!app.should_quit());
-    let status = row_text(&draw(&app, 80, 24), 23);
-    assert!(status.contains("not available yet"), "{status:?}");
-}
+// Issue #171 gives Ctrl-R its action, and issue #172 gives Ctrl-S and Ctrl-O
+// theirs, so no global key is "not available yet".
 
 /// Run the binary with the arguments and the input on a pipe. Give the exit
 /// code, stdout and stderr. Kill the binary after 5 seconds.

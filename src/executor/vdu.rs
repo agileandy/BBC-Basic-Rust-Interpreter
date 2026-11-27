@@ -98,10 +98,6 @@ impl Executor {
     /// Send a control character to the display. It does not change the
     /// print column.
     fn print_control(&mut self, text: &str) {
-        self.output.push_str(text);
-        #[cfg(not(test))]
-        {
-            print!("{}", text);
-        }
+        self.write_text(text);
     }
 }

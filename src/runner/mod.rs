@@ -10,7 +10,7 @@ use std::ops::Bound;
 use std::rc::Rc;
 
 use crate::error::BBCBasicError;
-use crate::executor::{ErrorHandler, Executor, FunctionBody, ResultEvaluator};
+use crate::executor::{ErrorHandler, Executor, FunctionBody, Interrupt, ResultEvaluator};
 use crate::parser::{parse_line, BinaryOperator, Expression, Statement};
 use crate::program::{Position, ProgramStore, TYPED_LINE};
 use crate::tokenizer::TokenizedLine;
@@ -965,12 +965,21 @@ fn run_case(
 }
 
 /// Execute one item at `position` and apply its control flow.
+///
+/// First the stop check: an Escape of the console gives the error Escape at
+/// this statement, and a Quit stops the program (issue #171). The main run
+/// and each function body run come here, so a loop with no output also stops.
 fn step(
     executor: &mut Executor,
     program: &mut Cursor,
     item: &Item,
     position: Position,
 ) -> Result<Flow, StepError> {
+    match executor.take_interrupt() {
+        Some(Interrupt::Escape) => return Err(StepError::Runtime(BBCBasicError::Escape)),
+        Some(Interrupt::Quit) => return Ok(Flow::Quit),
+        None => {}
+    }
     let line_number = position.line;
     let statement = match item {
         Item::Statement(statement) => statement,
@@ -1328,6 +1337,7 @@ fn skip_empty_for_each(executor: &mut Executor, program: &mut Cursor) -> Result<
 /// Convert an interpreter error to its BBC BASIC error number (ERR).
 fn error_number(error: &BBCBasicError) -> i32 {
     match error {
+        BBCBasicError::Escape => 17,
         BBCBasicError::DivisionByZero => 18,
         BBCBasicError::TypeMismatch => 6,
         BBCBasicError::SubscriptOutOfRange => 15,

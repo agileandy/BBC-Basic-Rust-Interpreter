@@ -8,6 +8,7 @@
 #![cfg_attr(test, allow(clippy::approx_constant))]
 
 pub mod collections;
+pub mod commands;
 pub mod executor;
 pub mod extensions;
 pub mod filesystem;
@@ -122,6 +123,8 @@ pub mod error {
         NoSuchKey(String),
         // A FOR EACH of an empty collection with no NEXT after it (issue #141)
         MissingNext,
+        // The Escape key stopped the program. ERR 17 (issue #171).
+        Escape,
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -178,6 +181,7 @@ pub mod error {
                 BBCBasicError::BadCollection => write!(f, "Bad collection"),
                 BBCBasicError::NoSuchKey(key) => write!(f, "No such key: {}", key),
                 BBCBasicError::MissingNext => write!(f, "FOR EACH without matching NEXT"),
+                BBCBasicError::Escape => write!(f, "Escape"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }

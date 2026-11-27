@@ -165,3 +165,4 @@ mod issue_172_ide_files_mode;
 mod issue_184_fill_moves_last_point;
 mod issue_183_outline_pixels_one_time;
 mod issue_167_keyword_short_forms;
+mod issue_171_ide_run_mode;

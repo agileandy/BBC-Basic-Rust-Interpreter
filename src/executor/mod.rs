@@ -2,10 +2,13 @@
 //!
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
+mod console;
 // Unit tests never read stdin, so the stdin reader is not used in them.
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
 mod vdu;
+
+pub use console::{Console, Interrupt};
 
 use crate::collections::{CollectionStore, Element};
 use crate::error::{BBCBasicError, Result};
@@ -495,6 +498,8 @@ pub struct Executor {
     vdu_queue: Vec<u8>,
     // Lists of the program, found by handle (extension, issue #139)
     collections: CollectionStore,
+    // The screen and keyboard of a front end (issue #171). None: stdout and stdin
+    console: console::ConsoleSlot,
 }
 
 impl Executor {
@@ -541,6 +546,7 @@ impl Executor {
             text_background: 0,
             vdu_queue: Vec::new(),
             collections: CollectionStore::new(),
+            console: console::ConsoleSlot::default(),
         }
     }
 
@@ -1034,11 +1040,70 @@ impl Executor {
                 _ => self.column += 1,
             }
         }
+        self.write_text(text);
+    }
+
+    /// Give the screen and the keyboard of a front end to the executor. The
+    /// program text then goes to the console and not to the output buffer.
+    pub fn set_console(&mut self, console: Box<dyn Console>) {
+        self.console.0 = Some(console);
+    }
+
+    /// The stop check: give the pending interrupt of the console, if there
+    /// is one. With no console, there is never an interrupt.
+    pub fn take_interrupt(&mut self) -> Option<Interrupt> {
+        self.console.0.as_mut()?.interrupt()
+    }
+
+    /// Show text with no change to the print column: to the console, or to
+    /// the output buffer in test mode and to stdout in production. The
+    /// commands of the prompt (LIST, LVAR and the others) use it.
+    pub fn write_text(&mut self, text: &str) {
+        if let Some(console) = self.console.0.as_mut() {
+            console.write(text);
+            return;
+        }
         self.output.push_str(text);
         #[cfg(not(test))]
         {
             print!("{}", text);
         }
+    }
+
+    /// Read one typed line for a command, such as a line of AUTO: from the
+    /// console, or from stdin. Give None at the end of input, or if an
+    /// interrupt stopped the read.
+    pub fn read_text_line(&mut self) -> Option<String> {
+        if let Some(console) = self.console.0.as_mut() {
+            let line = console.read_line();
+            return line.filter(|_| console.interrupt().is_none());
+        }
+        #[cfg(test)]
+        {
+            None
+        }
+        #[cfg(not(test))]
+        {
+            use std::io;
+
+            io::stdout().flush().unwrap();
+            let mut line = String::new();
+            match io::stdin().read_line(&mut line) {
+                Ok(0) | Err(_) => None,
+                Ok(_) => Some(line),
+            }
+        }
+    }
+
+    /// Read one key from the console, and give the error Escape if an
+    /// interrupt stopped the read.
+    fn console_key(&mut self, limit: Option<Duration>) -> Option<Result<Option<char>>> {
+        let console = self.console.0.as_mut()?;
+        let key = console.read_key(limit);
+        Some(match console.interrupt() {
+            Some(_) => Err(BBCBasicError::Escape),
+            None => Ok(key),
+        })
     }
 
     /// Print a new line (BBC codes 13 and 10) and set the column to 0
@@ -1070,36 +1135,44 @@ impl Executor {
     }
 
     /// Take the next key from the queue. If the queue is empty, read one key
-    /// from stdin. Give None at the end of input.
-    fn next_key(&mut self) -> Option<char> {
+    /// from the console or stdin. Give None at the end of input. An
+    /// interrupt of the console read gives the error Escape.
+    fn next_key(&mut self) -> Result<Option<char>> {
         if let Some(key) = self.key_queue.pop_front() {
-            return Some(key);
+            return Ok(Some(key));
+        }
+        if let Some(key) = self.console_key(None) {
+            return key;
         }
         #[cfg(test)]
         {
-            None
+            Ok(None)
         }
         #[cfg(not(test))]
         {
-            key_input::read_key().map(char::from)
+            Ok(key_input::read_key().map(char::from))
         }
     }
 
     /// Take the next key from the queue with no wait. If the queue is empty,
-    /// wait for a maximum of `limit` for one key from stdin. Give None if no
-    /// key comes in that time or at the end of input.
-    fn next_key_within(&mut self, limit: Duration) -> Option<char> {
+    /// wait for a maximum of `limit` for one key from the console or stdin.
+    /// Give None if no key comes in that time or at the end of input. An
+    /// interrupt of the console read gives the error Escape.
+    fn next_key_within(&mut self, limit: Duration) -> Result<Option<char>> {
         if let Some(key) = self.key_queue.pop_front() {
-            return Some(key);
+            return Ok(Some(key));
+        }
+        if let Some(key) = self.console_key(Some(limit)) {
+            return key;
         }
         #[cfg(test)]
         {
             let _ = limit;
-            None
+            Ok(None)
         }
         #[cfg(not(test))]
         {
-            key_input::read_key_within(limit).map(char::from)
+            Ok(key_input::read_key_within(limit).map(char::from))
         }
     }
 
@@ -1403,7 +1476,7 @@ impl Executor {
                 InputItem::ArrayElement { name, indices } => (name, Some(indices)),
             };
             if values.is_empty() {
-                let reply = self.read_input_reply(question_mark);
+                let reply = self.read_input_reply(question_mark)?;
                 values = split_input_reply(&reply);
             }
             question_mark = true;
@@ -1476,7 +1549,7 @@ impl Executor {
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
             }
-            let reply = self.read_input_reply(question_mark);
+            let reply = self.read_input_reply(question_mark)?;
             question_mark = true;
             let reply = without_line_end(&reply);
             self.store_input_value(
@@ -1490,26 +1563,36 @@ impl Executor {
 
     /// Show `?` if `question_mark` is true, then read the next reply line.
     /// The Enter key of the reply moves the cursor to column 0.
-    fn read_input_reply(&mut self, question_mark: bool) -> String {
+    fn read_input_reply(&mut self, question_mark: bool) -> Result<String> {
         if question_mark {
             self.print_output("?");
         }
-        let reply = self.next_input_reply();
+        let reply = self.next_input_reply()?;
         self.column = 0;
-        reply
+        Ok(reply)
     }
 
     /// Take the next INPUT reply from the queue. If the queue is empty, read stdin.
     /// A read error or the end of input gives an empty reply. A queued reply
     /// adds a new line to the output, as the Enter key does on a screen.
-    fn next_input_reply(&mut self) -> String {
+    /// A console reads the reply, if there is one. An interrupt of the
+    /// console read gives the error Escape.
+    fn next_input_reply(&mut self) -> Result<String> {
         if let Some(reply) = self.input_queue.pop_front() {
             self.print_new_line();
-            return reply;
+            return Ok(reply);
+        }
+        if let Some(console) = self.console.0.as_mut() {
+            let reply = console.read_line();
+            return match (reply, console.interrupt()) {
+                (Some(reply), None) => Ok(reply),
+                (None, None) => Ok(String::new()),
+                (_, Some(_)) => Err(BBCBasicError::Escape),
+            };
         }
         #[cfg(test)]
         {
-            String::new()
+            Ok(String::new())
         }
         #[cfg(not(test))]
         {
@@ -1521,7 +1604,7 @@ impl Executor {
             if io::stdin().read_line(&mut input).is_err() {
                 input.clear();
             }
-            input
+            Ok(input)
         }
     }
 
@@ -1838,6 +1921,11 @@ impl Executor {
 
     /// Execute CLS statement - clear screen
     fn execute_cls(&mut self) -> Result<()> {
+        if let Some(console) = self.console.0.as_mut() {
+            console.clear();
+            self.column = 0;
+            return Ok(());
+        }
         // Output ANSI escape sequences to clear screen and move cursor to home
         // ESC[2J clears the entire screen
         // ESC[H moves cursor to home position (0,0)
@@ -3041,14 +3129,14 @@ impl Executor {
                 Ok(0)
             }
             // GET waits for one key and gives its code. At the end of input it gives -1.
-            "GET" if args.is_empty() => Ok(self.next_key().map_or(-1, |key| key as i32)),
+            "GET" if args.is_empty() => Ok(self.next_key()?.map_or(-1, |key| key as i32)),
             // INKEY(n) waits for a maximum of n centiseconds for a key and
             // gives its code. If no key comes, it gives -1.
             // A negative n (a key scan) gives 0: see inkey_limit.
             "INKEY" if args.len() == 1 => {
                 let time = self.eval_integer(&args[0])?;
                 Ok(match inkey_limit(time) {
-                    Some(limit) => self.next_key_within(limit).map_or(-1, |key| key as i32),
+                    Some(limit) => self.next_key_within(limit)?.map_or(-1, |key| key as i32),
                     None => 0,
                 })
             }
@@ -3318,15 +3406,16 @@ impl Executor {
                 executor.eval_string(&parsed)
             }),
             // GET$ waits for one key and gives it. At the end of input it gives "".
-            "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
+            "GET$" if args.is_empty() => Ok(self.next_key()?.map(String::from).unwrap_or_default()),
             // INKEY$(n) waits for a maximum of n centiseconds for a key and
             // gives it. If no key comes, or n is negative, it gives "".
             "INKEY$" if args.len() == 1 => {
                 let time = self.eval_integer(&args[0])?;
-                Ok(inkey_limit(time)
-                    .and_then(|limit| self.next_key_within(limit))
-                    .map(String::from)
-                    .unwrap_or_default())
+                let key = match inkey_limit(time) {
+                    Some(limit) => self.next_key_within(limit)?,
+                    None => None,
+                };
+                Ok(key.map(String::from).unwrap_or_default())
             }
             "CHR$" => {
                 if args.len() != 1 {

@@ -27,6 +27,7 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::Frame;
 use ratatui::Terminal;
 use std::io::{self, IsTerminal, Write};
+use std::time::Duration;
 
 /// The usage line for an argument that is not known.
 pub const USAGE: &str = "Usage: bbc-basic-interpreter [--ide [file]]";
@@ -106,8 +107,8 @@ pub enum Outcome {
 
 /// The text of the question when the program has changes that are not saved.
 const QUIT_QUESTION: &str = "Not saved. Press ^Q again to quit";
-/// The text for a global key that a later issue gives its action.
-const NOT_AVAILABLE: &str = "not available yet";
+/// The longest wait for a terminal event before the next draw.
+const EVENT_WAIT: Duration = Duration::from_millis(20);
 
 /// The state that the 3 panes share. The frame gives it to each pane:
 /// `draw(&self, frame, area, &Context)` and `key(&mut self, key, &mut Context)`.
@@ -195,10 +196,23 @@ impl App {
         self.context.document.set_changed(changed);
     }
 
-    /// Put pasted text in the editor. Other modes ignore a paste.
+    /// Put pasted text in the editor, or type it in the run mode. The files
+    /// mode ignores a paste.
     pub fn paste(&mut self, text: &str) {
-        if self.mode == Mode::Edit {
-            self.editor.paste(text, &mut self.context);
+        match self.mode {
+            Mode::Edit => self.editor.paste(text, &mut self.context),
+            // The run mode takes the text as typed keys, with a line end as
+            // Enter (issue #171)
+            Mode::Run => {
+                for c in text.replace("\r\n", "\n").chars() {
+                    let code = match c {
+                        '\n' | '\r' => KeyCode::Enter,
+                        c => KeyCode::Char(c),
+                    };
+                    self.key(KeyEvent::new(code, KeyModifiers::NONE));
+                }
+            }
+            Mode::Files => {}
         }
     }
 
@@ -213,6 +227,9 @@ impl App {
         }
         if mode == Mode::Files {
             self.files.focus(&mut self.context);
+        }
+        if mode == Mode::Run {
+            self.run.open(&mut self.context);
         }
         self.mode = mode;
     }
@@ -247,9 +264,7 @@ impl App {
             }
             KeyCode::Tab => self.set_mode(self.mode.next()),
             _ if is_quit => self.ask_to_quit(),
-            _ if is_ctrl(key, 'r') => {
-                self.context.message = NOT_AVAILABLE.to_string();
-            }
+            _ if is_ctrl(key, 'r') => self.start_run(),
             _ if is_ctrl(key, 's') => self.save(),
             _ if is_ctrl(key, 'o') => self.set_mode(Mode::Files),
             _ => {
@@ -260,6 +275,7 @@ impl App {
                     Mode::Files => self.files.key(key, ctx),
                 };
                 self.files_request();
+                self.run_request();
             }
         }
     }
@@ -303,6 +319,58 @@ impl App {
         }
     }
 
+    /// Ctrl-R: make the program from the text and run it in the run mode.
+    /// If a line has a fault, show the fault and its line in the edit mode.
+    fn start_run(&mut self) {
+        let (program, marks) = self.context.document.to_program();
+        if let Some(mark) = marks.first() {
+            let (row, message) = (mark.index, mark.message.clone());
+            self.set_mode(Mode::Edit);
+            self.editor.go_to_line(&self.context.document, row);
+            self.context.message = message;
+            return;
+        }
+        self.set_mode(Mode::Run);
+        self.context.program = program.clone();
+        self.run.start(program, &mut self.context);
+    }
+
+    /// True if a program or a typed command runs in the run mode.
+    pub fn is_running(&self) -> bool {
+        self.run.is_running()
+    }
+
+    /// Take the text and the state messages of the run for a short time.
+    /// The event loop calls it before each draw. Give true if a message came.
+    pub fn tick(&mut self) -> bool {
+        let changed = self.run.tick(&mut self.context);
+        self.run_request();
+        changed
+    }
+
+    /// Show the document line that the run mode asks for in the edit mode:
+    /// the line of an error, or a fault of the text.
+    fn run_request(&mut self) {
+        if let Some(row) = self.run.take_edit_request() {
+            self.set_mode(Mode::Edit);
+            self.editor.go_to_line(&self.context.document, row);
+        }
+    }
+
+    /// Take the messages of the run until it ends, for a maximum of `limit`.
+    /// Give true if no program runs. For tests: no fixed wait.
+    pub fn wait_for_run(&mut self, limit: Duration) -> bool {
+        let ended = self.run.wait_for_run(&mut self.context, limit);
+        self.run_request();
+        ended
+    }
+
+    /// Stop the worker of the run mode and wait for its end, for a maximum
+    /// of `limit`. Give true if it ended. The drop of the app also does this.
+    pub fn stop_worker(&mut self, limit: Duration) -> bool {
+        self.run.stop(limit)
+    }
+
     /// Draw the tab bar, the pane of the current mode and the status line.
     pub fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
@@ -325,7 +393,7 @@ impl App {
             }
             Mode::Run => {
                 self.run.draw(frame, pane, ctx);
-                String::new()
+                self.run.status()
             }
             Mode::Files => {
                 self.files.draw(frame, pane, ctx);
@@ -383,8 +451,13 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn new() -> io::Result<Self> {
         // The hook of today runs after the restore, so that its text shows.
+        // A panic of the run worker does not stop the IDE: the run pane
+        // shows its text in the status line.
         let previous_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
+            if std::thread::current().name() == Some(run::WORKER_NAME) {
+                return;
+            }
             restore_terminal();
             previous_hook(info);
         }));
@@ -417,14 +490,26 @@ pub fn main(file_name: Option<String>) -> i32 {
     }
 }
 
-/// The event loop: draw, read one event, until the app quits.
+/// The event loop: take the messages of a run, draw, and read the events
+/// that came, until the app quits. The wait for an event has a time limit,
+/// so that the text of a run shows while no key comes.
 fn run(mut app: App) -> io::Result<()> {
     let _guard = TerminalGuard::new()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    // Draw only after an event or a message of a run, so that an idle IDE
+    // writes nothing to the terminal
+    let mut changed = true;
     while !app.should_quit() {
-        // A resize event only draws the frame again at the new size.
-        terminal.draw(|frame| app.draw(frame))?;
-        app.event(event::read()?);
+        changed |= app.tick();
+        if changed {
+            // A resize event only draws the frame again at the new size.
+            terminal.draw(|frame| app.draw(frame))?;
+            changed = false;
+        }
+        if event::poll(EVENT_WAIT)? {
+            app.event(event::read()?);
+            changed = true;
+        }
     }
     Ok(())
 }

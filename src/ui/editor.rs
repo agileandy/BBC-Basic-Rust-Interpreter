@@ -94,6 +94,12 @@ impl EditorPane {
         self.check(doc);
     }
 
+    /// Put the cursor at the start of a line, such as the line of a fault
+    /// or of a run error (issue #171).
+    pub fn go_to_line(&mut self, doc: &Document, row: usize) {
+        self.move_to(doc, row.min(doc.lines().len() - 1), 0);
+    }
+
     pub fn key(&mut self, key: KeyEvent, ctx: &mut Context) -> Outcome {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
