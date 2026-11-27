@@ -6,7 +6,26 @@ use bbc_basic_interpreter::{
 };
 use std::io::{self, Write};
 
+/// True if a panic message comes from a write to a closed output pipe.
+fn is_closed_output_panic(message: &str) -> bool {
+    message.contains("Broken pipe") || message.contains("BrokenPipe")
+}
+
+/// End the process with status 0 when the output closes early.
+/// Show all other panics as before, with a status that is not 0.
+fn install_closed_output_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.payload_as_str().is_some_and(is_closed_output_panic) {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+}
+
 fn main() {
+    install_closed_output_hook();
+
     println!("BBC BASIC Interpreter v0.1.0");
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
 
@@ -413,4 +432,31 @@ fn print_help() {
     println!("  B   - Real (float) variable");
     println!("  C$  - String variable");
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_closed_output_panic;
+
+    #[test]
+    fn test_print_to_closed_stdout_is_closed_output() {
+        assert!(is_closed_output_panic(
+            "failed printing to stdout: Broken pipe (os error 32)"
+        ));
+    }
+
+    #[test]
+    fn test_unwrap_of_broken_pipe_error_is_closed_output() {
+        assert!(is_closed_output_panic(
+            "called `Result::unwrap()` on an `Err` value: Os { code: 32, kind: BrokenPipe, message: \"Broken pipe\" }"
+        ));
+    }
+
+    #[test]
+    fn test_other_panic_is_not_closed_output() {
+        assert!(!is_closed_output_panic("index out of bounds"));
+        assert!(!is_closed_output_panic(
+            "failed printing to stdout: Permission denied (os error 13)"
+        ));
+    }
 }
