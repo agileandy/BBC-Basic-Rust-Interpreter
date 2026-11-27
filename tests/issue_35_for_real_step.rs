@@ -80,19 +80,20 @@ fn test_integer_loop_truncates_real_values() {
     assert_eq!(output, "1\n2\n3\n");
 }
 
-/// The step 0.5 is truncated to 0. A step of 0 keeps the behaviour that the
-/// code had before: the loop runs one time.
+/// The step 0.5 is truncated to 0. A step of 0 does not change the loop
+/// variable (issue 58), so the body adds 1 to end the loop.
 #[test]
 fn test_integer_loop_with_half_step_truncates_step_to_zero() {
     let (result, output) = run(&[
         "10 FOR I% = 1 TO 2 STEP 0.5",
         "20 PRINT I%",
-        "30 NEXT I%",
-        "40 PRINT \"END \"; I%",
+        "30 I% = I% + 1",
+        "40 NEXT I%",
+        "50 PRINT \"END \"; I%",
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\nEND 1\n");
+    assert_eq!(output, "1\n2\nEND 3\n");
 }
 
 #[test]
