@@ -23,7 +23,9 @@ fn main() {
 
         // Read line
         line_buffer.clear();
-        if stdin.read_line(&mut line_buffer).is_err() {
+        // Ok(0) is end of input. Stop for it and for an error.
+        if matches!(stdin.read_line(&mut line_buffer), Ok(0) | Err(_)) {
+            println!();
             break;
         }
 
