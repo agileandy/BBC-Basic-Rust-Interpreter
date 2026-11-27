@@ -131,8 +131,8 @@ fn test_on_range_text() {
 #[test]
 fn test_no_such_variable_text_has_the_name() {
     assert_eq!(
-        error_of(&["10 PRINT Q%"]),
-        "No such variable: Q% at line 10"
+        error_of(&["10 PRINT QQ%"]),
+        "No such variable: QQ% at line 10"
     );
 }
 
@@ -343,12 +343,12 @@ fn test_report_prints_the_bbc_text_of_a_runtime_error() {
 fn test_report_prints_the_last_error_text() {
     let (result, output) = run(&[
         "10 ON ERROR GOTO 30",
-        "20 PRINT Q%",
+        "20 PRINT QQ%",
         "30 REPORT",
         "40 PRINT \" at line \"; ERL",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "No such variable: Q% at line 20\n");
+    assert_eq!(output, "No such variable: QQ% at line 20\n");
 }
 
 #[test]

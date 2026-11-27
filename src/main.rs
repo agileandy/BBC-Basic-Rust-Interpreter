@@ -280,7 +280,7 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     use std::io::Write;
     for (line_number, line) in program.list() {
         let text = detokenize(line)
-            .map_err(|e| format!("Failed to detokenize line {}: {:?}", line_number, e))?;
+            .map_err(|e| format!("Failed to detokenize line {}: {}", line_number, e))?;
         writeln!(file, "{}", text)
             .map_err(|e| format!("Failed to write line {}: {}", line_number, e))?;
     }
