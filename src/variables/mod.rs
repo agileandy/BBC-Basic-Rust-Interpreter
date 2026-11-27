@@ -139,17 +139,36 @@ pub struct VariableStore {
     structures: HashMap<String, Vec<(String, Variable)>>,
 }
 
-/// True if the name is one of the resident integer variables A% to Z%
+/// The name of the print format variable (issue 166)
+pub const PRINT_FORMAT_NAME: &str = "@%";
+
+/// The start value of `@%`: general format, 9 digits, a field of 10
+pub const PRINT_FORMAT_DEFAULT: i32 = 0x90A;
+
+/// True if the name is one of the resident integer variables @% and A% to Z%
 pub fn is_resident_integer(name: &str) -> bool {
-    matches!(name.as_bytes(), [b'A'..=b'Z', b'%'])
+    matches!(name.as_bytes(), [b'@'..=b'Z', b'%'])
+}
+
+/// The start value of a resident integer variable: &90A for @%, 0 for A% to Z%
+pub fn resident_default(name: &str) -> i32 {
+    if name == PRINT_FORMAT_NAME {
+        PRINT_FORMAT_DEFAULT
+    } else {
+        0
+    }
 }
 
 impl VariableStore {
-    /// Create a new variable store. The resident integer variables A% to Z%
-    /// exist from the start with the value 0.
+    /// Create a new variable store. The resident integer variables @% and A%
+    /// to Z% exist from the start with their start values.
     pub fn new() -> Self {
-        let variables = ('A'..='Z')
-            .map(|letter| (format!("{letter}%"), Variable::Integer(0)))
+        let variables = ('@'..='Z')
+            .map(|letter| format!("{letter}%"))
+            .map(|name| {
+                let value = resident_default(&name);
+                (name, Variable::Integer(value))
+            })
             .collect();
         Self {
             variables,
@@ -446,7 +465,7 @@ impl VariableStore {
     }
 
     /// Clear all variables, arrays and structures. The resident integer
-    /// variables A% to Z% keep their values.
+    /// variables @% and A% to Z% keep their values.
     pub fn clear(&mut self) {
         self.variables.retain(|name, _| is_resident_integer(name));
         self.arrays.clear();

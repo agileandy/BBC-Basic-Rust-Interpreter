@@ -21,7 +21,10 @@ use crate::library::LibraryStore;
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, DimItem, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
-use crate::variables::{is_resident_integer, Variable, VariableStore};
+use crate::variables::{
+    is_resident_integer, resident_default, Variable, VariableStore, PRINT_FORMAT_DEFAULT,
+    PRINT_FORMAT_NAME,
+};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -200,9 +203,228 @@ fn parse_leading_number(text: &str) -> f64 {
     text[..end].parse::<f64>().unwrap_or(0.0)
 }
 
-/// The width of a PRINT field: the low byte of `@%` on a BBC Micro, default 10.
-/// Issue #166 gives this value from `@%`.
-const PRINT_FIELD_WIDTH: usize = 10;
+/// The 3 number formats of byte 3 of `@%`
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NumberStyle {
+    /// G: up to the count of digits as significant digits, no trailing zeros
+    General,
+    /// E: one digit, a point, the other digits and the exponent
+    Exponent,
+    /// F: the count of digits as decimal places
+    Fixed,
+}
+
+/// The number format of `@%` (issue 166). The rules are the rules of the
+/// number output routine of the BBC BASIC 2 ROM (&9EDF to &A03F).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NumberFormat {
+    /// Byte 1: the width of a PRINT field and of a comma zone
+    width: usize,
+    /// Byte 2: the count of digits, from 0 to 10
+    digits: usize,
+    /// Byte 3: the format. A value above 2 is the general format.
+    style: NumberStyle,
+    /// Byte 4 is not 0: STR$ uses this format
+    for_str: bool,
+}
+
+/// The format of STR$ when byte 4 of `@%` is 0: the general format with 9
+/// digits, as PRINT shows with the start value of `@%`
+const STR_FORMAT: NumberFormat = NumberFormat {
+    width: 0,
+    digits: 9,
+    style: NumberStyle::General,
+    for_str: false,
+};
+
+impl NumberFormat {
+    /// The format of an `@%` value. A count of digits that is above 10 is 10.
+    /// A count of 0 is 10 in the general and exponent formats (ROM &9EEA).
+    fn from_value(value: i32) -> Self {
+        let [width, digits, style, for_str] = value.to_le_bytes();
+        let style = match style {
+            1 => NumberStyle::Exponent,
+            2 => NumberStyle::Fixed,
+            _ => NumberStyle::General,
+        };
+        let digits = match digits {
+            0 if style == NumberStyle::Fixed => 0,
+            0 => 10,
+            count => count.min(10),
+        };
+        Self {
+            width: width as usize,
+            digits: digits as usize,
+            style,
+            for_str: for_str != 0,
+        }
+    }
+
+    /// The text of a real value in this format, with no field
+    fn format_real(&self, value: f64) -> String {
+        if !value.is_finite() {
+            return value.to_string();
+        }
+        let text = match self.style {
+            NumberStyle::General => general_text(value.abs(), self.digits),
+            NumberStyle::Exponent => exponent_text(value.abs(), self.digits),
+            NumberStyle::Fixed => fixed_text(value.abs(), self.digits),
+        };
+        if value < 0.0 {
+            format!("-{}", text)
+        } else {
+            text
+        }
+    }
+
+    /// The text of an integer value in this format, with no field. In the
+    /// general format, an integer shows all its digits. In the other formats,
+    /// it shows as a real value does.
+    fn format_integer(&self, value: i32) -> String {
+        if self.style == NumberStyle::General {
+            value.to_string()
+        } else {
+            self.format_real(value as f64)
+        }
+    }
+}
+
+/// Round a value that is more than 0 to `count` significant digits, with a 5
+/// rounded up, as the ROM adds 5 at the digit after the last. Give the digits
+/// and the decimal exponent of the first digit. A count of 0 gives the digit
+/// 1 at the next exponent if the first digit is 5 or more. Give `None` if the
+/// value rounds to 0.
+fn round_digits(value: f64, count: i32) -> Option<(String, i32)> {
+    let scientific = format!("{:.20e}", value);
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("exponent format has an exponent");
+    let exponent: i32 = exponent.parse().expect("exponent is an integer");
+    let all_digits = mantissa.replace('.', "").into_bytes();
+
+    if count < 0 {
+        return None;
+    }
+    let count = count as usize;
+    if count == 0 {
+        return (all_digits[0] >= b'5').then(|| ("1".to_string(), exponent + 1));
+    }
+
+    let mut digits = all_digits[..count].to_vec();
+    if all_digits[count] >= b'5' {
+        // Add 1 to the last digit, and carry to the left
+        let mut index = count;
+        loop {
+            if index == 0 {
+                // All digits were 9: the value is the next power of 10
+                let mut text = "1".to_string();
+                text.push_str(&"0".repeat(count - 1));
+                return Some((text, exponent + 1));
+            }
+            index -= 1;
+            if digits[index] == b'9' {
+                digits[index] = b'0';
+            } else {
+                digits[index] += 1;
+                break;
+            }
+        }
+    }
+    Some((
+        String::from_utf8(digits).expect("digits are ASCII"),
+        exponent,
+    ))
+}
+
+/// The general format of a value that is 0 or more. If the exponent is from
+/// -7 up to (not including) the count of digits, the text is plain decimal.
+/// Otherwise the text has a mantissa and an exponent, for example `1.5E10`.
+fn general_text(value: f64, count: usize) -> String {
+    let Some((digits, exponent)) = (value > 0.0)
+        .then(|| round_digits(value, count as i32))
+        .flatten()
+    else {
+        return "0".to_string();
+    };
+
+    if (-7..count as i32).contains(&exponent) {
+        let (whole, fraction) = if exponent >= 0 {
+            let split = exponent as usize + 1;
+            (digits[..split].to_string(), digits[split..].to_string())
+        } else {
+            let zeros = "0".repeat((-exponent - 1) as usize);
+            ("0".to_string(), format!("{}{}", zeros, digits))
+        };
+        let fraction = fraction.trim_end_matches('0');
+        if fraction.is_empty() {
+            whole
+        } else {
+            format!("{}.{}", whole, fraction)
+        }
+    } else {
+        let fraction = digits[1..].trim_end_matches('0');
+        if fraction.is_empty() {
+            format!("{}E{}", &digits[..1], exponent)
+        } else {
+            format!("{}.{}E{}", &digits[..1], fraction, exponent)
+        }
+    }
+}
+
+/// The exponent format of a value that is 0 or more: one digit, a point, the
+/// other digits and the exponent. The exponent part always has 4 characters:
+/// a space is in the place of the minus sign, and a space follows an exponent
+/// of one digit (ROM &A02B).
+fn exponent_text(value: f64, count: usize) -> String {
+    let (digits, exponent) = (value > 0.0)
+        .then(|| round_digits(value, count as i32))
+        .flatten()
+        .unwrap_or_else(|| ("0".repeat(count), 0));
+    let mut text = format!("{}.{}E{}", &digits[..1], &digits[1..], exponent);
+    if exponent >= 0 {
+        text.push(' ');
+    }
+    if exponent.abs() < 10 {
+        text.push(' ');
+    }
+    text
+}
+
+/// The fixed format of a value that is 0 or more, with `places` decimal
+/// places. The text always has a point, also with 0 places. If the value
+/// needs more than 10 significant digits, the text is the general format
+/// with 10 digits (ROM &9F50).
+fn fixed_text(value: f64, places: usize) -> String {
+    let rounded = if value > 0.0 {
+        // The decimal exponent of the value before it is rounded
+        let exponent: i32 = format!("{:e}", value)
+            .split_once('e')
+            .and_then(|(_, exponent)| exponent.parse().ok())
+            .expect("exponent format has an exponent");
+        let count = places as i32 + exponent + 1;
+        if count > 10 {
+            return general_text(value, 10);
+        }
+        round_digits(value, count)
+    } else {
+        None
+    };
+    let (digits, exponent) = rounded.unwrap_or_else(|| ("0".to_string(), 0));
+    if places as i32 + exponent + 1 > 10 {
+        return general_text(value, 10);
+    }
+
+    // Each digit after the rounded digits is 0
+    if exponent >= 0 {
+        let whole = exponent as usize + 1;
+        let digits = format!("{:0<width$}", digits, width = whole + places);
+        format!("{}.{}", &digits[..whole], &digits[whole..])
+    } else {
+        let zeros = "0".repeat((-exponent - 1) as usize);
+        let fraction = format!("{}{}", zeros, digits);
+        format!("0.{:0<width$}", fraction, width = places)
+    }
+}
 
 /// Put the text of a number at the right of a field of `width` characters, as
 /// PRINT does. A text that is longer than the field does not change.
@@ -234,45 +456,7 @@ fn format_real(value: f64, exact: bool) -> String {
 /// 1E-7 up to (not including) 1E9, the text is plain decimal. Otherwise the text
 /// has a mantissa and an exponent, for example `1.5E10`.
 fn format_number(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    if !value.is_finite() {
-        return value.to_string();
-    }
-
-    // Round one time, then make each form from the same 9 digits
-    let scientific = format!("{:.8e}", value.abs());
-    let (mantissa, exponent) = scientific
-        .split_once('e')
-        .expect("exponent format has an exponent");
-    let exponent: i32 = exponent.parse().expect("exponent is an integer");
-    let digits = mantissa.replace('.', "");
-
-    let text = if (-7..9).contains(&exponent) {
-        let (whole, fraction) = if exponent >= 0 {
-            let split = exponent as usize + 1;
-            (digits[..split].to_string(), digits[split..].to_string())
-        } else {
-            let zeros = "0".repeat((-exponent - 1) as usize);
-            ("0".to_string(), format!("{}{}", zeros, digits))
-        };
-        let fraction = fraction.trim_end_matches('0');
-        if fraction.is_empty() {
-            whole
-        } else {
-            format!("{}.{}", whole, fraction)
-        }
-    } else {
-        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
-        format!("{}E{}", mantissa, exponent)
-    };
-
-    if value < 0.0 {
-        format!("-{}", text)
-    } else {
-        text
-    }
+    STR_FORMAT.format_real(value)
 }
 
 /// File handle for file I/O operations
@@ -957,7 +1141,7 @@ impl Executor {
     /// The field rules are the rules of BBC BASIC 2 (the PRINT routine at
     /// &8D83 to &8E1F of the ROM, and the PRINT page of the BBC Micro User
     /// Guide). At the start of the statement, a number prints at the right of a
-    /// field of `PRINT_FIELD_WIDTH` characters. A `;` turns the field off, so
+    /// field of the width in byte 1 of `@%` (issue 166). A `;` turns the field off, so
     /// that the numbers after it have no padding. A `,` first prints spaces up
     /// to the next field boundary (none if the column is on a boundary), then
     /// turns the field on again. A string is never padded. `TAB`, `SPC` and `'`
@@ -968,7 +1152,7 @@ impl Executor {
         // After ~, numeric items print in hex until the next comma or semicolon
         let mut hex = false;
         // The width of the field of the next number: 0 after a semicolon
-        let mut field = PRINT_FIELD_WIDTH;
+        let mut field = self.number_format().width;
         for item in items {
             match item {
                 PrintItem::Expression(expr) => {
@@ -988,11 +1172,14 @@ impl Executor {
                 }
                 PrintItem::Comma => {
                     hex = false;
-                    field = PRINT_FIELD_WIDTH;
-                    // Comma moves to the next field boundary
-                    let past_boundary = self.column % PRINT_FIELD_WIDTH;
-                    if past_boundary != 0 {
-                        self.print_output(&" ".repeat(PRINT_FIELD_WIDTH - past_boundary));
+                    field = self.number_format().width;
+                    // Comma moves to the next field boundary. A width of 0
+                    // has no boundaries (ROM &8DA6).
+                    if field != 0 {
+                        let past_boundary = self.column % field;
+                        if past_boundary != 0 {
+                            self.print_output(&" ".repeat(field - past_boundary));
+                        }
                     }
                 }
                 PrintItem::NewLine => self.print_new_line(),
@@ -1040,13 +1227,13 @@ impl Executor {
     /// Format an expression for printing. The flag is true for a number.
     fn format_expression(&mut self, expr: &Expression) -> Result<(String, bool)> {
         match expr {
-            Expression::Integer(_) => Ok((self.eval_integer(expr)?.to_string(), true)),
+            Expression::Integer(_) => self.format_integer_item(expr),
             Expression::Real(_) => self.format_real_item(expr),
             Expression::String(_) => Ok((self.eval_string(expr)?, false)),
             Expression::Member { structure, member } => self.format_member(structure, member),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
-                    Ok((self.eval_integer(expr)?.to_string(), true))
+                    self.format_integer_item(expr)
                 } else if name.ends_with('$') {
                     Ok((self.eval_string(expr)?, false))
                 } else {
@@ -1075,13 +1262,52 @@ impl Executor {
             // function, also for a string function such as FNx$.
             _ if self.is_string_expr(expr) => Ok((self.eval_string(expr)?, false)),
             _ if self.is_real_expr(expr) => self.format_real_item(expr),
-            _ => Ok((self.eval_integer(expr)?.to_string(), true)),
+            _ => self.format_integer_item(expr),
         }
     }
 
-    /// Format a real expression for printing, with the number flag
+    /// Format a real expression for printing, with the number flag. PRINT
+    /// uses the format of `@%`. PRINT# uses the text that reads back.
     fn format_real_item(&mut self, expr: &Expression) -> Result<(String, bool)> {
-        Ok((format_real(self.eval_real(expr)?, self.exact_reals), true))
+        let value = self.eval_real(expr)?;
+        let text = if self.exact_reals {
+            format_real(value, true)
+        } else {
+            self.number_format().format_real(value)
+        };
+        Ok((text, true))
+    }
+
+    /// Format an integer expression for printing, with the number flag. PRINT
+    /// uses the format of `@%`. PRINT# shows all the digits.
+    fn format_integer_item(&mut self, expr: &Expression) -> Result<(String, bool)> {
+        let value = self.eval_integer(expr)?;
+        let text = if self.exact_reals {
+            value.to_string()
+        } else {
+            self.number_format().format_integer(value)
+        };
+        Ok((text, true))
+    }
+
+    /// The number format of the value of `@%` (issue 166)
+    fn number_format(&self) -> NumberFormat {
+        let value = self
+            .variables
+            .get_integer_var(PRINT_FORMAT_NAME)
+            .unwrap_or(PRINT_FORMAT_DEFAULT);
+        NumberFormat::from_value(value)
+    }
+
+    /// The number format of STR$: the format of `@%` if its byte 4 is not 0,
+    /// otherwise the general format with 9 digits (ROM &B0AC)
+    fn str_format(&self) -> NumberFormat {
+        let format = self.number_format();
+        if format.for_str {
+            format
+        } else {
+            STR_FORMAT
+        }
     }
 
     /// Format the `=` result of a user function for PRINT. A string prints as
@@ -1991,14 +2217,16 @@ impl Executor {
 
     /// The LVAR text: one line for each scalar variable, then one line for
     /// each array with its top index in each dimension, in name order.
-    /// A resident integer variable (A% to Z%) is not listed when it is 0.
+    /// A resident integer variable (@% and A% to Z%) is not listed when it has
+    /// its start value.
     pub fn variable_listing(&self) -> Vec<String> {
         let scalars = self
             .variables
             .scalars()
             .into_iter()
             .filter(|(name, variable)| {
-                !(is_resident_integer(name) && **variable == Variable::Integer(0))
+                !(is_resident_integer(name)
+                    && **variable == Variable::Integer(resident_default(name)))
             })
             .map(|(name, variable)| match variable {
                 Variable::Integer(value) => format!("{} = {}", name, value),
@@ -3648,19 +3876,25 @@ impl Executor {
                         line: None,
                     });
                 }
+                // Byte 4 of @% selects the format (issue 166). Read @% after
+                // the argument, as the ROM does.
                 // Check if the expression is explicitly a Real or contains decimal point
                 match &args[0] {
-                    Expression::Real(val) => Ok(format_number(*val)),
-                    Expression::Integer(val) => Ok(val.to_string()),
+                    Expression::Real(val) => Ok(self.str_format().format_real(*val)),
+                    Expression::Integer(val) => Ok(self.str_format().format_integer(*val)),
                     // Select the evaluator one time, as PRINT does. A second
                     // try after an error runs the argument again, and a
                     // recursive function then doubles its calls at each
                     // level (issue 151).
                     // A real value gives the PRINT text (issue 181).
                     argument if self.is_real_expr(argument) => {
-                        Ok(format_number(self.eval_real(argument)?))
+                        let value = self.eval_real(argument)?;
+                        Ok(self.str_format().format_real(value))
                     }
-                    argument => Ok(self.eval_integer(argument)?.to_string()),
+                    argument => {
+                        let value = self.eval_integer(argument)?;
+                        Ok(self.str_format().format_integer(value))
+                    }
                 }
             }
             _ => {
