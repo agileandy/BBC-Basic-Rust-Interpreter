@@ -13,6 +13,7 @@ mod issue_106_directory_functions;
 mod issue_108_local_proc_parameters;
 mod issue_112_extension_string_functions;
 mod issue_11_sinewave_example;
+mod issue_120_endproc_in_function;
 mod issue_13_statements_on_a_line;
 mod issue_14_array_size;
 mod issue_15_scalar_and_array_names;

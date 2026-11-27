@@ -144,6 +144,9 @@ impl ProgramLines {
 struct Cursor<'a> {
     lines: &'a ProgramLines,
     current: Option<Position>,
+    /// The number of local scopes at the start of this run. A scope above
+    /// it is a PROC that this run called, so ENDPROC can close it.
+    proc_floor: usize,
 }
 
 impl Cursor<'_> {
@@ -573,12 +576,13 @@ fn run_lines(
     failure: &RefCell<BodyFailure>,
     start: Option<Position>,
 ) -> Result<RunOutcome, String> {
+    let local_depth = executor.local_depth();
     let mut cursor = Cursor {
         lines,
         current: start,
+        proc_floor: local_depth,
     };
     let mut previous_line = None;
-    let local_depth = executor.local_depth();
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
@@ -667,6 +671,8 @@ fn run_function_body(
     let mut cursor = Cursor {
         lines,
         current: Some(def_position),
+        // The scope of the function is open: ENDPROC cannot close it
+        proc_floor: executor.local_depth(),
     };
     cursor.next();
 
@@ -898,6 +904,11 @@ fn step(
             Ok(Flow::Next)
         }
         Statement::EndProc => {
+            // With no PROC open in this run, the newest scope is a function
+            // or a caller: change nothing
+            if executor.local_depth() <= program.proc_floor {
+                return Err(BBCBasicError::NoProc.into());
+            }
             executor
                 .exit_local_scope()
                 .map_err(|_| BBCBasicError::NoProc)?;
