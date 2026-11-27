@@ -150,3 +150,4 @@ mod issue_165_single_line_function_error_line;
 mod issue_162_swap;
 mod issue_159_print_apostrophe;
 mod issue_160_if_with_no_then;
+mod issue_169_ide_frame;

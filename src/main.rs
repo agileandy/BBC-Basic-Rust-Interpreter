@@ -3,6 +3,7 @@ use bbc_basic_interpreter::{
     program::{parse_list_range, ProgramStore},
     runner::{run_program_with_outcome, run_typed_line, RunOutcome},
     tokenizer::{detokenize, tokenize},
+    ui,
 };
 use std::io::{self, Write};
 
@@ -25,6 +26,16 @@ fn install_closed_output_hook() {
 
 fn main() {
     install_closed_output_hook();
+
+    // `--ide [file]` starts the IDE. No argument starts the command prompt.
+    match ui::parse_args(std::env::args().skip(1)) {
+        Ok(ui::Start::Prompt) => {}
+        Ok(ui::Start::Ide(file_name)) => std::process::exit(ui::main(file_name)),
+        Err(usage) => {
+            eprintln!("{}", usage);
+            std::process::exit(2);
+        }
+    }
 
     println!("BBC BASIC Interpreter v0.1.0");
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
