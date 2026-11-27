@@ -7,6 +7,7 @@ mod console;
 // Unit tests never read stdin, so the stdin reader is not used in them.
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
+mod matrix;
 mod vdu;
 mod whole_array;
 
@@ -583,6 +584,11 @@ impl Executor {
                 operator,
                 value,
             } => self.execute_array_assign(target, operator.as_ref(), value),
+            Statement::Matrix {
+                statement,
+                target,
+                source,
+            } => self.execute_matrix_statement(*statement, target, source),
             Statement::MemoryAssignment {
                 width,
                 address,
@@ -2240,6 +2246,9 @@ impl Executor {
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 real_to_integer(self.eval_list_function(name, indices)?)
             }
+            Expression::ArrayAccess { name, indices } if self.is_matrix_call(name) => {
+                real_to_integer(self.eval_matrix_function(name, indices)?)
+            }
             Expression::Variable(name) => {
                 // Check for pseudo-variables first
                 if name == "TIME" {
@@ -2457,6 +2466,9 @@ impl Executor {
             }
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 self.eval_list_function(name, indices)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_matrix_call(name) => {
+                self.eval_matrix_function(name, indices)
             }
             Expression::Variable(name) => {
                 // Check for pseudo-variables first

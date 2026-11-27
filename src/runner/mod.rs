@@ -1390,6 +1390,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         // FOR EACH without matching NEXT is an extension error (issue #141).
         // BBC BASIC does not use ERR 156.
         BBCBasicError::MissingNext => 156,
+        // Singular matrix is an extension error. BBC BASIC does not use ERR 157 (issue #190).
+        BBCBasicError::SingularMatrix => 157,
         _ => 255,
     }
 }
