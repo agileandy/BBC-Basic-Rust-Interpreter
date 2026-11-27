@@ -1076,7 +1076,7 @@ impl Executor {
     }
 
     /// Free the blocks that `DIM name size` reserved. The next block
-    /// starts at TOP. CLEAR and the start of a run use this.
+    /// starts at TOP. `clear_variables` uses this.
     pub fn reset_dim_space(&mut self) {
         self.dim_space_used = 0;
     }
@@ -1216,7 +1216,7 @@ impl Executor {
         Ok(())
     }
 
-    /// Remove all variables and arrays, close the loops, the calls and the
+    /// Remove all variables, arrays and DIM blocks, close the loops, the calls and the
     /// LOCAL scopes, and move the DATA pointer to the first value. The
     /// resident integer variables A% to Z%, the procedures and the
     /// functions stay. CLEAR, RUN, NEW, LOAD and CHAIN use this.
