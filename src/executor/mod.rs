@@ -957,6 +957,23 @@ impl Executor {
                         | BinaryOperator::GreaterThan
                         | BinaryOperator::GreaterThanOrEqual
                 ) {
+                    // If one operand is a string, compare the two operands as
+                    // strings. A numeric operand then gives a type mismatch.
+                    // The String order is the ASCII order that BBC BASIC uses.
+                    if self.is_string_expr(left) || self.is_string_expr(right) {
+                        let left_val = self.eval_string(left)?;
+                        let right_val = self.eval_string(right)?;
+                        let is_true = match op {
+                            BinaryOperator::Equal => left_val == right_val,
+                            BinaryOperator::NotEqual => left_val != right_val,
+                            BinaryOperator::LessThan => left_val < right_val,
+                            BinaryOperator::LessThanOrEqual => left_val <= right_val,
+                            BinaryOperator::GreaterThan => left_val > right_val,
+                            _ => left_val >= right_val,
+                        };
+                        return Ok(if is_true { -1 } else { 0 });
+                    }
+
                     let left_val = self.eval_number(left)?;
                     let right_val = self.eval_number(right)?;
                     let is_true = match op {
@@ -1182,6 +1199,23 @@ impl Executor {
                     _ => false,
                 }
             }
+        }
+    }
+
+    /// Tell if an expression gives a string value.
+    fn is_string_expr(&self, expr: &Expression) -> bool {
+        use crate::parser::BinaryOperator;
+        match expr {
+            Expression::String(_) => true,
+            Expression::Variable(name)
+            | Expression::ArrayAccess { name, .. }
+            | Expression::FunctionCall { name, .. } => name.ends_with('$'),
+            Expression::BinaryOp {
+                op: BinaryOperator::Add | BinaryOperator::StringConcat,
+                left,
+                right,
+            } => self.is_string_expr(left) || self.is_string_expr(right),
+            _ => false,
         }
     }
 

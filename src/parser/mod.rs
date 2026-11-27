@@ -2217,6 +2217,8 @@ fn parse_expr_precedence(tokens: &[Token], pos: &mut usize, min_prec: u8) -> Res
                             BinaryOperator::LessThanOrEqual
                         };
                         (30, op, 2) // Consume 2 tokens
+                    } else if *ch == '<' && matches!(tokens[*pos + 1], Token::Operator('>')) {
+                        (30, BinaryOperator::NotEqual, 2)
                     } else if let Some(p) = get_precedence(*ch) {
                         if let Some(binary_op) = char_to_binary_op(*ch) {
                             (p, binary_op, 1)
