@@ -56,6 +56,52 @@ fn parse_leading_number(text: &str) -> f64 {
     text[..end].parse::<f64>().unwrap_or(0.0)
 }
 
+/// Make the PRINT text for a real value, as a BBC Micro does. The value is rounded
+/// to 9 significant digits, without trailing zeros. If the absolute value is from
+/// 1E-7 up to (not including) 1E9, the text is plain decimal. Otherwise the text
+/// has a mantissa and an exponent, for example `1.5E10`.
+fn format_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    if !value.is_finite() {
+        return value.to_string();
+    }
+
+    // Round one time, then make each form from the same 9 digits
+    let scientific = format!("{:.8e}", value.abs());
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("exponent format has an exponent");
+    let exponent: i32 = exponent.parse().expect("exponent is an integer");
+    let digits = mantissa.replace('.', "");
+
+    let text = if (-7..9).contains(&exponent) {
+        let (whole, fraction) = if exponent >= 0 {
+            let split = exponent as usize + 1;
+            (digits[..split].to_string(), digits[split..].to_string())
+        } else {
+            let zeros = "0".repeat((-exponent - 1) as usize);
+            ("0".to_string(), format!("{}{}", zeros, digits))
+        };
+        let fraction = fraction.trim_end_matches('0');
+        if fraction.is_empty() {
+            whole
+        } else {
+            format!("{}.{}", whole, fraction)
+        }
+    } else {
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        format!("{}E{}", mantissa, exponent)
+    };
+
+    if value < 0.0 {
+        format!("-{}", text)
+    } else {
+        text
+    }
+}
+
 /// File handle for file I/O operations
 #[derive(Debug)]
 enum FileHandle {
@@ -483,7 +529,7 @@ impl Executor {
     fn format_expression(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::Integer(_) => Ok(self.eval_integer(expr)?.to_string()),
-            Expression::Real(_) => Ok(self.eval_real(expr)?.to_string()),
+            Expression::Real(_) => Ok(format_number(self.eval_real(expr)?)),
             Expression::String(_) => self.eval_string(expr),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
@@ -491,18 +537,18 @@ impl Executor {
                 } else if name.ends_with('$') {
                     self.eval_string(expr)
                 } else {
-                    Ok(self.eval_real(expr)?.to_string())
+                    Ok(format_number(self.eval_real(expr)?))
                 }
             }
             // VAL gives a real value, so do not try it as an integer first
             Expression::FunctionCall { name, .. } if name == "VAL" => {
-                Ok(self.eval_real(expr)?.to_string())
+                Ok(format_number(self.eval_real(expr)?))
             }
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
             // function, also for a string function such as FNx$.
             _ if self.is_string_expr(expr) => self.eval_string(expr),
-            _ if self.is_real_expr(expr) => Ok(self.eval_real(expr)?.to_string()),
+            _ if self.is_real_expr(expr) => Ok(format_number(self.eval_real(expr)?)),
             _ => Ok(self.eval_integer(expr)?.to_string()),
         }
     }
@@ -1888,7 +1934,7 @@ impl Executor {
                 }
                 // Check if the expression is explicitly a Real or contains decimal point
                 match &args[0] {
-                    Expression::Real(val) => Ok(val.to_string()),
+                    Expression::Real(val) => Ok(format_number(*val)),
                     Expression::Integer(val) => Ok(val.to_string()),
                     _ => {
                         // Try to evaluate - prefer real if it works
@@ -1897,7 +1943,7 @@ impl Executor {
                             if real_val.fract() == 0.0 {
                                 Ok((real_val as i32).to_string())
                             } else {
-                                Ok(real_val.to_string())
+                                Ok(format_number(real_val))
                             }
                         } else if let Ok(int_val) = self.eval_integer(&args[0]) {
                             Ok(int_val.to_string())
@@ -2807,6 +2853,34 @@ mod tests {
         assert_eq!(parse_leading_number("1E"), 1.0);
         assert_eq!(parse_leading_number("2e+2x"), 200.0);
         assert_eq!(parse_leading_number("1.5.6"), 1.5);
+    }
+
+    #[test]
+    fn test_format_number_rounds_to_nine_significant_digits() {
+        assert_eq!(format_number(1.0), "1");
+        assert_eq!(format_number(0.9999999999999999), "1");
+        assert_eq!(format_number(4.999999999999999), "5");
+        assert_eq!(format_number(1.0 / 3.0), "0.333333333");
+        assert_eq!(format_number(3.5), "3.5");
+        assert_eq!(format_number(-2.25), "-2.25");
+        assert_eq!(format_number(123456789.0), "123456789");
+    }
+
+    #[test]
+    fn test_format_number_uses_exponent_outside_plain_range() {
+        assert_eq!(format_number(1234567890.0), "1.23456789E9");
+        assert_eq!(format_number(1e9), "1E9");
+        assert_eq!(format_number(1.5e10), "1.5E10");
+        assert_eq!(format_number(1e-8), "1E-8");
+        assert_eq!(format_number(-1e-8), "-1E-8");
+        assert_eq!(format_number(1e-7), "0.0000001");
+        assert_eq!(format_number(999999999.6), "1E9");
+    }
+
+    #[test]
+    fn test_format_number_zero_has_no_sign() {
+        assert_eq!(format_number(0.0), "0");
+        assert_eq!(format_number(-0.0), "0");
     }
     use crate::parser::BinaryOperator;
 
