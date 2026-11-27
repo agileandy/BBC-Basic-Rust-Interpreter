@@ -45,7 +45,7 @@ fn test_a_relative_plot_past_the_i32_limit_saturates_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_a_relative_plot_below_the_i32_limit_saturates_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn test_point_with_a_large_origin_gives_off_the_screen() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n-1\n");
+    assert_eq!(output, "        -1\n        -1\n");
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn test_a_fill_at_the_i32_limit_returns() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn test_a_relative_plot_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3330\n30\n");
+    assert_eq!(output, "         3330\n         30\n");
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn test_a_rectangle_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "333300\n");
+    assert_eq!(output, "         333300\n");
 }
 
 #[test]
@@ -179,5 +179,5 @@ fn test_a_circle_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "33300\n");
+    assert_eq!(output, "         33300\n");
 }

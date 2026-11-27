@@ -75,7 +75,7 @@ fn test_correct_statements_still_run() {
         "60 PRINT B(1) + A",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "YES\n1\n2\n0\n");
+    assert_eq!(output, "YES\n         1\n         2\n         0\n");
 }
 
 /// Run one typed line with no stored program and return the result and the output.
@@ -121,7 +121,7 @@ fn test_statement_after_repeat_with_no_colon_runs() {
         "30 PRINT I%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn test_memory_forms_still_run() {
         "70 PRINT ?A%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "9\n-5\n44\n");
+    assert_eq!(output, "         9\n        -5\n        44\n");
 }
 
 #[test]

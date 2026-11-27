@@ -55,7 +55,7 @@ fn test_failed_load_keeps_variables_and_handler() {
 
     assert!(status.success());
     assert!(output.contains(UNCHANGED), "{}", output);
-    assert!(output.contains("> 7\n"), "{}", output);
+    assert!(output.contains(">          7\n"), "{}", output);
     assert!(output.contains("HANDLED"), "{}", output);
     std::fs::remove_dir_all(&dir).ok();
 }

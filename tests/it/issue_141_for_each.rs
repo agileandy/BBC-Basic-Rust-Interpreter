@@ -16,7 +16,7 @@ fn test_for_each_visits_each_number_of_a_list() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n1.5\n-2\nDONE\n");
+    assert_eq!(output, "         3\n       1.5\n        -2\nDONE\n");
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn test_for_each_with_an_integer_variable_and_next_with_the_name() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n8\n");
+    assert_eq!(output, "         7\n         8\n");
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_a_for_each_in_a_for_of_a_variable_named_each_ends_with_its_own_name() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1A\n2A\n");
+    assert_eq!(output, "         1A\n         2A\n");
 }
 
 #[test]
@@ -151,7 +151,10 @@ fn test_for_each_gives_a_numeric_variable_a_collection_boolean_or_null_as_listge
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n-1\n0\n0\n-1\n0\n0\n");
+    assert_eq!(
+        output,
+        "         5\n        -1\n         0\n         0\n        -1\n         0\n         0\n"
+    );
 }
 
 #[test]
@@ -210,7 +213,7 @@ fn test_a_trapped_type_mismatch_at_next_closes_the_loop_as_for_a_for_loop() {
     ]);
 
     assert_eq!(result, Err("No FOR at line 70".to_string()));
-    assert_eq!(output, "1\nType mismatch 50\n");
+    assert_eq!(output, "         1\nType mismatch 50\n");
 }
 
 #[test]
@@ -277,7 +280,10 @@ fn test_nested_for_each_loops() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1X\n1Y\n2X\n2Y\n");
+    assert_eq!(
+        output,
+        "         1X\n         1Y\n         2X\n         2Y\n"
+    );
 }
 
 #[test]
@@ -290,7 +296,7 @@ fn test_for_each_in_a_for_loop() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n20\n20\n40\n");
+    assert_eq!(output, "        10\n        20\n        20\n        40\n");
 }
 
 #[test]
@@ -310,7 +316,7 @@ fn test_for_each_in_a_procedure_and_endproc_closes_it() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n1\nI1\nI2\n");
+    assert_eq!(output, "         1\n         1\nI1\nI2\n");
 }
 
 #[test]
@@ -324,7 +330,7 @@ fn test_a_body_that_adds_an_element_visits_it() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -339,7 +345,7 @@ fn test_a_body_that_removes_elements_does_not_read_past_the_end() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\nLEFT 2\n");
+    assert_eq!(output, "         1\n         2\nLEFT 2\n");
 }
 
 #[test]
@@ -364,7 +370,7 @@ fn test_a_numeric_variable_with_a_string_element_is_type_mismatch_at_the_next_li
     ]);
 
     assert_eq!(result, Err("Type mismatch at line 40".to_string()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -418,7 +424,7 @@ fn test_a_trapped_error_in_a_for_each_body_goes_to_the_handler() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\nDivision by zero AT 40\n");
+    assert_eq!(output, "         1\nDivision by zero AT 40\n");
 }
 
 #[test]
@@ -433,7 +439,7 @@ fn test_goto_out_of_a_for_each_loop_and_a_new_loop_after_it() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\nM1\nM2\n");
+    assert_eq!(output, "         1\nM1\nM2\n");
 }
 
 #[test]
@@ -449,7 +455,10 @@ fn test_variables_and_arrays_named_each_and_in_still_work() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "123\n5E\n13\n12\n");
+    assert_eq!(
+        output,
+        "         1         2         3\n         5E\n        13\n         1         2\n"
+    );
 }
 
 #[test]

@@ -34,7 +34,7 @@ fn test_upper_and_lower_in_assignment_comparison_and_argument() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "xy\nYES\n2\nAb\nab\nQR\n");
+    assert_eq!(output, "xy\nYES\n         2\nAb\nab\nQR\n");
 }
 
 #[test]

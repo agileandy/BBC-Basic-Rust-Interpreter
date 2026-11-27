@@ -11,7 +11,7 @@ fn print_of(expression: &str) -> (Result<(), String>, String) {
 #[test]
 fn test_negative_exponent_in_a_variable_gives_a_fraction() {
     let (result, output) = run(&["10 N% = -1", "20 PRINT 2 ^ N%", "30 END"]);
-    assert_eq!((result, output), (Ok(()), "0.5\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "       0.5\n".to_string()));
 }
 
 #[test]
@@ -29,14 +29,14 @@ fn test_power_out_of_integer_range_prints_a_real_value() {
 #[test]
 fn test_whole_number_powers_print_the_exact_value() {
     for (expression, expected) in [
-        ("2 ^ 3", "8\n"),
-        ("10 ^ 2", "100\n"),
-        ("3 ^ 4", "81\n"),
-        ("7 ^ 2", "49\n"),
-        ("2 ^ 10", "1024\n"),
-        ("10 ^ 8", "100000000\n"),
-        ("3 ^ 2 + 1", "10\n"),
-        ("(-2) ^ 3", "-8\n"),
+        ("2 ^ 3", "         8\n"),
+        ("10 ^ 2", "       100\n"),
+        ("3 ^ 4", "        81\n"),
+        ("7 ^ 2", "        49\n"),
+        ("2 ^ 10", "      1024\n"),
+        ("10 ^ 8", " 100000000\n"),
+        ("3 ^ 2 + 1", "        10\n"),
+        ("(-2) ^ 3", "        -8\n"),
     ] {
         assert_eq!(
             print_of(expression),
@@ -59,14 +59,14 @@ fn test_whole_number_powers_convert_exactly_to_an_integer() {
     ]);
     assert_eq!(
         (result, output),
-        (Ok(()), "8 100 81 1000000000\n".to_string())
+        (Ok(()), "         8 100 81 1000000000\n".to_string())
     );
 }
 
 #[test]
 fn test_power_used_as_an_integer_converts_the_real_value() {
     let (result, output) = run(&["10 PRINT 10 ^ 2 DIV 3; \" \"; 2 ^ 3 MOD 5", "20 END"]);
-    assert_eq!((result, output), (Ok(()), "33 3\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        33 3\n".to_string()));
 }
 
 #[test]

@@ -12,7 +12,7 @@ fn test_swap_2_reals() {
         "30 PRINT A; \" \"; B",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2.25 1.5\n");
+    assert_eq!(output, "      2.25 1.5\n");
 }
 
 #[test]
@@ -23,14 +23,14 @@ fn test_swap_2_integers() {
         "30 PRINT A%; \" \"; B%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7 3\n");
+    assert_eq!(output, "         7 3\n");
 }
 
 #[test]
 fn test_swap_a_resident_integer_with_no_assignment() {
     let (result, output) = run(&["10 X% = 5", "20 SWAP Q%, X%", "30 PRINT Q%; \" \"; X%"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5 0\n");
+    assert_eq!(output, "         5 0\n");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_swap_an_element_and_a_variable() {
         "40 PRINT A%(2); \" \"; B%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "8 5\n");
+    assert_eq!(output, "         8 5\n");
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn test_indices_are_evaluated_one_time_before_the_exchange() {
         "40 PRINT I; \" \"; A(1); \" \"; A(3)",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3 1 30\n");
+    assert_eq!(output, "         3 1 30\n");
 }
 
 #[test]
@@ -93,7 +93,10 @@ fn test_swap_elements_in_a_bubble_sort() {
         "80 DATA 4, 1, 5, 2, 3",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2 3 4 5 \n");
+    assert_eq!(
+        output,
+        "         1          2          3          4          5 \n"
+    );
 }
 
 #[test]
@@ -104,7 +107,7 @@ fn test_swap_an_integer_and_a_real_converts_the_values() {
         "30 PRINT A%; \" \"; B",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7 2\n");
+    assert_eq!(output, "         7 2\n");
 }
 
 #[test]
@@ -191,7 +194,7 @@ fn test_lower_case_swap_is_a_variable_and_an_array_name() {
         "30 PRINT swap; \" \"; swap(1)",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "4 5\n");
+    assert_eq!(output, "         4 5\n");
 }
 
 #[test]

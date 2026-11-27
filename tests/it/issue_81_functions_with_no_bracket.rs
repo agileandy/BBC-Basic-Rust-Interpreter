@@ -22,7 +22,7 @@ fn test_rnd_without_bracket_is_an_integer() {
     let (result, output) = run(&["10 X = RND", "20 PRINT X = INT(X)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn test_rnd_1_stays_below_1() {
     let (result, output) = run(&["10 PRINT RND(1) < 1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_vpos_gives_0() {
     let (result, output) = run(&["10 PRINT VPOS"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -68,5 +68,5 @@ fn test_variables_that_start_with_the_words_keep_behaviour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7345\n");
+    assert_eq!(output, "         7345\n");
 }

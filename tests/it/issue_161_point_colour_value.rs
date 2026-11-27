@@ -13,7 +13,7 @@ fn test_point_gives_1_for_a_set_pixel_in_a_2_colour_mode() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_point_gives_0_for_a_clear_pixel() {
     let (result, output) = run_lines(&["10 MODE 0", "20 PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_point_gives_minus_1_off_the_screen_in_each_direction() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n-1\n-1\n-1\n");
+    assert_eq!(output, "        -1\n        -1\n        -1\n        -1\n");
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn test_point_at_the_screen_edge_is_on_the_screen() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n0\n");
+    assert_eq!(output, "         0\n         0\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_point_off_the_screen_uses_the_origin() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n-1\n-1\n");
+    assert_eq!(output, "         0\n        -1\n        -1\n");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_point_minus_10_minus_10_gives_minus_1() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n-1\n");
+    assert_eq!(output, "         1\n        -1\n");
 }
 
 #[test]
@@ -101,5 +101,5 @@ fn test_point_gives_0_for_a_pixel_drawn_in_colour_0() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }

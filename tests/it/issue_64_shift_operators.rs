@@ -11,22 +11,22 @@ fn assert_prints(source: &[&str], expected: &str) {
 
 #[test]
 fn test_left_shift() {
-    assert_prints(&["10 PRINT 1 << 4"], "16\n");
+    assert_prints(&["10 PRINT 1 << 4"], "        16\n");
 }
 
 #[test]
 fn test_right_shift() {
-    assert_prints(&["10 PRINT 256 >> 4"], "16\n");
+    assert_prints(&["10 PRINT 256 >> 4"], "        16\n");
 }
 
 #[test]
 fn test_right_shift_keeps_the_sign() {
-    assert_prints(&["10 PRINT -8 >> 1"], "-4\n");
+    assert_prints(&["10 PRINT -8 >> 1"], "        -4\n");
 }
 
 #[test]
 fn test_left_shift_of_40_places_gives_zero() {
-    assert_prints(&["10 PRINT 1 << 40"], "0\n");
+    assert_prints(&["10 PRINT 1 << 40"], "         0\n");
 }
 
 #[test]

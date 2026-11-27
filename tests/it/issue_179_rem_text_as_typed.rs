@@ -62,7 +62,7 @@ fn test_rem_after_a_statement_runs_and_keeps_its_text() {
     assert_same_tokens_after_list("10 PRINT 1 : REM a:b");
     let (result, output) = run(&["10 PRINT 1 : REM a:b", "20 PRINT 2"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n");
+    assert_eq!(output, "         1\n         2\n");
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn test_rem_after_data_runs_as_before() {
         "40 PRINT A;\" \";B$",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2 : REM x\n");
+    assert_eq!(output, "         1 2 : REM x\n");
 }
 
 #[test]
@@ -175,5 +175,5 @@ fn test_rem_in_a_for_each_block_runs_as_before() {
         "70 NEXT",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n");
+    assert_eq!(output, "         1\n         2\n");
 }

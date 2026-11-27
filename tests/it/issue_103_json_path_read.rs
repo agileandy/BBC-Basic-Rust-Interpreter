@@ -46,7 +46,7 @@ fn test_jsonget_gives_numbers() {
         "60 PRINT A%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "43\n1.5\n9.25\n1\n");
+    assert_eq!(output, "        43\n       1.5\n      9.25\n         1\n");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_jsonget_gives_true_as_minus_1_and_false_and_null_as_0() {
         "50 IF JSONGET(J$, \"user.admin\") THEN PRINT \"YES\"",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n0\n0\nYES\n");
+    assert_eq!(output, "        -1\n         0\n         0\nYES\n");
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_jsonlen_gives_array_object_and_string_lengths() {
         "60 PRINT N%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n4\n7\n5\n");
+    assert_eq!(output, "         3\n         4\n         7\n         5\n");
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn test_binary_runs_a_program_with_the_path_functions() {
     );
     let output = run_binary_read_first(&input);
     assert!(
-        output.contains("Ann Lee\n1.5\nmissing\n"),
+        output.contains("Ann Lee\n       1.5\nmissing\n"),
         "output: {output}"
     );
 }

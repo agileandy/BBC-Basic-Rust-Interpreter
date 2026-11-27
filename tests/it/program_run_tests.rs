@@ -213,7 +213,7 @@ fn test_error_handler_can_print_err_and_erl() {
 
     assert_eq!(result, Ok(()));
     // 18 is the BBC BASIC error number for "Division by zero"
-    assert_eq!(output, "18\n20\n");
+    assert_eq!(output, "        18\n        20\n");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn test_val_reads_a_real_number() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3.5\nTRUNCATED\n");
+    assert_eq!(output, "       3.5\nTRUNCATED\n");
 }
 
 #[test]

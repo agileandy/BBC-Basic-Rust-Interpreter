@@ -51,7 +51,7 @@ fn test_comment_after_a_colon_lists_as_typed_and_runs() {
     assert_same_tokens_after_list("10 X = 1 : ' note");
     let (result, output) = run(&["10 X = 1 : ' note", "20 PRINT X"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_comment_after_a_statement_lists_as_typed_and_ends_the_statement() {
     assert_same_tokens_after_list("10 X = 1 ' note");
     let (result, output) = run(&["10 X = 1 ' note", "20 PRINT X"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn test_comment_text_is_kept_as_typed() {
     assert_same_tokens_after_list(source);
     let (result, output) = run(&[source, "20 PRINT X"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -79,12 +79,12 @@ fn test_comment_after_then_and_else_keeps_its_text() {
     assert_eq!(listed(source), source);
     let (result, output) = run(&["5 X = 0", source, "20 PRINT Y"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
     let source = "10 IF X = 1 THEN Y = 1 ELSE Y = 2 ' no";
     assert_eq!(listed(source), source);
     let (result, output) = run(&["5 X = 0", source, "20 PRINT Y"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]

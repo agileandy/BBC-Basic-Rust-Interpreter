@@ -70,15 +70,15 @@ fn test_comma_moves_to_the_next_zone_of_10_columns() {
     let (result, output) = run(&["10 PRINT 1, 2"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1         2\n");
+    assert_eq!(output, "         1         2\n");
 }
 
 #[test]
-fn test_comma_after_a_full_zone_moves_to_the_zone_after_it() {
+fn test_comma_after_a_full_zone_prints_no_spaces() {
     let (result, output) = run(&["10 PRINT \"ABCDEFGHIJ\", \"K\""]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "ABCDEFGHIJ          K\n");
+    assert_eq!(output, "ABCDEFGHIJK\n");
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_comma_on_a_new_line_counts_from_column_0() {
     let (result, output) = run(&["10 PRINT \"HELLO WORLD\"", "20 PRINT 1, 2"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "HELLO WORLD\n1         2\n");
+    assert_eq!(output, "HELLO WORLD\n         1         2\n");
 }
 
 #[test]

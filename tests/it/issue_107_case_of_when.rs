@@ -159,7 +159,7 @@ fn test_case_value_is_evaluated_one_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "one\n1\n");
+    assert_eq!(output, "one\n         1\n");
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn test_goto_out_of_a_case_needs_no_cleanup() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5000\n");
+    assert_eq!(output, "      5000\n");
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn test_lower_case_names_are_variables_and_arrays() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "15\n21\n");
+    assert_eq!(output, "        15\n        21\n");
 }
 
 /// Store the program lines, then run one typed line, with a time limit.
@@ -589,7 +589,7 @@ fn test_typed_command_runs_when_a_stored_case_line_is_invalid() {
     );
 
     assert_eq!(result, Ok(RunOutcome::Ended));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn test_typed_command_runs_when_a_stored_endcase_is_missing() {
     let (result, output) = typed(&["10 CASE 1 OF", "20 WHEN 1 : PRINT \"one\""], "PRINT 2");
 
     assert_eq!(result, Ok(RunOutcome::Ended));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]
@@ -644,7 +644,7 @@ fn test_upper_case_names_are_variables_and_arrays() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "11\n14\n");
+    assert_eq!(output, "        11\n        14\n");
 }
 
 #[test]

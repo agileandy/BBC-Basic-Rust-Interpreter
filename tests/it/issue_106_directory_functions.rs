@@ -90,7 +90,7 @@ fn test_old_program_with_variables_named_like_the_new_words_still_works() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "345L\n");
+    assert_eq!(output, "         345L\n");
 }
 
 #[test]
@@ -128,20 +128,26 @@ fn test_on_error_catches_each_directory_error() {
     std::fs::write(dir.join("f"), "x").unwrap();
 
     // ERR 151 is Bad directory. BBC BASIC does not use 151.
-    assert_eq!(caught(&format!("RMDIR \"{}/full\"", path)), "151 20\n");
-    assert_eq!(caught(&format!("RMDIR \"{}/f\"", path)), "151 20\n");
-    assert_eq!(caught(&format!("MKDIR \"{}/f\"", path)), "151 20\n");
+    assert_eq!(
+        caught(&format!("RMDIR \"{}/full\"", path)),
+        "       151 20\n"
+    );
+    assert_eq!(caught(&format!("RMDIR \"{}/f\"", path)), "       151 20\n");
+    assert_eq!(caught(&format!("MKDIR \"{}/f\"", path)), "       151 20\n");
     assert_eq!(
         caught(&format!("A$ = LISTDIR$(\"{}/f\")", path)),
-        "151 20\n"
+        "       151 20\n"
     );
-    assert_eq!(caught(&format!("RMDIR \"{}/missing\"", path)), "214 20\n");
+    assert_eq!(
+        caught(&format!("RMDIR \"{}/missing\"", path)),
+        "       214 20\n"
+    );
     assert_eq!(
         caught(&format!("MKDIR \"{}/missing/new\"", path)),
-        "214 20\n"
+        "       214 20\n"
     );
     assert_eq!(
         caught(&format!("A$ = LISTDIR$(\"{}/missing\")", path)),
-        "214 20\n"
+        "       214 20\n"
     );
 }

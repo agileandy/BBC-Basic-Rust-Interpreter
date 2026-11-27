@@ -83,7 +83,7 @@ fn test_handler_statements_read_err_and_erl() {
 
     assert_eq!(result, Ok(()));
     // 18 is the BBC BASIC error number for "Division by zero"
-    assert_eq!(output, "18\n30\n");
+    assert_eq!(output, "        18\n        30\n");
 }
 
 // D2: in normal flow, ON ERROR stores the handler and the run continues at
@@ -107,7 +107,7 @@ fn test_handler_statements_catch_a_second_error() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n");
+    assert_eq!(output, "         1\n         2\n");
 }
 
 // D5: an IF in the handler line

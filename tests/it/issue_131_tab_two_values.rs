@@ -10,7 +10,7 @@ fn test_tab_with_2_values_sets_the_column_and_sends_no_escape_code() {
     let (result, output) = run(&["10 PRINT TAB(5, 3); \"X\";", "20 PRINT POS"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X6\n");
+    assert_eq!(output, "X         6\n");
     assert!(!output.contains('\x1b'), "output: {output:?}");
 }
 
@@ -22,7 +22,7 @@ fn test_tab_with_2_values_has_the_same_effect_as_vdu_31() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "ABCDEFGHX3\nX3\n");
+    assert_eq!(output, "ABCDEFGHX         3\nX         3\n");
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn test_tab_with_2_values_takes_expressions_and_runs_each_one_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X52\n");
+    assert_eq!(output, "X         52\n");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_tab_with_2_values_truncates_a_real() {
     let (result, output) = run(&["10 PRINT TAB(4.7, 1.2); \"X\"; : PRINT POS"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X5\n");
+    assert_eq!(output, "X         5\n");
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_tab_with_1_value_does_not_change() {
     let (result, output) = run(&["10 PRINT \"AB\"; TAB(5); \"X\"; : PRINT POS"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "AB   X6\n");
+    assert_eq!(output, "AB   X         6\n");
 }
 
 #[test]
@@ -113,5 +113,5 @@ fn test_listed_tab_with_2_values_runs_as_typed() {
     let (result, output) = run(&["10 PRINT TAB(5,3);\"X\";:PRINT POS"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X6\n");
+    assert_eq!(output, "X         6\n");
 }

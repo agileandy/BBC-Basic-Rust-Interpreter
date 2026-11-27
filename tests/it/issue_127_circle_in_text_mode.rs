@@ -39,42 +39,42 @@ fn run_program_lines(lines: &[String]) -> String {
 
 #[test]
 fn test_circle_in_mode_1_draws() {
-    assert_eq!(run_program_lines(&circle_program("1")), "3\n");
+    assert_eq!(run_program_lines(&circle_program("1")), "         3\n");
 }
 
 #[test]
 fn test_circle_in_mode_3_sets_no_pixel() {
-    assert_eq!(run_program_lines(&circle_program("3")), "0\n");
+    assert_eq!(run_program_lines(&circle_program("3")), "         0\n");
 }
 
 #[test]
 fn test_circle_in_mode_6_sets_no_pixel() {
-    assert_eq!(run_program_lines(&circle_program("6")), "0\n");
+    assert_eq!(run_program_lines(&circle_program("6")), "         0\n");
 }
 
 #[test]
 fn test_circle_in_mode_7_sets_no_pixel() {
-    assert_eq!(run_program_lines(&circle_program("7")), "0\n");
+    assert_eq!(run_program_lines(&circle_program("7")), "         0\n");
 }
 
 #[test]
 fn test_ellipse_in_mode_1_draws() {
-    assert_eq!(run_program_lines(&ellipse_program("1")), "3\n");
+    assert_eq!(run_program_lines(&ellipse_program("1")), "         3\n");
 }
 
 #[test]
 fn test_ellipse_in_mode_3_sets_no_pixel() {
-    assert_eq!(run_program_lines(&ellipse_program("3")), "0\n");
+    assert_eq!(run_program_lines(&ellipse_program("3")), "         0\n");
 }
 
 #[test]
 fn test_ellipse_in_mode_6_sets_no_pixel() {
-    assert_eq!(run_program_lines(&ellipse_program("6")), "0\n");
+    assert_eq!(run_program_lines(&ellipse_program("6")), "         0\n");
 }
 
 #[test]
 fn test_ellipse_in_mode_7_sets_no_pixel() {
-    assert_eq!(run_program_lines(&ellipse_program("7")), "0\n");
+    assert_eq!(run_program_lines(&ellipse_program("7")), "         0\n");
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_circle_in_mode_1_after_mode_7_draws() {
         "50 PRINT POINT(150,100)",
     ]);
 
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_rectangle_in_mode_7_sets_no_pixel() {
         "30 PRINT POINT(120,120)",
     ]);
 
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -121,19 +121,19 @@ fn test_rectangle_in_mode_1_draws() {
         "30 PRINT POINT(120,120)",
     ]);
 
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
 fn test_fill_in_mode_1_draws() {
     let output = output_of(&["10 MODE 1", "20 FILL 100,100", "30 PRINT POINT(100,100)"]);
 
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
 fn test_fill_in_mode_7_sets_no_pixel() {
     let output = output_of(&["10 MODE 7", "20 FILL 100,100", "30 PRINT POINT(100,100)"]);
 
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }

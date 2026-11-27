@@ -16,7 +16,7 @@ fn test_integer_scalar_and_array_with_same_name_are_separate() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n9\n9\n6\n");
+    assert_eq!(output, "         5\n         9\n         9\n         6\n");
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn test_real_scalar_and_array_with_same_name_are_separate() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2.5\n7.5\n7.5\n1.5\n");
+    assert_eq!(output, "       2.5\n       7.5\n       7.5\n       1.5\n");
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn test_local_scalar_leaves_array_readable_in_and_after_procedure() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n9\n5\n8\n");
+    assert_eq!(output, "         7\n         9\n         5\n         8\n");
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_local_array_leaves_scalar_readable_in_and_after_procedure() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n4\n6\n9\n");
+    assert_eq!(output, "         5\n         4\n         6\n         9\n");
 }
 
 #[test]

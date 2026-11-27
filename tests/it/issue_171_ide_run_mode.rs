@@ -160,7 +160,7 @@ fn get_and_inkey_take_the_key_codes() {
     app.key(ctrl('r'));
     type_text(&mut app, "AB");
     assert!(app.wait_for_run(LIMIT));
-    assert_eq!(pane_rows(&app), ["> RUN", "65 66", ">"]);
+    assert_eq!(pane_rows(&app), ["> RUN", "        65 66", ">"]);
 }
 
 #[test]
@@ -249,7 +249,12 @@ fn an_error_shows_its_text_and_enter_goes_to_its_line_in_edit() {
     run(&mut app);
     assert_eq!(
         pane_rows(&app),
-        ["> RUN", "1", "Error: Division by zero at line 20", ">"]
+        [
+            "> RUN",
+            "         1",
+            "Error: Division by zero at line 20",
+            ">"
+        ]
     );
     app.key(press(KeyCode::Enter));
     // The worker says that the line is empty: a short wait
@@ -281,7 +286,7 @@ fn a_typed_print_at_the_prompt_of_the_pane_prints_2() {
     type_text(&mut app, "PRINT 1 + 1");
     app.key(press(KeyCode::Enter));
     assert!(app.wait_for_run(LIMIT));
-    assert_eq!(pane_rows(&app), ["> PRINT 1 + 1", "2", ">"]);
+    assert_eq!(pane_rows(&app), ["> PRINT 1 + 1", "         2", ">"]);
 }
 
 #[test]
@@ -405,7 +410,10 @@ fn a_paste_in_the_run_mode_types_the_text() {
     assert!(app.wait_for_run(LIMIT));
     wait_for_row(&mut app, "4");
     assert!(app.wait_for_run(LIMIT));
-    assert_eq!(pane_rows(&app), ["> PRINT 3", "3", "> PRINT 4", "4", ">"]);
+    assert_eq!(
+        pane_rows(&app),
+        ["> PRINT 3", "         3", "> PRINT 4", "         4", ">"]
+    );
 }
 
 #[test]
@@ -537,7 +545,7 @@ fn a_deep_recursion_runs_on_the_large_stack_of_the_worker() {
         "10 PRINT FNd(250)\n20 END\n30 DEF FNd(N%)\n40 IF N% = 0 THEN = 0\n50 = 1 + FNd(N% - 1)",
     );
     run(&mut app);
-    assert_eq!(pane_rows(&app)[1], "250");
+    assert_eq!(pane_rows(&app)[1], "       250");
 }
 
 #[test]

@@ -21,7 +21,7 @@ fn test_erl_is_def_line_with_handler() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "40\n");
+    assert_eq!(output, "        40\n");
 }
 
 #[test]
@@ -109,5 +109,5 @@ fn test_later_error_after_good_call_gives_its_own_line() {
     let (result, output) = run(&["10 PRINT FNa", "20 X = 1 / 0", "30 END", "40 DEF FNa = 2"]);
 
     assert_eq!(result, Err("Division by zero at line 20".to_string()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }

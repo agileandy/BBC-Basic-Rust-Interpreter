@@ -57,7 +57,7 @@ fn test_savejson_then_loadjson_gives_the_same_text() {
         "60 PRINT B$ = J$",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "{\"a\":[1,2],\"b\":{\"c\":\"x\"}}\n-1\n");
+    assert_eq!(output, "{\"a\":[1,2],\"b\":{\"c\":\"x\"}}\n        -1\n");
     assert_eq!(
         fs::read_to_string(&file).unwrap(),
         "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"x\"\n  }\n}\n"
@@ -167,7 +167,10 @@ fn test_jsonvalid_for_5_texts() {
         "50 PRINT JSONVALID(\"[1,]\")",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n-1\n0\n0\n0\n");
+    assert_eq!(
+        output,
+        "        -1\n        -1\n         0\n         0\n         0\n"
+    );
 }
 
 #[test]
@@ -182,7 +185,7 @@ fn test_loadjson_longer_than_the_string_limit_gives_string_too_long() {
 fn test_string_of_1000_characters_in_a_variable_works() {
     let (result, output) = run(&["10 A$ = STRING$(1000, \"A\")", "20 PRINT LEN(A$)"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1000\n");
+    assert_eq!(output, "      1000\n");
 }
 
 #[test]
@@ -200,7 +203,7 @@ fn test_variables_with_the_new_names_still_work() {
         "40 PRINT SAVEJSON; LOADJSON$; JSONVALID",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5a3\n");
+    assert_eq!(output, "         5a3\n");
 }
 
 #[test]

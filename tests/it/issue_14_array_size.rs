@@ -13,7 +13,7 @@ fn test_real_array_holds_index_0_to_top_index() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.52.53.5\n");
+    assert_eq!(output, "       1.52.53.5\n");
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn test_integer_array_holds_index_0_to_top_index() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "234\n");
+    assert_eq!(output, "         234\n");
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn test_two_dimension_array_holds_top_index_in_each_dimension() {
     let (result, output) = run(&["10 DIM M(2, 3)", "20 M(2, 3) = 7", "30 PRINT M(2, 3)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_two_dimension_array_second_index_above_top_gives_subscript_error() {
 fn test_dim_zero_makes_one_element() {
     let (result, output) = run(&["10 DIM A%(0)", "20 A%(0) = 5", "30 PRINT A%(0)"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 
     let (result, _) = run(&["10 DIM A%(0)", "20 A%(1) = 5"]);
     assert_eq!(result, Err("Subscript at line 20".to_string()));

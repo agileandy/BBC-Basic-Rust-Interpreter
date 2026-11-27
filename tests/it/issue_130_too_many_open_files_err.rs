@@ -62,7 +62,7 @@ fn test_the_open_after_the_limit_gives_err_192_and_a_close_frees_a_channel() {
     let (result, output) = run_with_file_limit(2, source);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "192 40\n-1\n");
+    assert_eq!(output, "       192 40\n        -1\n");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_openin_after_the_limit_gives_err_192() {
     let (result, output) = run_with_file_limit(1, source);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "192\n");
+    assert_eq!(output, "       192\n");
 }
 
 #[test]

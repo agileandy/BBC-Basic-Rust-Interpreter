@@ -19,7 +19,7 @@ fn test_integer_local_two_times_restores_first_value() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n1\n");
+    assert_eq!(output, "         0\n         1\n");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn test_real_local_two_times_restores_first_value() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.5\n");
+    assert_eq!(output, "       1.5\n");
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn test_array_local_two_times_restores_first_array() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -106,5 +106,5 @@ fn test_nested_call_with_local_two_times_restores_each_value() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n1\n");
+    assert_eq!(output, "         3\n         1\n");
 }

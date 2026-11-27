@@ -125,7 +125,7 @@ fn test_on_range_error_is_err_40() {
         ]);
 
         assert_eq!(result, Ok(()), "{}", keyword);
-        assert_eq!(output, "40\n", "{}", keyword);
+        assert_eq!(output, "        40\n", "{}", keyword);
     }
 }
 

@@ -16,7 +16,7 @@ fn test_restore_to_second_data_line_reads_its_first_value() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 3\n");
+    assert_eq!(output, "         1 3\n");
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn test_restore_on_same_line_as_read() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2\n");
+    assert_eq!(output, "         1 2\n");
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_restore_to_first_data_line_reads_all_values_again() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "123123\n");
+    assert_eq!(output, "         123123\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_restore_with_no_line_number_is_unchanged() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "787\n");
+    assert_eq!(output, "         787\n");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_restore_to_line_with_no_data_moves_to_next_data_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2\n");
+    assert_eq!(output, "         1 2\n");
 }
 
 #[test]
@@ -112,5 +112,5 @@ fn test_restore_in_loop_reads_one_table_three_times() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n12\n12\n");
+    assert_eq!(output, "         12\n         12\n         12\n");
 }

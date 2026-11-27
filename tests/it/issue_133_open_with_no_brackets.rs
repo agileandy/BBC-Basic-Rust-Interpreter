@@ -46,7 +46,7 @@ fn test_openup_with_string_literal() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "4\n");
+    assert_eq!(output, "         4\n");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_open_functions_with_string_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "65\n1\n");
+    assert_eq!(output, "        65\n         1\n");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_open_functions_with_string_expression_in_brackets() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "66\n1\n");
+    assert_eq!(output, "        66\n         1\n");
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_openin_with_no_bracket_gives_0_for_missing_file() {
     let (result, output) = run(&[&open_in, "20 PRINT A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_variables_that_start_with_the_names_keep_behaviour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "73Z\n");
+    assert_eq!(output, "         73Z\n");
 }
 
 #[test]
@@ -145,5 +145,5 @@ fn test_channel_functions_with_no_bracket() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "65 1 1 -1\n");
+    assert_eq!(output, "        65 1 1 -1\n");
 }

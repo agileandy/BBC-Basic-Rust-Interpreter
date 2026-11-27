@@ -126,7 +126,7 @@ fn test_rectangle_sets_an_edge_pixel_and_not_the_centre() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3330\n");
+    assert_eq!(output, "         3330\n");
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_rectangle_fill_sets_the_centre() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "330\n");
+    assert_eq!(output, "         330\n");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn test_rectangle_with_3_values_draws_a_square() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "30\n330\n");
+    assert_eq!(output, "         30\n         330\n");
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn test_circle_fill_sets_the_centre() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n30\n");
+    assert_eq!(output, "         0\n         30\n");
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn test_ellipse_fill_sets_the_centre() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n30\n");
+    assert_eq!(output, "         0\n         30\n");
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn test_fill_still_fills_an_area_in_an_outline_rectangle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "30\n");
+    assert_eq!(output, "         30\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_each_filled_shape_draws_nothing_in_mode_7() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "000\n");
+    assert_eq!(output, "         000\n");
 }
 
 // The last point. BBCSDL (src/bbexec.c, case TRECT) draws RECTANGLE as
@@ -218,7 +218,7 @@ fn test_rectangle_ends_at_the_start_corner() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn test_rectangle_puts_the_top_left_corner_before_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn test_rectangle_fill_ends_at_the_far_corner() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn test_circle_fill_ends_at_the_point_on_the_circle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn test_ellipse_fill_ends_at_the_corner_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 // Out of scope (D3)

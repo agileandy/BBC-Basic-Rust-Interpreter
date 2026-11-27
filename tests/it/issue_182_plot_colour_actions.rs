@@ -16,7 +16,7 @@ fn test_a_line_draws_in_the_foreground_the_background_and_the_inverse_colour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n0\n2\n");
+    assert_eq!(output, "         3\n         0\n         2\n");
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn test_a_relative_line_uses_the_same_colours() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n0\n2\n");
+    assert_eq!(output, "         3\n         0\n         2\n");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn test_a_point_draws_in_the_foreground_the_background_and_the_inverse_colour() 
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n0\n2\n");
+    assert_eq!(output, "         3\n         0\n         2\n");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_a_triangle_draws_in_the_foreground_the_background_and_the_inverse_colour
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n0\n2\n");
+    assert_eq!(output, "         3\n         0\n         2\n");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_a_circle_draws_in_the_foreground_the_background_and_the_inverse_colour()
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n0\n2\n");
+    assert_eq!(output, "         3\n         0\n         2\n");
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_plot_7_uses_the_background_action() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 /// A box of colour 3 from (100, 100) to (200, 200), then a fill in colour 1
@@ -104,11 +104,11 @@ fn run_box_fill(fill: &str) -> (Result<(), String>, String) {
 fn test_plot_133_fills_the_same_pixels_as_fill() {
     let (result, output) = run_box_fill("FILL 150, 150");
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "130\n");
+    assert_eq!(output, "         130\n");
 
     let (result, output) = run_box_fill("PLOT 133, 150, 150");
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "130\n");
+    assert_eq!(output, "         130\n");
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn test_plot_129_fills_from_a_point_relative_to_the_last_point() {
     let (result, output) = run_box_fill("MOVE 140, 140 : PLOT 129, 10, 10");
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "130\n");
+    assert_eq!(output, "         130\n");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn test_clg_uses_the_background_action() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -138,5 +138,5 @@ fn test_a_background_gcol_keeps_the_foreground_action() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }

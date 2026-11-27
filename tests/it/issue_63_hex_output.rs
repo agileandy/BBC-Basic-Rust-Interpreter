@@ -18,24 +18,24 @@ fn output_of(source: &[&str]) -> String {
 
 #[test]
 fn test_print_tilde_255_shows_ff() {
-    assert_eq!(output_of(&["10 PRINT ~255"]), "FF\n");
+    assert_eq!(output_of(&["10 PRINT ~255"]), "        FF\n");
 }
 
 #[test]
 fn test_print_tilde_minus_1_shows_32_bit_form() {
-    assert_eq!(output_of(&["10 PRINT ~-1"]), "FFFFFFFF\n");
+    assert_eq!(output_of(&["10 PRINT ~-1"]), "  FFFFFFFF\n");
 }
 
 #[test]
 fn test_print_tilde_hex_literal_shows_same_digits() {
-    assert_eq!(output_of(&["10 PRINT ~&1F"]), "1F\n");
+    assert_eq!(output_of(&["10 PRINT ~&1F"]), "        1F\n");
 }
 
 #[test]
 fn test_print_tilde_variable_and_real() {
     assert_eq!(
         output_of(&["10 A% = 4096", "20 B = 31.9", "30 PRINT ~A%;\" \";~B"]),
-        "1000 1F\n"
+        "      1000 1F\n"
     );
 }
 
@@ -54,7 +54,7 @@ fn test_str_tilde_result_is_a_string() {
 
 #[test]
 fn test_val_reads_hex_text() {
-    assert_eq!(output_of(&["10 PRINT VAL(\"&1F\")"]), "31\n");
+    assert_eq!(output_of(&["10 PRINT VAL(\"&1F\")"]), "        31\n");
 }
 
 #[test]
@@ -79,18 +79,18 @@ fn test_input_reads_hex_reply() {
 
 #[test]
 fn test_comma_makes_format_decimal_again() {
-    // "FF" in zone 1, then 255 in decimal at column 10
-    assert_eq!(output_of(&["10 PRINT ~255,255"]), "FF        255\n");
+    // "FF" at the right of field 1, then 255 in decimal at the right of field 2
+    assert_eq!(output_of(&["10 PRINT ~255,255"]), "        FF       255\n");
 }
 
 #[test]
 fn test_semicolon_makes_format_decimal_again() {
-    assert_eq!(output_of(&["10 PRINT ~10;10"]), "A10\n");
+    assert_eq!(output_of(&["10 PRINT ~10;10"]), "         A10\n");
 }
 
 #[test]
 fn test_tilde_after_separator_applies_to_next_item() {
-    assert_eq!(output_of(&["10 PRINT 10;~10"]), "10A\n");
+    assert_eq!(output_of(&["10 PRINT 10;~10"]), "        10A\n");
 }
 
 #[test]

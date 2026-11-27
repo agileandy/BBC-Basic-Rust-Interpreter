@@ -27,7 +27,7 @@ fn test_endproc_in_fn_from_gosub_goes_to_handler_and_return_works() {
         "310 RETURN",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "13 160\nsub\ndone\n");
+    assert_eq!(output, "        13 160\nsub\ndone\n");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_endproc_in_fn_keeps_local_variable_of_caller_proc() {
         "210 END",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "13 1\n");
+    assert_eq!(output, "        13 1\n");
 }
 
 // D2: a PROC that a function calls, and a function that a PROC calls, end
@@ -126,7 +126,7 @@ fn test_proc_called_from_fn_ends_correctly() {
         "220 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6\n");
+    assert_eq!(output, "         6\n");
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn test_fn_called_from_proc_ends_correctly() {
         "160 = N + 1",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\nback\n");
+    assert_eq!(output, "         5\nback\n");
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn test_recursive_proc_in_fn_ends_correctly() {
         "240 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn test_recursive_proc_ends_correctly() {
         "140 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n2\n1\nend\n");
+    assert_eq!(output, "         3\n         2\n         1\nend\n");
 }
 
 #[test]

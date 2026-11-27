@@ -30,14 +30,14 @@ fn test_apostrophe_at_the_end_adds_a_new_line() {
 fn test_apostrophe_before_a_variable() {
     let (result, output) = run(&["10 A = 7", "20 PRINT 'A"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "\n7\n");
+    assert_eq!(output, "\n         7\n");
 }
 
 #[test]
 fn test_apostrophe_sets_the_column_to_zero_for_tab_and_pos() {
     let (result, output) = run(&["10 PRINT TAB(5);\"A\"'TAB(5);\"B\";", "20 PRINT POS"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "     A\n     B6\n");
+    assert_eq!(output, "     A\n     B         6\n");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_apostrophe_in_a_rem_and_in_data_is_text() {
 fn test_input_prompt_with_apostrophe_prints_two_lines() {
     let (result, output) = run_with_replies(&["10 INPUT \"A\"'\"B\" X", "20 PRINT X"], &["42"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "A\nB\n42\n");
+    assert_eq!(output, "A\nB\n        42\n");
 }
 
 #[test]

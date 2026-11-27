@@ -7,7 +7,7 @@ fn test_two_numbers_with_no_separator_print_both() {
     let (result, output) = run(&["10 PRINT 10 58"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1058\n");
+    assert_eq!(output, "        10        58\n");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn test_subtract_with_spaces_is_one_item() {
     let (result, output) = run(&["10 PRINT 1 - 2"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn test_hex_applies_to_items_until_comma() {
     let (result, output) = run(&["10 PRINT ~10 58,58"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "A3A       58\n");
+    assert_eq!(output, "         A        3A        58\n");
 }
 
 #[test]

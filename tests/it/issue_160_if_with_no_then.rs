@@ -54,7 +54,7 @@ fn test_assignment_with_no_then_runs() {
     let (result, output) = run(&["10 A% = 5", "20 IF A% > 3 A% = 0", "30 PRINT A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -70,15 +70,15 @@ fn test_assignment_after_a_variable_condition() {
     let (result, output) = run(&["10 A = 1", "20 IF A B = 1", "30 PRINT B"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
 fn test_assignment_with_no_then_and_else() {
     let program = |a: &'static str| run(&[a, "20 IF A = 1 B = 2 ELSE B = 3", "30 PRINT B"]);
 
-    assert_eq!(program("10 A = 1"), (Ok(()), "2\n".to_string()));
-    assert_eq!(program("10 A = 0"), (Ok(()), "3\n".to_string()));
+    assert_eq!(program("10 A = 1"), (Ok(()), "         2\n".to_string()));
+    assert_eq!(program("10 A = 0"), (Ok(()), "         3\n".to_string()));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_user_function_condition_then_assignment() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]
@@ -116,14 +116,14 @@ fn test_array_element_condition_then_array_assignment() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
 fn test_minus_after_a_variable_continues_the_condition() {
     let program = |a: &'static str| run(&[a, "20 IF A -1 = 0 PRINT 1"]);
 
-    assert_eq!(program("10 A = 1"), (Ok(()), "1\n".to_string()));
+    assert_eq!(program("10 A = 1"), (Ok(()), "         1\n".to_string()));
     assert_eq!(program("10 A = 0"), (Ok(()), String::new()));
 }
 
@@ -141,7 +141,7 @@ fn test_bracket_after_a_variable_is_an_array_in_the_condition() {
 fn test_else_directly_after_the_condition() {
     let program = |a: &'static str| run(&[a, "20 IF A ELSE PRINT 2"]);
 
-    assert_eq!(program("10 A = 0"), (Ok(()), "2\n".to_string()));
+    assert_eq!(program("10 A = 0"), (Ok(()), "         2\n".to_string()));
     assert_eq!(program("10 A = 1"), (Ok(()), String::new()));
 }
 
@@ -173,8 +173,8 @@ fn test_statement_that_is_a_name_follows_the_condition() {
 fn test_if_with_no_then_else_runs_the_correct_branch() {
     let program = |a: &'static str| run(&[a, "20 IF A PRINT 1 ELSE PRINT 2"]);
 
-    assert_eq!(program("10 A = 1"), (Ok(()), "1\n".to_string()));
-    assert_eq!(program("10 A = 0"), (Ok(()), "2\n".to_string()));
+    assert_eq!(program("10 A = 1"), (Ok(()), "         1\n".to_string()));
+    assert_eq!(program("10 A = 0"), (Ok(()), "         2\n".to_string()));
 }
 
 #[test]
@@ -210,7 +210,10 @@ fn test_function_keyword_in_condition_is_not_a_statement_start() {
 fn test_nested_if_with_no_then() {
     let program = |a: &'static str, b: &'static str| run(&[a, b, "30 IF A IF B PRINT 1"]);
 
-    assert_eq!(program("10 A = 1", "20 B = 1"), (Ok(()), "1\n".to_string()));
+    assert_eq!(
+        program("10 A = 1", "20 B = 1"),
+        (Ok(()), "         1\n".to_string())
+    );
     assert_eq!(program("10 A = 1", "20 B = 0"), (Ok(()), String::new()));
     assert_eq!(program("10 A = 0", "20 B = 1"), (Ok(()), String::new()));
 }

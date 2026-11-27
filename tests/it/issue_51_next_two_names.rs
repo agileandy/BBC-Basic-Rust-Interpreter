@@ -83,7 +83,7 @@ fn test_two_names_with_real_loop_variables() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.5\n2\n2\n2.5\n");
+    assert_eq!(output, "       1.5\n         2\n         2\n       2.5\n");
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn test_two_names_with_empty_inner_loop() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3 4 5\n");
+    assert_eq!(output, "         3 4 5\n");
 }
 
 #[test]

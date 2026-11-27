@@ -24,7 +24,7 @@ fn test_second_dim_gives_err_10_and_keeps_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n5\n");
+    assert_eq!(output, "        10\n         5\n");
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn test_local_array_can_be_dimensioned_in_each_call() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n7\n");
+    assert_eq!(output, "         7\n         7\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_second_memory_block_reserves_second_block() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "11\n");
+    assert_eq!(output, "        11\n");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_dim_after_clear_works() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "4\n");
+    assert_eq!(output, "         4\n");
 }
 
 #[test]
@@ -89,5 +89,5 @@ fn test_second_run_of_program_with_dim_works() {
 
     assert_eq!(run_program(&mut executor, &mut program), Ok(()));
     assert_eq!(run_program(&mut executor, &mut program), Ok(()));
-    assert_eq!(executor.get_output(), "3\n3\n");
+    assert_eq!(executor.get_output(), "         3\n         3\n");
 }

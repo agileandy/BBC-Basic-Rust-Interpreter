@@ -43,7 +43,8 @@ fn test_str_gives_the_same_text_as_print() {
         assert_eq!(result, Ok(()), "{}", value);
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 2, "{}: {:?}", value, output);
-        assert_eq!(lines[0], lines[1], "{}", value);
+        // PRINT puts the number at the right of a field of 10 (issue #91)
+        assert_eq!(format!("{:>10}", lines[0]), lines[1], "{}", value);
     }
 }
 
@@ -66,9 +67,12 @@ fn test_str_of_integer_variable_does_not_change() {
 
 #[test]
 fn test_str_round_trips_through_val_and_len() {
-    assert_eq!(printed("10 X = 123456 : PRINT VAL(STR$(X))"), "123456\n");
-    assert_eq!(printed("10 X = 1E10 : PRINT VAL(STR$(X))"), "1E10\n");
-    assert_eq!(printed("10 X = 1E10 : PRINT LEN STR$(X)"), "4\n");
+    assert_eq!(
+        printed("10 X = 123456 : PRINT VAL(STR$(X))"),
+        "    123456\n"
+    );
+    assert_eq!(printed("10 X = 1E10 : PRINT VAL(STR$(X))"), "      1E10\n");
+    assert_eq!(printed("10 X = 1E10 : PRINT LEN STR$(X)"), "         4\n");
 }
 
 #[test]

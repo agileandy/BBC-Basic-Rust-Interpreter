@@ -23,7 +23,7 @@ fn test_move_and_draw_take_an_array_element() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3 0\n");
+    assert_eq!(without_clear(&output), "         3 0\n");
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_plot_takes_array_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3 0\n");
+    assert_eq!(without_clear(&output), "         3 0\n");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_origin_takes_a_function_with_a_string_argument() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3 0\n");
+    assert_eq!(without_clear(&output), "         3 0\n");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_gcol_takes_an_array_element() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "0\n");
+    assert_eq!(without_clear(&output), "         0\n");
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn test_circle_ellipse_and_rectangle_take_array_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3 3 3 0\n");
+    assert_eq!(without_clear(&output), "         3 3 3 0\n");
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_fill_takes_array_elements() {
     let (result, output) = run_lines(&[TABLE, "20 FILL P(1,1), P(1,2)", "30 PRINT POINT(100,100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3\n");
+    assert_eq!(without_clear(&output), "         3\n");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_a_comma_in_a_string_literal_does_not_split_the_values() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3\n");
+    assert_eq!(without_clear(&output), "         3\n");
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn test_an_array_index_takes_an_array_element() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "9\n");
+    assert_eq!(output, "         9\n");
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn test_file_statements_take_an_array_element_as_the_handle() {
     let _ = std::fs::remove_file(path);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "42 65\n");
+    assert_eq!(output, "        42 65\n");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn test_proc_arguments_with_commas_in_brackets_still_work() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3 ab\n");
+    assert_eq!(output, "         3 ab\n");
 }
 
 #[test]
@@ -215,5 +215,5 @@ fn test_print_items_with_commas_in_brackets_still_work() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1         2\n");
+    assert_eq!(output, "         1         2\n");
 }

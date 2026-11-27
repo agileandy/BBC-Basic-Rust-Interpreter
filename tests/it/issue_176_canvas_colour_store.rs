@@ -26,7 +26,7 @@ fn test_mode_1_plots_in_colour_3_by_default() {
         run_with_limit(&["10 MODE 1 : PLOT 69, 100, 100 : PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_gcol_0_1_plots_in_colour_1() {
         run_with_limit(&["10 MODE 1 : GCOL 0, 1 : PLOT 69, 100, 100 : PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_gcol_0_0_clears_a_pixel() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_gcol_3_1_on_a_pixel_of_colour_2_gives_3() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_mode_0_plots_in_colour_1_by_default() {
         run_with_limit(&["10 MODE 0 : PLOT 69, 100, 100 : PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn test_gcol_0_5_in_a_4_colour_mode_gives_colour_1() {
         run_with_limit(&["10 MODE 1 : GCOL 0, 5 : PLOT 69, 100, 100 : PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn test_gcol_0_129_and_clg_fill_with_colour_1() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "111\n");
+    assert_eq!(output, "         111\n");
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_fill_stops_at_a_line_of_a_different_colour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1120\n");
+    assert_eq!(output, "         1120\n");
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_fill_from_a_pixel_that_is_not_the_background_fills_nothing() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "22\n");
+    assert_eq!(output, "         22\n");
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn test_fill_fills_the_pixels_of_the_graphics_background_colour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "321\n");
+    assert_eq!(output, "         321\n");
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn test_fill_with_an_action_that_keeps_the_background_stops() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -145,5 +145,5 @@ fn test_gcol_129_does_not_change_the_foreground_colour() {
         run_with_limit(&["10 MODE 1 : GCOL 0, 129 : PLOT 69, 100, 100 : PRINT POINT(100, 100)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }

@@ -37,7 +37,7 @@ fn test_print_string_function_runs_its_body_one_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "counted\n1\n");
+    assert_eq!(output, "counted\n         1\n");
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_print_real_function_runs_its_body_one_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.5\n1\n");
+    assert_eq!(output, "       1.5\n         1\n");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_print_mixed_function_result_types_on_one_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.5x7y\n");
+    assert_eq!(output, "       1.5x7y\n");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn test_print_hex_of_function_does_not_change() {
     let (result, output) = run(&["10 PRINT ~FNa", "20 END", "30 DEF FNa = 255"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "FF\n");
+    assert_eq!(output, "        FF\n");
 }
 
 #[test]
@@ -159,5 +159,5 @@ fn test_print_len_of_string_function() {
     let (result, output) = run(&["10 PRINT LEN(FNt)", "20 END", "30 DEF FNt = \"one line\""]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "8\n");
+    assert_eq!(output, "         8\n");
 }

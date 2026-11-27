@@ -14,14 +14,14 @@ fn short_form_of_print_prints_a_string_and_a_real() {
 fn short_form_before_a_number_with_a_full_stop_runs() {
     let (result, output) = run_lines(&["10 P. .5"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0.5\n");
+    assert_eq!(output, "       0.5\n");
 }
 
 #[test]
 fn short_forms_in_a_loop_run() {
     let (result, output) = run_lines(&["10 F.I=1 TO 3:P.I;:N.", "20 REP.:I=I-1:U.I=1"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "123");
+    assert_eq!(output, "         1         2         3");
 }
 
 #[test]
@@ -52,5 +52,5 @@ fn name_that_is_not_a_short_form_and_a_full_stop_gives_the_error_of_today() {
 fn variable_and_array_named_p_still_work() {
     let (result, output) = run_lines(&["10 P=2:DIM P(2):P(1)=3:PRINT P*P(1)"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6\n");
+    assert_eq!(output, "         6\n");
 }

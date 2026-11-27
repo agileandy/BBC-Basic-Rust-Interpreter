@@ -22,7 +22,7 @@ fn test_load_skips_line_with_only_a_number() {
     assert!(output.contains("Loaded from prog.bas"), "{}", output);
     assert!(output.contains("10 PRINT 1\n30 PRINT 3\n"), "{}", output);
     assert!(!output.contains("\n20\n"), "{}", output);
-    assert!(output.contains("1\n3\n"), "{}", output);
+    assert!(output.contains("         1\n         3\n"), "{}", output);
     std::fs::remove_dir_all(&dir).ok();
 }
 

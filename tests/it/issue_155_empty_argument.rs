@@ -61,7 +61,7 @@ fn test_move_with_2_values_is_unchanged() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "3\n");
+    assert_eq!(without_clear(&output), "         3\n");
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn test_print_with_2_commas_together_is_unchanged() {
     let (result, output) = run_lines(&["10 PRINT 1,,2"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1                   2\n");
+    assert_eq!(output, "         1         2\n");
 }
 
 #[test]

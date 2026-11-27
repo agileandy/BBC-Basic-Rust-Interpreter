@@ -30,7 +30,7 @@ fn test_data_before_between_and_after_reads_gives_each_value_one_time() {
     ]);
 
     assert_out_of_data_at(result, 80);
-    assert_eq!(output, "123\n");
+    assert_eq!(output, "         123\n");
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_loop_through_data_line_three_times_reads_each_value_one_time() {
     ]);
 
     assert_out_of_data_at(result, 60);
-    assert_eq!(output, "7\n8\n9\n");
+    assert_eq!(output, "         7\n         8\n         9\n");
 }
 
 #[test]
@@ -61,5 +61,5 @@ fn test_restore_then_read_gives_first_value_again() {
     ]);
 
     assert_out_of_data_at(result, 60);
-    assert_eq!(output, "556\n");
+    assert_eq!(output, "         556\n");
 }

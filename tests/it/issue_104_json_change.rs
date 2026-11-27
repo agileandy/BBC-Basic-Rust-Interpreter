@@ -60,7 +60,7 @@ fn test_jsonset_escapes_a_quote_and_a_new_line() {
         "40 PRINT JSONGET$(J$, \"s\") = S$",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "{\"s\":\"say \\\"hi\\\"\\nbye\"}\n-1\n");
+    assert_eq!(output, "{\"s\":\"say \\\"hi\\\"\\nbye\"}\n        -1\n");
 }
 
 #[test]

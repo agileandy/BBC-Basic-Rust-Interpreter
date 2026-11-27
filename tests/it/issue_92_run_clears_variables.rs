@@ -50,7 +50,7 @@ fn run_binary(input: &str) -> String {
 /// Assert that the binary printed an error and did not print the value 2.
 fn assert_x_does_not_exist(output: &str) {
     assert!(output.contains("Error:"), "output was: {}", output);
-    assert!(!output.contains("> 2\n"), "output was: {}", output);
+    assert!(!output.contains(">          2\n"), "output was: {}", output);
 }
 
 /// Store the source lines in a new program.
@@ -90,7 +90,7 @@ fn test_run_keeps_resident_integer_set_by_typed_line() {
     let result = run_program(&mut executor, &mut program);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(executor.get_output(), "2\n");
+    assert_eq!(executor.get_output(), "         2\n");
 }
 
 #[test]
@@ -136,12 +136,12 @@ fn test_load_removes_variables() {
 fn test_new_keeps_resident_integer() {
     let output = run_binary("A% = 2\nNEW\nPRINT A%\nEXIT\n");
 
-    assert!(output.contains("> 2\n"), "output was: {}", output);
+    assert!(output.contains(">          2\n"), "output was: {}", output);
 }
 
 #[test]
 fn test_typed_line_keeps_variables() {
     let output = run_binary("X = 2\nPRINT X\nEXIT\n");
 
-    assert!(output.contains("> 2\n"), "output was: {}", output);
+    assert!(output.contains(">          2\n"), "output was: {}", output);
 }

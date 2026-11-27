@@ -23,7 +23,7 @@ fn test_a_round_trip_of_a_nested_map_gives_the_same_text() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, format!("{}\n-1\n", DOCUMENT));
+    assert_eq!(output, format!("{}\n        -1\n", DOCUMENT));
 }
 
 #[test]
@@ -55,7 +55,10 @@ fn test_the_getters_read_the_converted_elements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7 7 A\n2 9\nv\n-1 0 0\n0 0 0\n");
+    assert_eq!(
+        output,
+        "         7 7 A\n         2 9\nv\n        -1 0 0\n         0 0 0\n"
+    );
 }
 
 #[test]
@@ -102,7 +105,7 @@ fn test_listaddcol_and_mapputcol_put_a_nested_collection_and_listadd_puts_a_numb
     assert_eq!(result, Ok(()));
     assert_eq!(
         output,
-        "[{\"k\":1,\"t\":[3,\"X\"]},2]\nmap number list\n-1\n"
+        "[{\"k\":1,\"t\":[3,\"X\"]},2]\nmap number list\n        -1\n"
     );
 }
 
@@ -221,7 +224,7 @@ fn test_each_statement_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 }
 
@@ -236,7 +239,7 @@ fn test_each_function_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 
     for name in ["TOJSON$", "LISTKIND$", "MAPKIND$"] {

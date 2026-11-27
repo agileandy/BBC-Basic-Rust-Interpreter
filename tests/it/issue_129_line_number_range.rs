@@ -87,7 +87,7 @@ fn restore_65535_reads_the_data_on_line_65535() {
         "65535 DATA 2",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]
@@ -112,5 +112,5 @@ fn on_error_catches_a_calculated_target_out_of_range() {
         "100 PRINT \"wrapped\"",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "41 20\n");
+    assert_eq!(output, "        41 20\n");
 }

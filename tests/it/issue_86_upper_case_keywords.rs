@@ -13,7 +13,7 @@ fn test_lower_case_count_is_a_variable() {
     let (result, output) = run(&["10 count = 5 : PRINT count"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_for_loop_with_lower_case_variable_runs() {
     let (result, output) = run(&["10 FOR i = 1 TO 3 : PRINT i : NEXT i"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn test_lower_case_time_to_and_step_are_variables() {
     let (result, output) = run(&["10 time = 1 : to = 2 : step = 3 : PRINT time + to + step"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6\n");
+    assert_eq!(output, "         6\n");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn test_lower_case_pi_val_len_and_endwhile_are_variables() {
         run(&["10 pi = 1 : val = 2 : len = 3 : endwhile = 4 : PRINT pi + val + len + endwhile"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -58,5 +58,5 @@ fn test_typed_commands_work_in_lower_case() {
         "output was {:?}",
         output
     );
-    assert!(output.contains("> 5\n"), "output was {:?}", output);
+    assert!(output.contains(">          5\n"), "output was {:?}", output);
 }
