@@ -141,13 +141,13 @@ fn test_on_error_catches_each_directory_error() {
     std::fs::write(dir.join("full").join("data"), "x").unwrap();
     std::fs::write(dir.join("f"), "x").unwrap();
 
-    // ERR 150 is Bad directory. BBC BASIC does not use 150.
-    assert_eq!(caught(&format!("RMDIR \"{}/full\"", path)), "150 20\n");
-    assert_eq!(caught(&format!("RMDIR \"{}/f\"", path)), "150 20\n");
-    assert_eq!(caught(&format!("MKDIR \"{}/f\"", path)), "150 20\n");
+    // ERR 151 is Bad directory. BBC BASIC does not use 151.
+    assert_eq!(caught(&format!("RMDIR \"{}/full\"", path)), "151 20\n");
+    assert_eq!(caught(&format!("RMDIR \"{}/f\"", path)), "151 20\n");
+    assert_eq!(caught(&format!("MKDIR \"{}/f\"", path)), "151 20\n");
     assert_eq!(
         caught(&format!("A$ = LISTDIR$(\"{}/f\")", path)),
-        "150 20\n"
+        "151 20\n"
     );
     assert_eq!(caught(&format!("RMDIR \"{}/missing\"", path)), "255 20\n");
     assert_eq!(

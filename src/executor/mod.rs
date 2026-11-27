@@ -1985,7 +1985,7 @@ impl Executor {
             // LISTDIR$(path$) is an extension. The parser cannot tell it from
             // an array, so an array named LISTDIR$ keeps its old meaning.
             Expression::ArrayAccess { name, indices }
-                if name == "LISTDIR$" && self.variables.save_array(name).is_none() =>
+                if name == "LISTDIR$" && !self.variables.has_array(name) =>
             {
                 let [path] = indices.as_slice() else {
                     return Err(BBCBasicError::SyntaxError {

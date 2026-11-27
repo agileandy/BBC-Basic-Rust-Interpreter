@@ -26,9 +26,6 @@ impl Default for FileSystem {
 // Directory functions: LISTDIR$, MKDIR and RMDIR. These are modern
 // extensions, not BBC BASIC.
 
-/// The maximum length of a BBC BASIC string
-const MAX_STRING_LENGTH: usize = 255;
-
 /// Convert an I/O error of a directory function to a BBC BASIC error.
 fn directory_error(path: &str, error: std::io::Error) -> BBCBasicError {
     match error.kind() {
@@ -65,7 +62,7 @@ pub fn list_directory(path: &str) -> Result<String> {
     }
     names.sort();
     let listing = names.join("\n");
-    if listing.len() > MAX_STRING_LENGTH {
+    if listing.len() > crate::variables::MAX_STRING_LENGTH {
         return Err(BBCBasicError::StringTooLong);
     }
     Ok(listing)
@@ -138,10 +135,23 @@ mod tests {
     }
 
     #[test]
-    fn test_list_directory_longer_than_a_string_gives_string_too_long() {
-        let dir = fresh_dir("list_long");
+    fn test_list_directory_longer_than_255_characters_is_accepted() {
+        let dir = fresh_dir("list_over_255");
         for n in 0..30 {
             std::fs::write(dir.join(format!("file_number_{:02}", n)), "x").unwrap();
+        }
+
+        // 30 names of 14 characters and 29 line feeds
+        assert_eq!(list_directory(&text(&dir)).map(|s| s.len()), Ok(449));
+    }
+
+    #[test]
+    fn test_list_directory_longer_than_a_string_gives_string_too_long() {
+        let dir = fresh_dir("list_long");
+        // 280 names of 240 characters and 279 line feeds: 67479 characters
+        for n in 0..280 {
+            let name = format!("{:03}{}", n, "x".repeat(237));
+            std::fs::write(dir.join(name), "x").unwrap();
         }
 
         assert_eq!(
