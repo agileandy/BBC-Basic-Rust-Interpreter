@@ -15,7 +15,7 @@
 150   N$(J%) = K$
 160 NEXT I%
 170 FOR I% = 1 TO N%
-180   PRINT I%;". ";N$(I%)
+180   PRINT ;I%;". ";N$(I%)
 190 NEXT I%
 200 PRINT "First: ";N$(1);"  Last: ";N$(N%)
 210 DATA 6

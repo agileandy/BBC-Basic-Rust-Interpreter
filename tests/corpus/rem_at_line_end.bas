@@ -2,7 +2,7 @@
 20 A% = 1 : B% = 2 : REM set the start values
 30 C% = A% + B% : PRINT "C% = ";C% : REM print the sum
 40 REM a REM hides the rest of the line : PRINT "Not shown"
-50 FOR I% = 1 TO 3 : PRINT I%; : NEXT I% : PRINT : REM a loop on one line
+50 FOR I% = 1 TO 3 : PRINT ;I%; : NEXT I% : PRINT : REM a loop on one line
 60 IF C% = 3 THEN PRINT "Three" : REM inside the THEN part
 70 IF C% = 4 THEN PRINT "Four" ELSE PRINT "Not four" : REM inside the ELSE part
 80 PRINT "Colon in a string: A:B" : REM quotes protect the colon

@@ -1,7 +1,7 @@
 10 REM A table of powers in columns with TAB
 20 PRINT "N";TAB(5);"N^2";TAB(12);"N^3";TAB(20);"SQR"
 30 FOR N% = 1 TO 6
-40   PRINT N%;TAB(5);N%^2;TAB(12);N%^3;TAB(20);INT(SQR(N%)*100+0.5)/100
+40   PRINT ;N%;TAB(5);N%^2;TAB(12);N%^3;TAB(20);INT(SQR(N%)*100+0.5)/100
 50 NEXT N%
 60 PRINT
 70 PRINT "Right aligned:"

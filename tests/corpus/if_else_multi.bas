@@ -3,7 +3,7 @@
 20 FOR I% = 1 TO 6
 30   READ M%
 40   IF M% >= 70 THEN G$ = "A" : P% = P% + 1 ELSE IF M% >= 50 THEN G$ = "B" : P% = P% + 1 ELSE G$ = "F" : F% = F% + 1
-50   PRINT M%;" ";G$
+50   PRINT ;M%;" ";G$
 60 NEXT I%
 70 PRINT "Passes: ";P%;" Fails: ";F%
 80 IF P% > F% THEN PRINT "More passes" ELSE PRINT "More fails"

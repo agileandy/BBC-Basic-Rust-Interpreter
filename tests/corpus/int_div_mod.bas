@@ -5,7 +5,7 @@
 50 REM Seconds to hours, minutes and seconds
 60 T% = 10000
 70 H% = T% DIV 3600 : M% = (T% MOD 3600) DIV 60 : S% = T% MOD 60
-80 PRINT T%;" seconds is ";H%;"h ";M%;"m ";S%;"s"
+80 PRINT ;T%;" seconds is ";H%;"h ";M%;"m ";S%;"s"
 90 REM Digit sum and reverse
 100 N% = 4096 : SUM% = 0 : REV% = 0
 110 REPEAT

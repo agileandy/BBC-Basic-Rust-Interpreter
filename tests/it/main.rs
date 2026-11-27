@@ -173,3 +173,4 @@ mod issue_173_ide_canvas;
 mod issue_188_array_functions;
 mod issue_190_matrix_functions;
 mod issue_191_structures;
+mod issue_195_corpus_table_layout;

@@ -1,6 +1,8 @@
 10 REM Recursive functions
+12 REM A table of N and N!, each at the right of a field of 10
+15 PRINT TAB(9);"N";TAB(18);"N!"
 20 FOR N% = 0 TO 6
-30   PRINT N%;"! = ";FNfact(N%)
+30   PRINT N%, FNfact(N%)
 40 NEXT N%
 50 PRINT "Fibonacci:";
 60 FOR N% = 1 TO 10 : PRINT " ";FNfib(N%); : NEXT N%
