@@ -425,6 +425,19 @@ pub enum Statement {
     MapRemove { map: Expression, key: Expression },
     /// MAPCLEAR m - remove all keys of a map (extension)
     MapClear { map: Expression },
+    /// LISTADDCOL l, handle - add a nested collection at the end of a list
+    /// (extension, issue #142)
+    ListAddCollection {
+        list: Expression,
+        handle: Expression,
+    },
+    /// MAPPUTCOL m, key$, handle - put a nested collection for a key of a
+    /// map (extension, issue #142)
+    MapPutCollection {
+        map: Expression,
+        key: Expression,
+        handle: Expression,
+    },
     /// Empty statement
     Empty,
 }
@@ -1942,7 +1955,8 @@ fn parse_savejson_statement(tokens: &[Token], line_number: Option<u16>) -> Resul
 }
 
 /// Tell if a name is a list statement (extension, issue #139) or a map
-/// statement (extension, issue #140).
+/// statement (extension, issue #140). LISTADDCOL and MAPPUTCOL are from
+/// issue #142.
 fn is_list_statement(name: &str) -> bool {
     matches!(
         name,
@@ -1954,6 +1968,8 @@ fn is_list_statement(name: &str) -> bool {
             | "MAPPUT"
             | "MAPREMOVE"
             | "MAPCLEAR"
+            | "LISTADDCOL"
+            | "MAPPUTCOL"
     )
 }
 
@@ -1973,7 +1989,7 @@ fn parse_list_statement(
 
     let count = match name {
         "LISTCLEAR" | "MAPCLEAR" => 1,
-        "LISTADD" | "LISTREMOVE" | "MAPREMOVE" => 2,
+        "LISTADD" | "LISTREMOVE" | "MAPREMOVE" | "LISTADDCOL" => 2,
         _ => 3,
     };
     if args.len() != count {
@@ -2014,6 +2030,15 @@ fn parse_list_statement(
         "MAPREMOVE" => Statement::MapRemove {
             map: list,
             key: next(),
+        },
+        "LISTADDCOL" => Statement::ListAddCollection {
+            list,
+            handle: next(),
+        },
+        "MAPPUTCOL" => Statement::MapPutCollection {
+            map: list,
+            key: next(),
+            handle: next(),
         },
         _ => Statement::MapClear { map: list },
     })

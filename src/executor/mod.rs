@@ -631,6 +631,19 @@ impl Executor {
                 let map = self.eval_integer(map)?;
                 self.collections.clear_map(map)
             }
+            Statement::ListAddCollection { list, handle } => {
+                let list = self.eval_integer(list)?;
+                let handle = self.eval_integer(handle)?;
+                let element = self.collections.collection_element(handle)?;
+                self.collections.add(list, element)
+            }
+            Statement::MapPutCollection { map, key, handle } => {
+                let map = self.eval_integer(map)?;
+                let key = self.eval_string(key)?;
+                let handle = self.eval_integer(handle)?;
+                let element = self.collections.collection_element(handle)?;
+                self.collections.put(map, &key, element)
+            }
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -2271,6 +2284,39 @@ impl Executor {
                 let index = self.eval_integer(index)?;
                 self.collections.get_text(list, index)
             }
+            // TOJSON$(handle) is an extension (issue #142). An array named
+            // TOJSON$ keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if name == "TOJSON$" && !self.variables.has_array(name) =>
+            {
+                let [handle] = indices.as_slice() else {
+                    return Err(list_arguments_error(name, 1));
+                };
+                let handle = self.eval_integer(handle)?;
+                let value = self
+                    .collections
+                    .to_json(handle, crate::variables::MAX_STRING_LENGTH)?;
+                json_text_in_limit(crate::json::to_compact(&value))
+            }
+            // LISTKIND$(l, i) and MAPKIND$(m, key$) are extensions (issue
+            // #142). An array with that name keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if matches!(name.as_str(), "LISTKIND$" | "MAPKIND$")
+                    && !self.variables.has_array(name) =>
+            {
+                let [handle, at] = indices.as_slice() else {
+                    return Err(list_arguments_error(name, 2));
+                };
+                let handle = self.eval_integer(handle)?;
+                let kind = if name == "LISTKIND$" {
+                    let index = self.eval_integer(at)?;
+                    self.collections.list_kind(handle, index)?
+                } else {
+                    let key = self.eval_string(at)?;
+                    self.collections.map_kind(handle, &key)?
+                };
+                Ok(kind.to_string())
+            }
             // MAPGET$(m, key$) and MAPKEY$(m, n) are extensions (issue #140).
             // An array with that name keeps its old meaning.
             Expression::ArrayAccess { name, indices }
@@ -3105,9 +3151,9 @@ impl Executor {
         }
     }
 
-    /// Tell if `name(...)` is a call of a numeric list function (issue #139)
-    /// or a numeric map function (issue #140). An array of the same name has
-    /// priority.
+    /// Tell if `name(...)` is a call of a numeric list function (issue #139),
+    /// a numeric map function (issue #140) or a JSON conversion function
+    /// (issue #142). An array of the same name has priority.
     fn is_list_call(&self, name: &str) -> bool {
         matches!(
             name,
@@ -3120,6 +3166,8 @@ impl Executor {
                 | "MAPGET"
                 | "MAPHAS"
                 | "MAPISSTR"
+                | "JSONTOLIST"
+                | "JSONTOMAP"
         ) && !self.variables.has_array(name)
     }
 
@@ -3127,11 +3175,23 @@ impl Executor {
     /// or LISTISSTR(l, i). Or evaluate a numeric map function: NEWMAP(),
     /// MAPLEN(m), MAPGET(m, key$), MAPHAS(m, key$) or MAPISSTR(m, key$).
     /// LISTISSTR, MAPHAS and MAPISSTR give TRUE (-1) or FALSE (0).
+    /// JSONTOLIST(json$) and JSONTOMAP(json$) give the handle of a new list
+    /// or map.
     fn eval_list_function(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
         let truth = |value: bool| if value { -1.0 } else { 0.0 };
         match (name, args) {
             ("NEWLIST", []) => self.collections.new_list().map(f64::from),
             ("NEWMAP", []) => self.collections.new_map().map(f64::from),
+            ("JSONTOLIST" | "JSONTOMAP", [json]) => {
+                let value = crate::json::parse(&self.eval_string(json)?)?;
+                let handle = if name == "JSONTOLIST" {
+                    self.collections.list_from_json(value)?
+                } else {
+                    self.collections.map_from_json(value)?
+                };
+                Ok(f64::from(handle))
+            }
+            ("JSONTOLIST" | "JSONTOMAP", _) => Err(list_arguments_error(name, 1)),
             ("MAPLEN", [map]) => {
                 let map = self.eval_integer(map)?;
                 Ok(self.collections.map_length(map)? as f64)
