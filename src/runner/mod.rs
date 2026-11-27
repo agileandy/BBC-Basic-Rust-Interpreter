@@ -327,7 +327,8 @@ pub fn run_program_with_outcome(
     executor.reset_data();
     executor.clear_procedures();
     executor.clear_functions();
-    executor.clear_control_stacks();
+    // RUN starts with no variables, except A% to Z%
+    executor.clear_variables();
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
