@@ -1506,7 +1506,10 @@ impl Executor {
         let y_val = self.eval_integer(y)?;
         let radius_val = self.eval_integer(radius)?;
 
-        self.graphics.draw_circle(x_val, y_val, radius_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics.draw_circle(x_val, y_val, radius_val);
+        }
         Ok(())
     }
 
@@ -1538,8 +1541,11 @@ impl Executor {
         let major_val = self.eval_integer(major)?;
         let minor_val = self.eval_integer(minor)?;
 
-        self.graphics
-            .draw_ellipse(x_val, y_val, major_val, minor_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics
+                .draw_ellipse(x_val, y_val, major_val, minor_val);
+        }
         Ok(())
     }
 
@@ -1560,8 +1566,11 @@ impl Executor {
         let x2_val = x1_val + width_val;
         let y2_val = y1_val + height_val;
 
-        self.graphics
-            .draw_rectangle(x1_val, y1_val, x2_val, y2_val, filled);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics
+                .draw_rectangle(x1_val, y1_val, x2_val, y2_val, filled);
+        }
         Ok(())
     }
 
@@ -1570,7 +1579,10 @@ impl Executor {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
 
-        self.graphics.flood_fill(x_val, y_val);
+        // A text-only screen mode has no graphics
+        if self.screen_mode.has_graphics {
+            self.graphics.flood_fill(x_val, y_val);
+        }
         Ok(())
     }
 

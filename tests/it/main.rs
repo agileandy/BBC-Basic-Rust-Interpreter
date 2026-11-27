@@ -107,3 +107,4 @@ mod issue_119_line_feed_column;
 mod issue_118_mode_above_7;
 mod issue_125_lower_case_command_words;
 mod issue_104_json_change;
+mod issue_127_circle_in_text_mode;
