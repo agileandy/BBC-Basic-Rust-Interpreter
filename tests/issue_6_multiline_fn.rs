@@ -280,10 +280,7 @@ fn test_removed_function_is_unknown_on_next_run() {
     program.delete_line(100);
     let result = run_program(&mut executor, &mut program);
 
-    assert_eq!(
-        result,
-        Err("Syntax error at line 10: Unknown function: a".to_string())
-    );
+    assert_eq!(result, Err("No such FN/PROC: FNa at line 10".to_string()));
 }
 
 #[test]

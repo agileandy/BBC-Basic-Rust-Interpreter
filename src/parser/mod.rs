@@ -2297,9 +2297,11 @@ fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement>
         });
     }
 
-    // Extract function name (identifier)
+    // Extract function name (identifier). The name keeps its FN prefix, as
+    // in a call, so that the executor can tell a user function from a
+    // built-in function.
     let name = match &tokens[0] {
-        Token::Identifier(n) => n.clone(),
+        Token::Identifier(n) => format!("FN{}", n),
         _ => {
             return Err(BBCBasicError::SyntaxError {
                 message: "Expected identifier for function name".to_string(),
@@ -3015,13 +3017,14 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                 });
             }
 
-            // FN name: a call to a user-defined function. The name follows the keyword.
+            // FN name: a call to a user-defined function. The name follows the
+            // keyword, and the call keeps the FN prefix.
             let mut is_user_function = false;
             let keyword = match tokens.get(*pos) {
                 Some(Token::Identifier(name)) if keyword == "FN" => {
                     *pos += 1;
                     is_user_function = true;
-                    name.clone()
+                    format!("FN{}", name)
                 }
                 // STR$~(X) gives the hex text of X
                 Some(Token::Operator('~')) if keyword == "STR$" => {

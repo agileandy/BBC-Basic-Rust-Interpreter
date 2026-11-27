@@ -183,7 +183,7 @@ fn test_bad_call_text() {
 fn test_runtime_syntax_error_text() {
     assert_eq!(
         error_of(&["10 DEF FNa(X) = X", "20 PRINT FNb(1)"]),
-        "Syntax error at line 20: Unknown function: b"
+        "No such FN/PROC: FNb at line 20"
     );
 }
 
