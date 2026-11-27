@@ -91,6 +91,8 @@ fn main() {
             program.clear();
             // NEW removes the variables, except A% to Z%
             executor.clear_variables();
+            // The handler line belongs to the old program
+            executor.clear_error_handler();
             println!("Program cleared");
             continue;
         }
@@ -304,6 +306,8 @@ fn load_program(
     // Clear the program and the variables, as NEW does. A% to Z% stay.
     program.clear();
     executor.clear_variables();
+    // The handler line belongs to the old program
+    executor.clear_error_handler();
 
     // Parse and add each line
     for (line_num, line) in content.lines().enumerate() {
