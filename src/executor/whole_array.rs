@@ -46,6 +46,10 @@ impl Executor {
             ArrayOperand::Scalar(expression) => {
                 Ok(Operand::Scalar(self.array_value(expression, text)?))
             }
+            ArrayOperand::Product(left, right) => Ok(Operand::Array(arrays::product(
+                self.variables.get_array(left)?,
+                self.variables.get_array(right)?,
+            )?)),
         }
     }
 
