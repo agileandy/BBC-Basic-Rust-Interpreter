@@ -143,3 +143,23 @@ fn test_statement_after_repeat_with_no_colon_runs() {
     assert_eq!(result, Ok(()));
     assert_eq!(output, "3\n");
 }
+
+#[test]
+fn test_memory_forms_still_run() {
+    let (result, output) = run(&[
+        "10 A% = &3000",
+        "20 ?A% = 300",
+        "30 A%?1 = 7",
+        "40 PRINT A%?1 + 2",
+        "50 A%!4 = -5",
+        "60 PRINT !(A% + 4)",
+        "70 PRINT ?A%",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "9\n-5\n44\n");
+}
+
+#[test]
+fn test_memory_write_with_two_numbers() {
+    check_error(&["10 A% = &3000", "20 ?A% = 1 2", "30 PRINT \"RAN\""], "20");
+}
