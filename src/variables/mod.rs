@@ -134,6 +134,9 @@ pub struct VariableStore {
     /// Arrays, apart from scalars of the same name. `None` is an array that
     /// LOCAL declared but no DIM has made yet.
     arrays: HashMap<String, Option<Variable>>,
+    /// Structures, apart from scalars and arrays of the same name (issue
+    /// #191). Each structure has its members in the order of the DIM.
+    structures: HashMap<String, Vec<(String, Variable)>>,
 }
 
 /// True if the name is one of the resident integer variables A% to Z%
@@ -151,7 +154,82 @@ impl VariableStore {
         Self {
             variables,
             arrays: HashMap::new(),
+            structures: HashMap::new(),
         }
+    }
+
+    /// Declare a structure with these member names (issue #191). Each member
+    /// starts at 0 or an empty string, by the suffix of its name. A second
+    /// DIM of a structure gives Bad DIM, as for an array. The parser checks
+    /// the member names.
+    pub fn dim_structure(&mut self, name: &str, members: &[String]) -> Result<()> {
+        if self.structures.contains_key(name) {
+            return Err(BBCBasicError::BadDim);
+        }
+        let members = members
+            .iter()
+            .map(|member| {
+                let value = if member.ends_with('%') {
+                    Variable::Integer(0)
+                } else if member.ends_with('$') {
+                    Variable::String(String::new())
+                } else {
+                    Variable::Real(0.0)
+                };
+                (member.clone(), value)
+            })
+            .collect();
+        self.structures.insert(name.to_string(), members);
+        Ok(())
+    }
+
+    /// The value of a structure member. A name that is not a structure gives
+    /// Bad use of structure. A member that does not exist gives No such variable.
+    pub fn get_member(&self, structure: &str, member: &str) -> Result<&Variable> {
+        let members = self
+            .structures
+            .get(structure)
+            .ok_or(BBCBasicError::BadStructure)?;
+        members
+            .iter()
+            .find(|(name, _)| name == member)
+            .map(|(_, value)| value)
+            .ok_or_else(|| BBCBasicError::NoSuchVariable(format!("{structure}.{member}")))
+    }
+
+    /// Set a structure member. The value must have the type of the member.
+    /// The errors are the errors of `get_member`, and Type mismatch.
+    pub fn set_member(&mut self, structure: &str, member: &str, value: Variable) -> Result<()> {
+        let members = self
+            .structures
+            .get_mut(structure)
+            .ok_or(BBCBasicError::BadStructure)?;
+        let (_, slot) = members
+            .iter_mut()
+            .find(|(name, _)| name == member)
+            .ok_or_else(|| BBCBasicError::NoSuchVariable(format!("{structure}.{member}")))?;
+        match (&*slot, &value) {
+            (Variable::Integer(_), Variable::Integer(_))
+            | (Variable::Real(_), Variable::Real(_)) => {}
+            (Variable::String(_), Variable::String(text)) if text.len() > MAX_STRING_LENGTH => {
+                return Err(BBCBasicError::StringTooLong)
+            }
+            (Variable::String(_), Variable::String(_)) => {}
+            _ => return Err(BBCBasicError::TypeMismatch),
+        }
+        *slot = value;
+        Ok(())
+    }
+
+    /// The structures and their members, in name order
+    pub fn structures(&self) -> Vec<(&str, &[(String, Variable)])> {
+        let mut structures: Vec<_> = self
+            .structures
+            .iter()
+            .map(|(name, members)| (name.as_str(), members.as_slice()))
+            .collect();
+        structures.sort_by_key(|(name, _)| *name);
+        structures
     }
 
     /// Set an integer variable
@@ -367,11 +445,12 @@ impl VariableStore {
         arrays
     }
 
-    /// Clear all variables and arrays. The resident integer variables A% to
-    /// Z% keep their values.
+    /// Clear all variables, arrays and structures. The resident integer
+    /// variables A% to Z% keep their values.
     pub fn clear(&mut self) {
         self.variables.retain(|name, _| is_resident_integer(name));
         self.arrays.clear();
+        self.structures.clear();
     }
 }
 
@@ -462,6 +541,34 @@ mod tests {
 
         let result = store.set_string_var("A$".to_string(), long_string);
         assert!(matches!(result, Err(BBCBasicError::StringTooLong)));
+    }
+
+    #[test]
+    fn test_structure_members() {
+        let mut store = VariableStore::new();
+        let members = ["x", "n%", "s$"].map(String::from);
+        store.dim_structure("p", &members).unwrap();
+        assert_eq!(store.get_member("p", "n%").unwrap(), &Variable::Integer(0));
+        store.set_member("p", "x", Variable::Real(1.5)).unwrap();
+        assert_eq!(store.get_member("p", "x").unwrap(), &Variable::Real(1.5));
+        assert!(matches!(
+            store.set_member("p", "s$", Variable::Integer(1)),
+            Err(BBCBasicError::TypeMismatch)
+        ));
+        assert!(matches!(
+            store.get_member("p", "z"),
+            Err(BBCBasicError::NoSuchVariable(name)) if name == "p.z"
+        ));
+        assert!(matches!(
+            store.get_member("q", "x"),
+            Err(BBCBasicError::BadStructure)
+        ));
+        assert!(matches!(
+            store.dim_structure("p", &members),
+            Err(BBCBasicError::BadDim)
+        ));
+        store.clear();
+        assert!(store.structures().is_empty());
     }
 
     // Property-Based Tests

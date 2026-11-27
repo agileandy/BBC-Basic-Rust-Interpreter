@@ -85,6 +85,9 @@ pub mod error {
         NoSuchVariable(String),
         // An element of an array that has no DIM. ERR 14 (issue #122).
         Array,
+        // A member of a name that is not a structure. ERR 56 of BBC BASIC
+        // for Windows (issue #191).
+        BadStructure,
 
         // Memory errors
         InvalidAddress(u16),
@@ -166,6 +169,7 @@ pub mod error {
                 BBCBasicError::NoSuchFnProc(name) => write!(f, "No such FN/PROC: {}", name),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
                 BBCBasicError::Array => write!(f, "Array"),
+                BBCBasicError::BadStructure => write!(f, "Bad use of structure"),
                 BBCBasicError::InvalidAddress(addr) => write!(f, "Invalid address: ${:04X}", addr),
                 BBCBasicError::MemoryExhausted => write!(f, "Memory exhausted"),
                 BBCBasicError::FileNotFound(name) => write!(f, "File not found: {}", name),

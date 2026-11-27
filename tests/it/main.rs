@@ -172,3 +172,4 @@ mod issue_91_print_number_fields;
 mod issue_173_ide_canvas;
 mod issue_188_array_functions;
 mod issue_190_matrix_functions;
+mod issue_191_structures;

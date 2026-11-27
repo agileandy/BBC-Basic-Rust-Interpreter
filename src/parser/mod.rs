@@ -7,6 +7,7 @@ use crate::error::BBCBasicError;
 use crate::error::Result;
 use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
 
+mod structures;
 mod whole_array;
 pub use whole_array::{parse_array_reference, ArrayExpression, ArrayOperand};
 mod matrix;
@@ -107,6 +108,8 @@ pub enum Expression {
     String(String),
     /// Variable reference
     Variable(String),
+    /// A structure member, such as `point.x` (issue #191)
+    Member { structure: String, member: String },
     /// Array access with indices
     ArrayAccess {
         name: String,
@@ -164,6 +167,8 @@ pub enum InputItem {
         name: String,
         indices: Vec<Expression>,
     },
+    /// A structure member that gets a reply (issue #191)
+    Member { structure: String, member: String },
 }
 
 /// The form of a TRACE statement
@@ -204,6 +209,12 @@ pub enum Statement {
         statement: crate::matrix::MatrixStatement,
         target: String,
         source: String,
+    },
+    /// A structure member assignment, such as `point.x = 1` (issue #191)
+    MemberAssignment {
+        structure: String,
+        member: String,
+        expression: Expression,
     },
     /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
     /// or `base!offset = value`. The address includes the offset.
@@ -484,6 +495,8 @@ pub enum DimItem {
     /// A block of `size + 1` bytes, such as `B% 10`. The numeric variable
     /// gets the address of the first byte.
     Block { name: String, size: Expression },
+    /// A structure, such as `point{x, y%, name$}` (issue #191)
+    Structure { name: String, members: Vec<String> },
 }
 
 /// Data value types for DATA statement
@@ -522,7 +535,11 @@ impl Expression {
             Expression::Integer(_) => ExpressionType::Integer,
             Expression::Real(_) => ExpressionType::Real,
             Expression::String(_) => ExpressionType::String,
-            Expression::Variable(name) => {
+            Expression::Variable(name)
+            | Expression::Member {
+                member: name,
+                structure: _,
+            } => {
                 if name.ends_with('%') {
                     ExpressionType::Integer
                 } else if name.ends_with('$') {
@@ -823,6 +840,7 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
     if tokens.is_empty() {
         return Ok(Statement::Empty);
     }
+    structures::check_no_whole_structure(tokens, line.line_number)?;
 
     // END, STOP, CLS, CLEAR and REPORT take no argument
     if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8 | 0xF6), unexpected, ..] = tokens.as_slice() {
@@ -890,7 +908,7 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // Variable assignment (without LET keyword), or a memory write
         // such as ?A = 5
-        Token::Identifier(_) | Token::Operator('?' | '!') => {
+        Token::Identifier(_) | Token::Member(..) | Token::Operator('?' | '!') => {
             match parse_assignment(tokens, line.line_number) {
                 // MKDIR path$ and RMDIR path$ are extension statements. A line
                 // that is a valid assignment, such as MKDIR = 3, keeps that meaning.
@@ -1304,6 +1322,10 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
         return parse_memory_assignment(tokens, line_number);
     }
 
+    if matches!(tokens.first(), Some(Token::Member(..))) {
+        return structures::parse_member_assignment(tokens, line_number);
+    }
+
     if tokens.len() < 3 {
         return Err(BBCBasicError::SyntaxError {
             message: "Invalid assignment".to_string(),
@@ -1432,6 +1454,8 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
     {
         return parse_for_each_statement(&tokens[1..], line_number);
     }
+
+    structures::check_for_variable(tokens, line_number)?;
 
     // FOR variable = start TO end [STEP step]
     if tokens.len() < 5 {
@@ -1862,6 +1886,7 @@ fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<I
                 }
             }
             Token::Identifier(name) => InputItem::Variable(name.clone()),
+            Token::Member(..) => structures::input_member(&tokens[pos..], line_number)?,
             Token::Separator('\'') => InputItem::NewLine,
             _ => break,
         };
@@ -1984,7 +2009,7 @@ fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
 /// form of INPUT. Other tokens give a syntax error (issue #154).
 fn parse_input_file_target(part: &[Token], line_number: Option<u16>) -> Result<InputItem> {
     let is_target = match part {
-        [Token::Identifier(_)] => true,
+        [Token::Identifier(_) | Token::Member(..)] => true,
         [Token::Identifier(_), Token::Separator('('), ..] => {
             find_closing_bracket(part, 1) == Some(part.len() - 1)
         }
@@ -2516,6 +2541,17 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             });
         }
 
+        // A name and { declare a structure (issue #191)
+        if matches!(tokens[pos], Token::Separator('{')) {
+            let (item, used) = structures::parse_dim_structure(name, &tokens[pos..], line_number)?;
+            items.push(item);
+            match structures::next_dim_item(tokens, pos + used, line_number)? {
+                Some(next) => pos = next,
+                None => break,
+            }
+            continue;
+        }
+
         // A name with no bracket reserves a block: the size runs to the
         // next comma outside brackets
         if !matches!(tokens[pos], Token::Separator('(')) {
@@ -2677,6 +2713,9 @@ fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 /// Parse one READ target: a variable, or an array element with the index
 /// form of INPUT. Another form gives a syntax error.
 fn parse_read_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
+    if let Some(member) = structures::member_target(tokens) {
+        return Ok(member);
+    }
     match tokens {
         [Token::Identifier(name)] => Ok(InputItem::Variable(name.clone())),
         [Token::Identifier(name), Token::Separator('('), ..]
@@ -2717,7 +2756,7 @@ fn parse_swap_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 /// Parse one SWAP target: a variable, or an array element with one index or
 /// more. Another form gives a syntax error.
 fn parse_swap_target(tokens: &[Token], line_number: Option<u16>) -> Result<InputItem> {
-    let is_variable = matches!(tokens, [Token::Identifier(_)]);
+    let is_variable = matches!(tokens, [Token::Identifier(_) | Token::Member(..)]);
     let is_element = matches!(tokens, [Token::Identifier(_), Token::Separator('('), ..])
         && tokens.len() > 3
         && find_closing_bracket(tokens, 1) == Some(tokens.len() - 1);
@@ -3628,6 +3667,11 @@ fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> 
     let token = &tokens[*pos];
 
     match token {
+        // A structure member, such as point.x (issue #191)
+        Token::Member(structure, member) => {
+            *pos += 1;
+            structures::member_expression(structure, member, tokens.get(*pos))
+        }
         // Literals
         Token::Integer(val) | Token::HexInteger(val) => {
             *pos += 1;

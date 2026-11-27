@@ -8,6 +8,7 @@ mod console;
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
 mod matrix;
+mod structures;
 mod vdu;
 mod whole_array;
 
@@ -51,8 +52,16 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
-/// The name of a SWAP target and, for an array element, its index values
-type SwapLocation<'a> = (&'a str, Option<Vec<usize>>);
+/// Where the value of a SWAP target is: a variable, the index values of an
+/// array element, or the structure of a member (issue #191)
+enum SwapPlace<'a> {
+    Variable,
+    Element(Vec<usize>),
+    Member(&'a str),
+}
+
+/// The name of a SWAP target, which gives its type, and its place
+type SwapLocation<'a> = (&'a str, SwapPlace<'a>);
 
 /// Convert a value to the type of the variable `name`. A number and a
 /// string give "Type mismatch". A real that does not fit in an integer gives
@@ -589,6 +598,11 @@ impl Executor {
                 target,
                 source,
             } => self.execute_matrix_statement(*statement, target, source),
+            Statement::MemberAssignment {
+                structure,
+                member,
+                expression,
+            } => self.execute_member_assignment(structure, member, expression),
             Statement::MemoryAssignment {
                 width,
                 address,
@@ -1017,6 +1031,9 @@ impl Executor {
             Expression::Integer(_) => Ok((self.eval_integer(expr)?.to_string(), true)),
             Expression::Real(_) => self.format_real_item(expr),
             Expression::String(_) => Ok((self.eval_string(expr)?, false)),
+            Expression::Member { structure, member } => {
+                self.format_member(structure, member).map(|text| (text, false))
+            }
             Expression::Variable(name) => {
                 if name.ends_with('%') {
                     Ok((self.eval_integer(expr)?.to_string(), true))
@@ -1505,7 +1522,7 @@ impl Executor {
         let mut question_mark = true;
 
         for item in items {
-            let (var, indices) = match item {
+            let var = match item {
                 InputItem::Prompt {
                     text,
                     question_mark: shows,
@@ -1518,8 +1535,9 @@ impl Executor {
                     self.print_new_line();
                     continue;
                 }
-                InputItem::Variable(var) => (var, None),
-                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
+                InputItem::Variable(var) => var,
+                InputItem::ArrayElement { name, .. } => name,
+                InputItem::Member { member, .. } => member,
             };
             if values.is_empty() {
                 let reply = self.read_input_reply(question_mark)?;
@@ -1536,9 +1554,25 @@ impl Executor {
             } else {
                 Variable::Real(parse_leading_number(&reply))
             };
-            self.store_input_value(var, indices.map(Vec::as_slice), value)?;
+            self.store_target(item, value)?;
         }
         Ok(())
+    }
+
+    /// Store a value in the target of INPUT, READ or INPUT#: a variable, an
+    /// array element or a structure member (issue #191)
+    fn store_target(&mut self, target: &InputItem, value: Variable) -> Result<()> {
+        match target {
+            InputItem::Variable(name) => self.store_input_value(name, None, value),
+            InputItem::ArrayElement { name, indices } => {
+                self.store_input_value(name, Some(indices), value)
+            }
+            InputItem::Member { structure, member } => {
+                self.variables.set_member(structure, member, value)
+            }
+            // A prompt text and a new line store no value
+            InputItem::Prompt { .. } | InputItem::NewLine => Ok(()),
+        }
     }
 
     /// Store an INPUT value in a variable, or in an array element if `indices`
@@ -1576,7 +1610,7 @@ impl Executor {
         let mut question_mark = true;
 
         for item in items {
-            let (var, indices) = match item {
+            let var = match item {
                 InputItem::Prompt {
                     text,
                     question_mark: shows,
@@ -1589,8 +1623,9 @@ impl Executor {
                     self.print_new_line();
                     continue;
                 }
-                InputItem::Variable(var) => (var, None),
-                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
+                InputItem::Variable(var) => var,
+                InputItem::ArrayElement { name, .. } => name,
+                InputItem::Member { member, .. } => member,
             };
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
@@ -1598,11 +1633,7 @@ impl Executor {
             let reply = self.read_input_reply(question_mark)?;
             question_mark = true;
             let reply = without_line_end(&reply);
-            self.store_input_value(
-                var,
-                indices.map(Vec::as_slice),
-                Variable::String(reply.to_string()),
-            )?;
+            self.store_target(item, Variable::String(reply.to_string()))?;
         }
         Ok(())
     }
@@ -1661,6 +1692,10 @@ impl Executor {
                 DimItem::Array { name, dimensions } => (name, dimensions),
                 DimItem::Block { name, size } => {
                     self.execute_dim_block(name, size)?;
+                    continue;
+                }
+                DimItem::Structure { name, members } => {
+                    self.execute_dim_structure(name, members)?;
                     continue;
                 }
             };
@@ -1784,9 +1819,10 @@ impl Executor {
     /// `READ I, A(I)` uses the new I (issue #153).
     fn execute_read(&mut self, variables: &[InputItem]) -> Result<()> {
         for target in variables {
-            let (var_name, indices) = match target {
-                InputItem::Variable(name) => (name, None),
-                InputItem::ArrayElement { name, indices } => (name, Some(indices.as_slice())),
+            let var_name = match target {
+                InputItem::Variable(name) => name,
+                InputItem::ArrayElement { name, .. } => name,
+                InputItem::Member { member, .. } => member,
                 InputItem::Prompt { .. } | InputItem::NewLine => {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Expected variable name in READ".to_string(),
@@ -1823,7 +1859,7 @@ impl Executor {
                     DataValue::String(s) => parse_leading_number(s),
                 })
             };
-            self.store_input_value(var_name, indices, value)?;
+            self.store_target(target, value)?;
         }
         Ok(())
     }
@@ -1845,7 +1881,8 @@ impl Executor {
     /// The name of a SWAP target and, for an array element, its index values
     fn swap_location<'a>(&mut self, target: &'a InputItem) -> Result<SwapLocation<'a>> {
         match target {
-            InputItem::Variable(name) => Ok((name, None)),
+            InputItem::Variable(name) => Ok((name, SwapPlace::Variable)),
+            InputItem::Member { structure, member } => Ok((member, SwapPlace::Member(structure))),
             InputItem::ArrayElement { name, indices } => {
                 let mut index_values = Vec::with_capacity(indices.len());
                 for index_expr in indices {
@@ -1855,7 +1892,7 @@ impl Executor {
                     }
                     index_values.push(idx as usize);
                 }
-                Ok((name, Some(index_values)))
+                Ok((name, SwapPlace::Element(index_values)))
             }
             // The parser gives no prompt text and no ' in SWAP
             InputItem::Prompt { .. } | InputItem::NewLine => Err(BBCBasicError::SyntaxError {
@@ -1867,9 +1904,11 @@ impl Executor {
 
     /// The value of a SWAP target. A variable that does not exist gives
     /// "No such variable".
-    fn swap_value(&self, (name, indices): &SwapLocation) -> Result<Variable> {
-        if let Some(indices) = indices {
-            return self.variables.get_array_element(name, indices);
+    fn swap_value(&self, (name, place): &SwapLocation) -> Result<Variable> {
+        match place {
+            SwapPlace::Element(indices) => return self.variables.get_array_element(name, indices),
+            SwapPlace::Member(structure) => return self.member_value(structure, name),
+            SwapPlace::Variable => {}
         }
         let value = if name.ends_with('$') {
             self.variables
@@ -1887,10 +1926,11 @@ impl Executor {
     }
 
     /// Store a converted value in a SWAP target
-    fn store_swap_value(&mut self, (name, indices): &SwapLocation, value: Variable) -> Result<()> {
-        match indices {
-            Some(indices) => self.variables.set_array_element(name, indices, value),
-            None => self.store_input_value(name, None, value),
+    fn store_swap_value(&mut self, (name, place): &SwapLocation, value: Variable) -> Result<()> {
+        match place {
+            SwapPlace::Element(indices) => self.variables.set_array_element(name, indices, value),
+            SwapPlace::Member(structure) => self.variables.set_member(structure, name, value),
+            SwapPlace::Variable => self.store_input_value(name, None, value),
         }
     }
 
@@ -1962,7 +2002,11 @@ impl Executor {
                 .collect();
             format!("{}({})", name, top_indices.join(","))
         });
-        scalars.chain(arrays).collect()
+        // The members of each structure follow the arrays (issue #191)
+        scalars
+            .chain(arrays)
+            .chain(self.structure_listing())
+            .collect()
     }
 
     /// Execute CLS statement - clear screen
@@ -2242,6 +2286,7 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => real_to_integer(*val),
+            Expression::Member { structure, member } => self.member_integer(structure, member),
             Expression::Variable(name) if self.is_new_list_call(name) => self.new_collection(name),
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 real_to_integer(self.eval_list_function(name, indices)?)
@@ -2461,6 +2506,7 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
+            Expression::Member { structure, member } => self.member_real(structure, member),
             Expression::Variable(name) if self.is_new_list_call(name) => {
                 self.new_collection(name).map(f64::from)
             }
@@ -2644,7 +2690,9 @@ impl Executor {
                         && !name.ends_with('$')
                         && self.variables.get_real_var(name).is_some())
             }
-            Expression::ArrayAccess { name, .. } => !name.ends_with('%') && !name.ends_with('$'),
+            Expression::ArrayAccess { name, .. } | Expression::Member { member: name, .. } => {
+                !name.ends_with('%') && !name.ends_with('$')
+            }
             Expression::BinaryOp { op, left, right } => match op {
                 // In BBC BASIC, `/` always gives a real value
                 BinaryOperator::Divide => true,
@@ -2716,6 +2764,7 @@ impl Executor {
             Expression::Variable(name)
             | Expression::ArrayAccess { name, .. }
             | Expression::FunctionCall { name, .. } => name.ends_with('$') || name == "STR$~",
+            Expression::Member { member, .. } => member.ends_with('$'),
             Expression::BinaryOp {
                 op: BinaryOperator::Add | BinaryOperator::StringConcat,
                 left,
@@ -2731,6 +2780,7 @@ impl Executor {
     fn eval_string_level(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::String(val) => Ok(val.clone()),
+            Expression::Member { structure, member } => self.member_string(structure, member),
             // TIME$ is the date and time in UTC. TIME$ is from the BBC Master, not the Model B.
             Expression::Variable(name) if name == "TIME$" => {
                 let seconds = std::time::SystemTime::now()
@@ -4723,9 +4773,10 @@ impl Executor {
 
         // Each target reads one record: one line of the file (issue #157)
         for target in targets {
-            let (var_name, indices) = match target {
-                InputItem::Variable(var) => (var, None),
-                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
+            let var_name = match target {
+                InputItem::Variable(var) => var,
+                InputItem::ArrayElement { name, .. } => name,
+                InputItem::Member { member, .. } => member,
                 // The parser gives no prompt text and no ' in INPUT#
                 InputItem::Prompt { .. } | InputItem::NewLine => continue,
             };
@@ -4741,7 +4792,7 @@ impl Executor {
                 Variable::Real(record.trim().parse::<f64>().unwrap_or(0.0))
             };
             // The indices of an element are evaluated now (issue #154)
-            self.store_input_value(var_name, indices.map(Vec::as_slice), value)?;
+            self.store_target(target, value)?;
         }
 
         Ok(())
