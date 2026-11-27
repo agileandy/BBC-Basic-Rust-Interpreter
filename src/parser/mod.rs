@@ -373,6 +373,10 @@ pub enum Statement {
         channel: Expression,
         position: Expression,
     },
+    /// MKDIR statement - make one directory (extension, not BBC BASIC)
+    MakeDirectory { path: Expression },
+    /// RMDIR statement - remove one empty directory (extension, not BBC BASIC)
+    RemoveDirectory { path: Expression },
     /// Empty statement
     Empty,
 }
@@ -611,7 +615,21 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // Variable assignment (without LET keyword), or a memory write
         // such as ?A = 5
         Token::Identifier(_) | Token::Operator('?' | '!') => {
-            parse_assignment(tokens, line.line_number)
+            match parse_assignment(tokens, line.line_number) {
+                // MKDIR path$ and RMDIR path$ are extension statements. A line
+                // that is a valid assignment, such as MKDIR = 3, keeps that meaning.
+                Err(_) if matches!(&tokens[0], Token::Identifier(name) if name == "MKDIR") => {
+                    Ok(Statement::MakeDirectory {
+                        path: parse_expression(&tokens[1..])?,
+                    })
+                }
+                Err(_) if matches!(&tokens[0], Token::Identifier(name) if name == "RMDIR") => {
+                    Ok(Statement::RemoveDirectory {
+                        path: parse_expression(&tokens[1..])?,
+                    })
+                }
+                parsed => parsed,
+            }
         }
 
         // FOR loop

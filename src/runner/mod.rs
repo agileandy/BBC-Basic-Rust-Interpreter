@@ -1024,6 +1024,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::BadMode => 25,
         // Not a BBC BASIC error: BBC BASIC does not use 150 (issue #102)
         BBCBasicError::BadJson(_) => 150,
+        // Bad directory is an extension error. BBC BASIC does not use ERR 150.
+        BBCBasicError::BadDirectory => 150,
         _ => 255,
     }
 }

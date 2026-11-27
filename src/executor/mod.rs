@@ -503,6 +503,12 @@ impl Executor {
                 self.eval_integer(position)?;
                 Ok(())
             }
+            Statement::MakeDirectory { path } => {
+                crate::filesystem::make_directory(&self.eval_string(path)?)
+            }
+            Statement::RemoveDirectory { path } => {
+                crate::filesystem::remove_directory(&self.eval_string(path)?)
+            }
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -1975,6 +1981,19 @@ impl Executor {
                     return Err(BBCBasicError::StringTooLong);
                 }
                 Ok(text)
+            }
+            // LISTDIR$(path$) is an extension. The parser cannot tell it from
+            // an array, so an array named LISTDIR$ keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if name == "LISTDIR$" && self.variables.save_array(name).is_none() =>
+            {
+                let [path] = indices.as_slice() else {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: "LISTDIR$ requires 1 argument".to_string(),
+                        line: None,
+                    });
+                };
+                crate::filesystem::list_directory(&self.eval_string(path)?)
             }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
