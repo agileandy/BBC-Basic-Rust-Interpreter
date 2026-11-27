@@ -16,6 +16,9 @@
 //! | `LOWER$` | Convert string to lowercase | ❌ No |
 //! | `STRING$` | Repeat a character N times | ❌ No |
 //! | `REPORT$` | Get last error message as string | ❌ No |
+//! | `LOADJSON$(file$)` | Read a JSON file as compact text (`src/json`) | ❌ No |
+//! | `JSONVALID(json$)` | TRUE if the text is correct JSON (`src/json`) | ❌ No |
+//! | `SAVEJSON file$, json$` | Statement: write JSON text with indentation (`src/json`) | ❌ No |
 //!
 //! ### Standard BBC BASIC String Functions (for reference)
 //!

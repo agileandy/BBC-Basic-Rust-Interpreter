@@ -11,6 +11,7 @@ pub mod executor;
 pub mod extensions;
 pub mod filesystem;
 pub mod graphics;
+pub mod json;
 pub mod memory;
 pub mod os;
 pub mod parser;
@@ -94,6 +95,8 @@ pub mod error {
         BadCall,
         // MODE with a number that is not 0 to 7
         BadMode,
+        // A text that is not JSON, with the detail from the parser (issue #102)
+        BadJson(String),
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -141,6 +144,7 @@ pub mod error {
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),
+                BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }

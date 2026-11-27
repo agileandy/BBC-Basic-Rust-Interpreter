@@ -320,6 +320,8 @@ pub enum Statement {
         handle: Expression,
         position: Expression,
     },
+    /// SAVEJSON file$, json$ - write a JSON text to a file (extension, issue #102)
+    SaveJson { file: Expression, json: Expression },
     /// PLOT statement - general plotting with mode code
     Plot {
         mode: Expression,
@@ -592,6 +594,18 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                 });
             }
             parse_assignment(&tokens[1..], line.line_number)
+        }
+
+        // SAVEJSON file$, json$ (issue #102). With '=' or '(' after it, the
+        // name is a variable or an array, so that old programs do not change.
+        Token::Identifier(name)
+            if name == "SAVEJSON"
+                && !matches!(
+                    tokens.get(1),
+                    Some(Token::Operator('=') | Token::Separator('('))
+                ) =>
+        {
+            parse_savejson_statement(&tokens[1..], line.line_number)
         }
 
         // Variable assignment (without LET keyword), or a memory write
@@ -1572,6 +1586,32 @@ fn parse_bput_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
     let value = parse_expression(&tokens[comma_pos + 1..])?;
 
     Ok(Statement::Bput { handle, value })
+}
+
+/// Parse SAVEJSON file$, json$ (extension, issue #102)
+fn parse_savejson_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // The comma between the two texts is the first comma outside brackets
+    let mut depth = 0;
+    let comma_pos = tokens
+        .iter()
+        .position(|token| {
+            match token {
+                Token::Separator('(') => depth += 1,
+                Token::Separator(')') => depth -= 1,
+                Token::Separator(',') if depth == 0 => return true,
+                _ => {}
+            }
+            false
+        })
+        .ok_or_else(|| BBCBasicError::SyntaxError {
+            message: "Expected comma after file name in SAVEJSON".to_string(),
+            line: line_number,
+        })?;
+
+    let file = parse_expression(&tokens[..comma_pos])?;
+    let json = parse_expression(&tokens[comma_pos + 1..])?;
+
+    Ok(Statement::SaveJson { file, json })
 }
 
 /// Parse PTR# assignment (file I/O)

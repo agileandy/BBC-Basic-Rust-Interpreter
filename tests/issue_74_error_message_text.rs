@@ -110,7 +110,7 @@ fn test_subscript_text() {
 #[test]
 fn test_string_too_long_text() {
     assert_eq!(
-        error_of(&["10 A$ = STRING$(200, \"A\") + STRING$(100, \"B\")"]),
+        error_of(&["10 A$ = STRING$(40000, \"A\") + STRING$(30000, \"B\")"]),
         "String too long at line 10"
     );
 }
