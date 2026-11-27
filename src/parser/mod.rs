@@ -134,6 +134,14 @@ pub enum PrintItem {
     Comma,           // ,
 }
 
+/// Item of a VDU statement. A semicolon after the item sends it as 2 bytes,
+/// low byte first. A comma or no separator sends it as 1 byte.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VduItem {
+    pub value: Expression,
+    pub two_bytes: bool,
+}
+
 /// Item of an INPUT or INPUT LINE statement, in the order of the source
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputItem {
@@ -334,6 +342,8 @@ pub enum Statement {
     Clg,
     /// MODE statement - select a screen mode from 0 to 7
     Mode { mode: Expression },
+    /// VDU statement - send bytes to the display
+    Vdu { items: Vec<VduItem> },
     /// ELLIPSE statement - draw an ellipse
     Ellipse {
         x: Expression,
@@ -745,6 +755,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // MODE statement
         Token::Keyword(0xEB) => parse_mode_statement(&tokens[1..], line.line_number),
+
+        // VDU statement
+        Token::Keyword(0xEF) => parse_vdu_statement(&tokens[1..], line.line_number),
 
         // Extended statements (0xC8 prefix)
         Token::ExtendedKeyword(0xC8, extended_token) => match extended_token {
@@ -2115,6 +2128,47 @@ fn parse_mode_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 
     let mode = parse_expression(tokens)?;
     Ok(Statement::Mode { mode })
+}
+
+/// Parse VDU statement: VDU a, b; c
+/// A comma or no separator after an item sends 1 byte. A semicolon sends 2.
+/// A comma in brackets is part of the item.
+fn parse_vdu_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let syntax_error = |message: &str| BBCBasicError::SyntaxError {
+        message: message.to_string(),
+        line: line_number,
+    };
+    if tokens.is_empty() {
+        return Err(syntax_error("VDU requires a value"));
+    }
+
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut depth = 0;
+    for (pos, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Separator('(') => depth += 1,
+            Token::Separator(')') => depth -= 1,
+            Token::Separator(separator @ (',' | ';')) if depth == 0 => {
+                if start == pos {
+                    return Err(syntax_error("VDU item is missing"));
+                }
+                items.push(VduItem {
+                    value: parse_expression(&tokens[start..pos])?,
+                    two_bytes: *separator == ';',
+                });
+                start = pos + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < tokens.len() {
+        items.push(VduItem {
+            value: parse_expression(&tokens[start..])?,
+            two_bytes: false,
+        });
+    }
+    Ok(Statement::Vdu { items })
 }
 
 /// Parse TRACE statement
@@ -4957,6 +5011,58 @@ mod tests {
     #[test]
     fn test_parse_mode_with_no_operand_gives_error() {
         assert!(parse_trace("MODE").is_err());
+    }
+
+    fn vdu_item(value: Expression, two_bytes: bool) -> VduItem {
+        VduItem { value, two_bytes }
+    }
+
+    #[test]
+    fn test_parse_vdu_comma_items_are_single_bytes() {
+        assert_eq!(
+            parse_trace("VDU 22, 4").unwrap(),
+            Statement::Vdu {
+                items: vec![
+                    vdu_item(Expression::Integer(22), false),
+                    vdu_item(Expression::Integer(4), false),
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_vdu_semicolon_items_are_two_bytes() {
+        assert_eq!(
+            parse_trace("VDU 25, 4, 100; 200;").unwrap(),
+            Statement::Vdu {
+                items: vec![
+                    vdu_item(Expression::Integer(25), false),
+                    vdu_item(Expression::Integer(4), false),
+                    vdu_item(Expression::Integer(100), true),
+                    vdu_item(Expression::Integer(200), true),
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_vdu_comma_in_brackets_does_not_split_the_item() {
+        assert_eq!(
+            parse_trace("VDU ASC(MID$(A$, 2, 1))").unwrap(),
+            Statement::Vdu {
+                items: vec![vdu_item(parse_text("ASC(MID$(A$, 2, 1))").unwrap(), false)]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_vdu_with_no_operand_gives_error() {
+        assert!(parse_trace("VDU").is_err());
+    }
+
+    #[test]
+    fn test_parse_vdu_with_empty_item_gives_error() {
+        assert!(parse_trace("VDU 1,,2").is_err());
     }
 
     /// Tokenize the text and parse it as one expression.

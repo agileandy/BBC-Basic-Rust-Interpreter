@@ -261,21 +261,19 @@ impl GraphicsSystem {
         };
 
         match mode & 0xF8 {
-            // 0-7: Move/line operations
+            // 0-7: Move or draw a line. 0-3 are relative to the cursor and
+            // 4-7 are absolute (bit 2). 1 and 5 draw in the foreground colour.
+            // The other colours are not modelled, so 2, 3, 6 and 7 only move.
             0x00 => {
-                // Move operations (modes 0-3)
-                if (mode & 0x04) == 0 {
-                    self.move_to(x, y);
+                let (line_x, line_y) = if (mode & 0x04) == 0 {
+                    (self.current_pos.x + x, self.current_pos.y + y)
                 } else {
-                    self.move_by(x, y);
-                }
-            }
-            // 4-7: Draw line
-            _ if (4..=7).contains(&mode) => {
-                if relative {
-                    self.draw_line_by(x, y);
+                    (x, y)
+                };
+                if (mode & 0x03) == 1 {
+                    self.draw_line_to(line_x, line_y);
                 } else {
-                    self.draw_line_to(target_x, target_y);
+                    self.move_to(line_x, line_y);
                 }
             }
             // 64-71: Plot point
