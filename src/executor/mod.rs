@@ -699,13 +699,8 @@ impl Executor {
                     self.print_output(&" ".repeat(next_zone - self.column));
                 }
                 PrintItem::Tab(expr) => {
-                    // TAB accepts both integer and real, truncating real to integer
-                    let pos = if let Ok(int_val) = self.eval_integer(expr) {
-                        int_val.max(0) as usize
-                    } else {
-                        let real_val = self.eval_real(expr)?;
-                        real_val.floor().max(0.0) as usize
-                    };
+                    // TAB evaluates its value one time and truncates a real
+                    let pos = self.eval_number(expr)?.floor().max(0.0) as usize;
                     // A column before the cursor starts a new line (BBC rule)
                     if pos < self.column {
                         self.print_output("\n");
@@ -713,13 +708,8 @@ impl Executor {
                     self.print_output(&" ".repeat(pos - self.column));
                 }
                 PrintItem::Spc(expr) => {
-                    // SPC accepts both integer and real, truncating real to integer
-                    let count = if let Ok(int_val) = self.eval_integer(expr) {
-                        int_val.max(0) as usize
-                    } else {
-                        let real_val = self.eval_real(expr)?;
-                        real_val.floor().max(0.0) as usize
-                    };
+                    // SPC evaluates its value one time and truncates a real
+                    let count = self.eval_number(expr)?.floor().max(0.0) as usize;
                     self.print_output(&" ".repeat(count));
                 }
             }
