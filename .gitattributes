@@ -1,0 +1,2 @@
+# Two branches that each add a test module line merge with no conflict.
+tests/it/main.rs merge=union
