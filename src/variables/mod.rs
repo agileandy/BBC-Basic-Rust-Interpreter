@@ -234,8 +234,7 @@ impl VariableStore {
     fn get_array(&self, name: &str) -> Result<&Variable> {
         match self.arrays.get(name) {
             Some(Some(array)) => Ok(array),
-            Some(None) => Err(BBCBasicError::ArrayNotDimensioned(name.to_string())),
-            None => Err(BBCBasicError::NoSuchVariable(name.to_string())),
+            Some(None) | None => Err(BBCBasicError::Array),
         }
     }
 
@@ -243,8 +242,7 @@ impl VariableStore {
     fn get_array_mut(&mut self, name: &str) -> Result<&mut Variable> {
         match self.arrays.get_mut(name) {
             Some(Some(array)) => Ok(array),
-            Some(None) => Err(BBCBasicError::ArrayNotDimensioned(name.to_string())),
-            None => Err(BBCBasicError::NoSuchVariable(name.to_string())),
+            Some(None) | None => Err(BBCBasicError::Array),
         }
     }
 

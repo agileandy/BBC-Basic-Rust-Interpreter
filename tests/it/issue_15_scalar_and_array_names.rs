@@ -113,6 +113,7 @@ fn test_local_array_without_dim_gives_array_not_dimensioned() {
     ]);
 
     let message = result.expect_err("A%(0) must not be readable before DIM");
-    assert_eq!(message, "Array not dimensioned: A% at line 120");
+    // An array that has no DIM gives Array (issue #122).
+    assert_eq!(message, "Array at line 120");
     assert_eq!(output, "");
 }

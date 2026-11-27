@@ -1082,7 +1082,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::ChannelNotOpen(_) => 222,
         BBCBasicError::BadCall => 30,
         BBCBasicError::NoSuchVariable(_) => 26,
-        BBCBasicError::ArrayNotDimensioned(_) => 14,
+        BBCBasicError::Array => 14,
         BBCBasicError::SyntaxError { .. } => 16,
         BBCBasicError::BadProgram => 254,
         BBCBasicError::IllegalFunction => 31,

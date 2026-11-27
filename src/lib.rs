@@ -78,7 +78,8 @@ pub mod error {
 
         // Variable and array errors
         NoSuchVariable(String),
-        ArrayNotDimensioned(String),
+        // An element of an array that has no DIM. ERR 14 (issue #122).
+        Array,
 
         // Memory errors
         InvalidAddress(u16),
@@ -139,9 +140,7 @@ pub mod error {
                 BBCBasicError::NoProc => write!(f, "No PROC"),
                 BBCBasicError::NoSuchFnProc(name) => write!(f, "No such FN/PROC: {}", name),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
-                BBCBasicError::ArrayNotDimensioned(name) => {
-                    write!(f, "Array not dimensioned: {}", name)
-                }
+                BBCBasicError::Array => write!(f, "Array"),
                 BBCBasicError::InvalidAddress(addr) => write!(f, "Invalid address: ${:04X}", addr),
                 BBCBasicError::MemoryExhausted => write!(f, "Memory exhausted"),
                 BBCBasicError::FileNotFound(name) => write!(f, "File not found: {}", name),
