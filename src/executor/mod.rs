@@ -703,7 +703,7 @@ impl Executor {
                     let pos = self.eval_number(expr)?.floor().max(0.0) as usize;
                     // A column before the cursor starts a new line (BBC rule)
                     if pos < self.column {
-                        self.print_output("\n");
+                        self.print_new_line();
                     }
                     self.print_output(&" ".repeat(pos - self.column));
                 }
@@ -717,7 +717,7 @@ impl Executor {
 
         // Add newline unless last item was semicolon
         if items.is_empty() || !matches!(items.last(), Some(PrintItem::Semicolon)) {
-            self.print_output("\n");
+            self.print_new_line();
         }
 
         Ok(())
@@ -761,13 +761,15 @@ impl Executor {
         }
     }
 
-    /// Print output (to buffer in test mode, to stdout in production)
+    /// Print output (to buffer in test mode, to stdout in production).
+    /// A line feed (code 10) keeps the column. A carriage return (code 13)
+    /// sets it to 0.
     fn print_output(&mut self, text: &str) {
         for ch in text.chars() {
-            if ch == '\n' {
-                self.column = 0;
-            } else {
-                self.column += 1;
+            match ch {
+                '\n' => {}
+                '\r' => self.column = 0,
+                _ => self.column += 1,
             }
         }
         self.output.push_str(text);
@@ -775,6 +777,12 @@ impl Executor {
         {
             print!("{}", text);
         }
+    }
+
+    /// Print a new line (BBC codes 13 and 10) and set the column to 0
+    fn print_new_line(&mut self) {
+        self.print_output("\n");
+        self.column = 0;
     }
 
     /// Set the print column to 0. The runner calls this at the start of a
@@ -1098,7 +1106,7 @@ impl Executor {
     /// adds a new line to the output, as the Enter key does on a screen.
     fn next_input_reply(&mut self) -> String {
         if let Some(reply) = self.input_queue.pop_front() {
-            self.print_output("\n");
+            self.print_new_line();
             return reply;
         }
         #[cfg(test)]
