@@ -529,6 +529,12 @@ fn install_function_body_runner(
 }
 
 /// " at line N" for a stored line, and nothing for the typed line.
+/// Go to a calculated line number. Return false if the value is not a line
+/// number from 0 to 65535 or the line does not exist.
+fn goto_calculated_line(program: &mut Cursor, target: i32) -> bool {
+    u16::try_from(target).is_ok_and(|line_number| program.goto_line(line_number))
+}
+
 fn at_line(line_key: u32) -> String {
     if line_key == TYPED_LINE {
         String::new()
@@ -764,6 +770,21 @@ fn step(
             // Push the current position so RETURN can come back here
             executor.push_gosub_return(position);
             if !program.goto_line(*target) {
+                return Err(format!("Line {} not found (GOSUB)", target).into());
+            }
+            Ok(Flow::Jumped)
+        }
+        Statement::GotoExpression { target } => {
+            let target = executor.eval_integer(target)?;
+            if !goto_calculated_line(program, target) {
+                return Err(format!("Line {} not found (GOTO)", target).into());
+            }
+            Ok(Flow::Jumped)
+        }
+        Statement::GosubExpression { target } => {
+            let target = executor.eval_integer(target)?;
+            executor.push_gosub_return(position);
+            if !goto_calculated_line(program, target) {
                 return Err(format!("Line {} not found (GOSUB)", target).into());
             }
             Ok(Flow::Jumped)
