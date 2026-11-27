@@ -98,6 +98,12 @@ pub enum InputItem {
     Prompt { text: String, question_mark: bool },
     /// A variable that gets a reply
     Variable(String),
+    /// An array element that gets a reply. The indices are evaluated when
+    /// the reply is stored.
+    ArrayElement {
+        name: String,
+        indices: Vec<Expression>,
+    },
 }
 
 /// The form of a TRACE statement
@@ -518,10 +524,10 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             } else if tokens.len() > 1 && matches!(tokens[1], Token::Keyword(0x86)) {
                 // INPUT LINE: 0x86 is the LINE token
                 Ok(Statement::InputLine {
-                    items: parse_input_items(&tokens[2..]),
+                    items: parse_input_items(&tokens[2..], line.line_number)?,
                 })
             } else {
-                parse_input_statement(&tokens[1..])
+                parse_input_statement(&tokens[1..], line.line_number)
             }
         }
 
@@ -1203,15 +1209,16 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 }
 
 /// Parse INPUT statement
-fn parse_input_statement(tokens: &[Token]) -> Result<Statement> {
+fn parse_input_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     Ok(Statement::Input {
-        items: parse_input_items(tokens),
+        items: parse_input_items(tokens, line_number)?,
     })
 }
 
-/// Parse the item list of INPUT or INPUT LINE: prompt texts and variables.
-/// A comma or a semicolon after a prompt text gives `?` after the text.
-fn parse_input_items(tokens: &[Token]) -> Vec<InputItem> {
+/// Parse the item list of INPUT or INPUT LINE: prompt texts, variables and
+/// array elements. A comma or a semicolon after a prompt text gives `?` after
+/// the text.
+fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<InputItem>> {
     let mut items = Vec::new();
     let mut pos = 0;
 
@@ -1221,6 +1228,22 @@ fn parse_input_items(tokens: &[Token]) -> Vec<InputItem> {
                 text: text.clone(),
                 question_mark: matches!(tokens.get(pos + 1), Some(Token::Separator(',' | ';'))),
             },
+            Token::Identifier(name)
+                if matches!(tokens.get(pos + 1), Some(Token::Separator('('))) =>
+            {
+                let close =
+                    find_closing_bracket(tokens, pos + 1).ok_or(BBCBasicError::SyntaxError {
+                        message: "Expected ')' in INPUT".to_string(),
+                        line: line_number,
+                    })?;
+                let indices =
+                    parse_comma_separated_expressions(&tokens[pos + 2..close], line_number)?;
+                pos = close;
+                InputItem::ArrayElement {
+                    name: name.clone(),
+                    indices,
+                }
+            }
             Token::Identifier(name) => InputItem::Variable(name.clone()),
             _ => break,
         };
@@ -1232,7 +1255,25 @@ fn parse_input_items(tokens: &[Token]) -> Vec<InputItem> {
         }
     }
 
-    items
+    Ok(items)
+}
+
+/// Find the bracket that closes the bracket at `open`
+fn find_closing_bracket(tokens: &[Token], open: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (i, token) in tokens.iter().enumerate().skip(open) {
+        match token {
+            Token::Separator('(') => depth += 1,
+            Token::Separator(')') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse PRINT# statement (file I/O)
@@ -3782,6 +3823,59 @@ mod tests {
             parse_input_text("INPUT LINE \"Text\" A$"),
             Statement::InputLine {
                 items: vec![input_prompt("Text", false), input_var("A$")],
+            }
+        );
+    }
+
+    fn input_element(name: &str, indices: Vec<Expression>) -> InputItem {
+        InputItem::ArrayElement {
+            name: name.to_string(),
+            indices,
+        }
+    }
+
+    #[test]
+    fn test_parse_input_numeric_array_element() {
+        assert_eq!(
+            parse_input_text("INPUT A(1)"),
+            Statement::Input {
+                items: vec![input_element("A", vec![Expression::Integer(1)])],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_string_array_element_with_variable_index() {
+        assert_eq!(
+            parse_input_text("INPUT A$(I%), B"),
+            Statement::Input {
+                items: vec![
+                    input_element("A$", vec![Expression::Variable("I%".to_string())]),
+                    input_var("B"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_two_dimension_element_after_prompt() {
+        assert_eq!(
+            parse_input_text("INPUT \"Cell\";M(1, 2)"),
+            Statement::Input {
+                items: vec![
+                    input_prompt("Cell", true),
+                    input_element("M", vec![Expression::Integer(1), Expression::Integer(2)]),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_line_array_element() {
+        assert_eq!(
+            parse_input_text("INPUT LINE L$(2)"),
+            Statement::InputLine {
+                items: vec![input_element("L$", vec![Expression::Integer(2)])],
             }
         );
     }

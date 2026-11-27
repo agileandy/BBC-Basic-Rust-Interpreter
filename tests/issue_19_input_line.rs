@@ -84,12 +84,13 @@ fn test_input_line_numeric_variable_gives_type_mismatch() {
 }
 
 #[test]
-fn test_plain_input_still_trims_the_reply() {
+fn test_plain_input_removes_only_leading_spaces_of_the_reply() {
+    // Issue 83: as the manual says, plain INPUT keeps the trailing spaces
     let (result, output) =
         run_with_replies(&["10 INPUT A$", "20 PRINT \"[\";A$;\"]\""], &["  Hello  "]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n[Hello]\n");
+    assert_eq!(output, "?\n[Hello  ]\n");
 }
 
 #[test]
