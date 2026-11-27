@@ -147,9 +147,9 @@ fn process_line(
     if let Some(line_number) = tokenized.line_number {
         // Program mode: store the line
         if tokenized.tokens.is_empty() {
-            // Just a line number with no statement = delete that line
+            // Just a line number with no statement = delete that line.
+            // Silent, like real BBC BASIC, also when the line does not exist.
             program.delete_line(line_number);
-            println!("Line {} deleted", line_number);
         } else {
             program.store_line(tokenized);
             // Silent storage (like real BBC BASIC)
