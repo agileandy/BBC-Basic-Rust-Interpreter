@@ -197,15 +197,19 @@ pub enum Statement {
     Cls,
     /// CLEAR statement - remove all variables and close the loops and calls
     Clear,
-    /// ON GOTO statement - computed GOTO based on expression value
+    /// ON GOTO statement - computed GOTO based on expression value. The
+    /// ELSE part (the rest of the line) runs if the index is out of range.
     OnGoto {
         expression: Expression,
         targets: Vec<u16>,
+        else_part: Option<Vec<Statement>>,
     },
-    /// ON GOSUB statement - computed GOSUB based on expression value
+    /// ON GOSUB statement - computed GOSUB based on expression value. The
+    /// ELSE part (the rest of the line) runs if the index is out of range.
     OnGosub {
         expression: Expression,
         targets: Vec<u16>,
+        else_part: Option<Vec<Statement>>,
     },
     /// ON ERROR GOTO statement - set error handler
     OnError { line_number: u16 },
@@ -398,7 +402,7 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
         let uses_rest_of_line = matches!(
             rest.first(),
             Some(Token::Keyword(0xF4 | 0xDC | 0xE7)) // REM, DATA, IF
-        );
+        ) || is_on_with_else(rest);
         let end = if uses_rest_of_line {
             rest.len()
         } else {
@@ -413,6 +417,22 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
         }
         rest = &rest[end + 1..];
     }
+}
+
+/// True if the tokens start with an ON GOTO or ON GOSUB statement that has
+/// an ELSE before the next colon. Its ELSE part is the rest of the line.
+/// ON ERROR has no ELSE part.
+fn is_on_with_else(tokens: &[Token]) -> bool {
+    let Some((Token::Keyword(0xEE), after_on)) = tokens.split_first() else {
+        return false;
+    };
+    if matches!(after_on.first(), Some(Token::Keyword(0x85))) {
+        return false;
+    }
+    after_on
+        .iter()
+        .take_while(|t| !matches!(t, Token::Separator(':')))
+        .any(|t| matches!(t, Token::Keyword(0x8B)))
 }
 
 /// Parse a tokenized line into a statement
@@ -1069,8 +1089,28 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     // Parse expression before GOTO/GOSUB
     let expression = parse_expression(&tokens[..keyword_pos])?;
 
-    // Parse line numbers after GOTO/GOSUB
-    let line_tokens = &tokens[keyword_pos + 1..];
+    // Parse line numbers after GOTO/GOSUB, up to an optional ELSE. The ELSE
+    // part is the rest of the line (parse_statements gives it to the ON).
+    let after_keyword = &tokens[keyword_pos + 1..];
+    let (line_tokens, else_part) = match after_keyword
+        .iter()
+        .position(|t| matches!(t, Token::Keyword(0x8B)))
+    {
+        Some(else_pos) => {
+            let else_tokens = &after_keyword[else_pos + 1..];
+            if else_tokens.is_empty() {
+                return Err(BBCBasicError::SyntaxError {
+                    message: "Expected statement after ELSE".to_string(),
+                    line: line_number,
+                });
+            }
+            (
+                &after_keyword[..else_pos],
+                Some(parse_if_branch(else_tokens, line_number)?),
+            )
+        }
+        None => (after_keyword, None),
+    };
     if line_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected line numbers after ON GOTO/GOSUB".to_string(),
@@ -1112,11 +1152,13 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         Ok(Statement::OnGoto {
             expression,
             targets,
+            else_part,
         })
     } else {
         Ok(Statement::OnGosub {
             expression,
             targets,
+            else_part,
         })
     }
 }
@@ -3269,9 +3311,11 @@ mod tests {
             Statement::OnGoto {
                 expression,
                 targets,
+                else_part,
             } => {
                 assert_eq!(expression, Expression::Variable("X".to_string()));
                 assert_eq!(targets, vec![100, 200, 300]);
+                assert_eq!(else_part, None);
             }
             _ => panic!("Expected OnGoto statement"),
         }
@@ -3288,12 +3332,97 @@ mod tests {
             Statement::OnGosub {
                 expression,
                 targets,
+                else_part,
             } => {
                 assert_eq!(expression, Expression::Variable("Y%".to_string()));
                 assert_eq!(targets, vec![1000, 2000]);
+                assert_eq!(else_part, None);
             }
             _ => panic!("Expected OnGosub statement"),
         }
+    }
+
+    fn print_string(text: &str) -> Statement {
+        Statement::Print {
+            items: vec![PrintItem::Expression(Expression::String(text.to_string()))],
+        }
+    }
+
+    #[test]
+    fn test_parse_on_goto_with_else() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON X% GOTO 100, 200 ELSE PRINT \"bad\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::OnGoto {
+                expression: Expression::Variable("X%".to_string()),
+                targets: vec![100, 200],
+                else_part: Some(vec![print_string("bad")]),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_gosub_else_part_is_rest_of_line() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON X% GOSUB 100 ELSE PRINT \"a\" : PRINT \"b\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::OnGosub {
+                expression: Expression::Variable("X%".to_string()),
+                targets: vec![100],
+                else_part: Some(vec![print_string("a"), print_string("b")]),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_goto_with_no_else_ends_at_colon() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON X% GOTO 100 : PRINT \"a\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![
+                Statement::OnGoto {
+                    expression: Expression::Variable("X%".to_string()),
+                    targets: vec![100],
+                    else_part: None,
+                },
+                print_string("a"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_goto_with_empty_else_is_error() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON X% GOTO 100 ELSE").unwrap();
+
+        assert!(parse_line(&line).is_err());
+    }
+
+    #[test]
+    fn test_parse_if_then_on_goto_else_keeps_else_in_if() {
+        // The run list gives an ON with an index out of range the ELSE of
+        // the IF, so the parser keeps the first ELSE after THEN in the IF.
+        use crate::tokenizer::tokenize;
+        let line = tokenize("IF A% THEN ON X% GOTO 100 ELSE PRINT \"bad\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::If {
+                condition: Expression::Variable("A%".to_string()),
+                then_part: vec![Statement::OnGoto {
+                    expression: Expression::Variable("X%".to_string()),
+                    targets: vec![100],
+                    else_part: None,
+                }],
+                else_part: Some(vec![print_string("bad")]),
+            }]
+        );
     }
 
     fn input_var(name: &str) -> InputItem {

@@ -79,7 +79,21 @@ fn flatten_line(statements: Vec<Statement>) -> Vec<Item> {
 /// Add the run list items of the statements to `items`, in the order of the
 /// line. `flatten_line` sets the jump indexes.
 fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
-    for statement in statements {
+    for mut statement in statements {
+        // The ELSE part of an ON follows it as an ELSE, as for an IF. An
+        // index out of range continues after the next ELSE on the line.
+        if let Statement::OnGoto { else_part, .. } | Statement::OnGosub { else_part, .. } =
+            &mut statement
+        {
+            let else_part = else_part.take();
+            items.push(Item::Statement(statement));
+            if let Some(else_part) = else_part {
+                items.push(Item::Skip(0));
+                flatten(else_part, items);
+            }
+            continue;
+        }
+
         let Statement::If {
             condition,
             then_part,
@@ -171,6 +185,27 @@ impl Cursor<'_> {
             });
         }
         self.current
+    }
+
+    /// Go to the item after the next ELSE on the line of `position`, at any
+    /// depth. This is where an ON with an index out of range continues. With
+    /// no ELSE after `position`, the error is "ON range".
+    fn goto_after_next_else(&mut self, position: Position) -> Result<(), BBCBasicError> {
+        let items = self
+            .lines
+            .items
+            .get(&position.line)
+            .map_or(&[][..], Vec::as_slice);
+        let else_index = items
+            .iter()
+            .skip(position.index + 1)
+            .position(|item| matches!(item, Item::Skip(_)))
+            .ok_or(BBCBasicError::OnRange)?;
+        self.goto(Position {
+            line: position.line,
+            index: position.index + 1 + else_index + 1,
+        });
+        Ok(())
     }
 
     /// Go to the last item of the current line, so that `next` goes to the
@@ -726,6 +761,7 @@ fn step(
         Statement::OnGoto {
             expression,
             targets,
+            ..
         } => {
             // BBC BASIC uses 1-based indexing
             let index = executor
@@ -739,12 +775,13 @@ fn step(
                 }
                 return Ok(Flow::Jumped);
             }
-            // Index out of range: continue with the next statement
-            Ok(Flow::Next)
+            program.goto_after_next_else(position)?;
+            Ok(Flow::Jumped)
         }
         Statement::OnGosub {
             expression,
             targets,
+            ..
         } => {
             // BBC BASIC uses 1-based indexing
             let index = executor
@@ -759,8 +796,8 @@ fn step(
                 }
                 return Ok(Flow::Jumped);
             }
-            // Index out of range: continue with the next statement
-            Ok(Flow::Next)
+            program.goto_after_next_else(position)?;
+            Ok(Flow::Jumped)
         }
         Statement::Return { .. } => {
             let return_position = executor
@@ -911,6 +948,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::NoRoom => 11,
         BBCBasicError::StringTooLong => 19,
         BBCBasicError::TooBig => 20,
+        BBCBasicError::OnRange => 40,
         BBCBasicError::NoSuchVariable(_) => 26,
         BBCBasicError::ArrayNotDimensioned(_) => 14,
         BBCBasicError::SyntaxError { .. } => 220,

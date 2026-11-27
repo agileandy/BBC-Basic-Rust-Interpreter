@@ -276,7 +276,8 @@ fn test_end_in_else_branch_stops_program() {
 }
 
 #[test]
-fn test_on_goto_index_out_of_range_continues_with_next_line() {
+fn test_on_goto_index_out_of_range_gives_on_range_error() {
+    // Issue 66: with no ELSE, BBC BASIC gives the error "ON range" (ERR 40)
     let (result, output) = run(&[
         "10 X% = 5",
         "20 ON X% GOTO 40, 50",
@@ -285,8 +286,8 @@ fn test_on_goto_index_out_of_range_continues_with_next_line() {
         "50 END",
     ]);
 
-    assert_eq!(result, Ok(()));
-    assert_eq!(output, "NEXT LINE\n");
+    assert!(result.is_err(), "result: {:?}", result);
+    assert_eq!(output, "");
 }
 
 #[test]
