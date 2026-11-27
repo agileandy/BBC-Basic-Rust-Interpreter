@@ -199,10 +199,8 @@ pub enum Statement {
     GosubExpression { target: Expression },
     /// RETURN statement (optionally with value for functions)
     Return { value: Option<Expression> },
-    /// DIM statement for array dimensioning
-    Dim {
-        arrays: Vec<(String, Vec<Expression>)>,
-    },
+    /// DIM statement: arrays, and blocks of memory such as `DIM B% 10`
+    Dim { items: Vec<DimItem> },
     /// REM statement (comment)
     Rem { comment: String },
     /// END statement
@@ -338,6 +336,19 @@ pub enum Statement {
     },
     /// Empty statement
     Empty,
+}
+
+/// One item of a DIM statement
+#[derive(Debug, Clone, PartialEq)]
+pub enum DimItem {
+    /// An array, such as `A%(10)` or `B(5, 5)`
+    Array {
+        name: String,
+        dimensions: Vec<Expression>,
+    },
+    /// A block of `size + 1` bytes, such as `B% 10`. The numeric variable
+    /// gets the address of the first byte.
+    Block { name: String, size: Expression },
 }
 
 /// Data value types for DATA statement
@@ -949,6 +960,11 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
         } else {
             parse_comma_separated_expressions(indices_tokens, line_number)?
         };
+
+        // An array element as the base of a memory write: C%(1)?2 = 5
+        if Indirection::from_operator(tokens.get(close_paren_pos + 1)).is_some() {
+            return parse_memory_assignment(tokens, line_number);
+        }
 
         // After closing paren, expect '='
         if close_paren_pos + 1 >= tokens.len()
@@ -1828,7 +1844,7 @@ fn parse_comma_separated_expressions(
 
 /// Parse DIM statement
 fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    let mut arrays = Vec::new();
+    let mut items = Vec::new();
     let mut pos = 0;
 
     while pos < tokens.len() {
@@ -1847,12 +1863,34 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         };
         pos += 1;
 
-        // Expect opening paren
-        if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
+        if pos >= tokens.len() {
             return Err(BBCBasicError::SyntaxError {
                 message: "Expected '(' after array name".to_string(),
                 line: line_number,
             });
+        }
+
+        // A name with no bracket reserves a block: the size runs to the
+        // next comma outside brackets
+        if !matches!(tokens[pos], Token::Separator('(')) {
+            let start = pos;
+            let mut depth = 0;
+            while pos < tokens.len() {
+                match &tokens[pos] {
+                    Token::Separator('(') => depth += 1,
+                    Token::Separator(')') => depth -= 1,
+                    Token::Separator(',') if depth == 0 => break,
+                    _ => {}
+                }
+                pos += 1;
+            }
+            let size = parse_expression(&tokens[start..pos])?;
+            items.push(DimItem::Block { name, size });
+            if pos < tokens.len() {
+                pos += 1; // the comma before the next item
+                continue;
+            }
+            break;
         }
         pos += 1;
 
@@ -1892,7 +1930,7 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             }
         }
 
-        arrays.push((name, dimensions));
+        items.push(DimItem::Array { name, dimensions });
 
         // Check for comma (multiple arrays in one DIM)
         if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
@@ -1902,7 +1940,7 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         }
     }
 
-    Ok(Statement::Dim { arrays })
+    Ok(Statement::Dim { items })
 }
 
 /// Parse DATA statement
@@ -4078,15 +4116,90 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Dim {
-                arrays: vec![
-                    ("A%".to_string(), vec![Expression::Integer(10)]),
-                    (
-                        "B".to_string(),
-                        vec![Expression::Integer(5), Expression::Integer(5)]
+                items: vec![
+                    DimItem::Array {
+                        name: "A%".to_string(),
+                        dimensions: vec![Expression::Integer(10)],
+                    },
+                    DimItem::Array {
+                        name: "B".to_string(),
+                        dimensions: vec![Expression::Integer(5), Expression::Integer(5)],
+                    },
+                ],
+            }
+        );
+    }
+
+    fn block(name: &str, size: Expression) -> DimItem {
+        DimItem::Block {
+            name: name.to_string(),
+            size,
+        }
+    }
+
+    #[test]
+    fn test_parse_dim_block() {
+        assert_eq!(
+            parse_one("DIM B% 10"),
+            Statement::Dim {
+                items: vec![block("B%", Expression::Integer(10))],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_dim_two_blocks() {
+        assert_eq!(
+            parse_one("DIM A% 10, B% N% + 1"),
+            Statement::Dim {
+                items: vec![
+                    block("A%", Expression::Integer(10)),
+                    block(
+                        "B%",
+                        binary(var("N%"), BinaryOperator::Add, Expression::Integer(1))
                     ),
                 ],
             }
         );
+    }
+
+    #[test]
+    fn test_parse_dim_array_and_block() {
+        assert_eq!(
+            parse_one("DIM A(5), B% 10"),
+            Statement::Dim {
+                items: vec![
+                    DimItem::Array {
+                        name: "A".to_string(),
+                        dimensions: vec![Expression::Integer(5)],
+                    },
+                    block("B%", Expression::Integer(10)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_memory_write_with_array_element_base() {
+        let element = Expression::ArrayAccess {
+            name: "C%".to_string(),
+            indices: vec![Expression::Integer(1)],
+        };
+        let cases = [
+            ("C%(1)?2 = 5", Indirection::Byte, Expression::Integer(2)),
+            ("C%(1)!4 = 5", Indirection::Word, Expression::Integer(4)),
+        ];
+        for (source, width, offset) in cases {
+            assert_eq!(
+                parse_one(source),
+                Statement::MemoryAssignment {
+                    width,
+                    address: binary(element.clone(), BinaryOperator::Add, offset),
+                    expression: Expression::Integer(5),
+                },
+                "{source}"
+            );
+        }
     }
 
     #[test]

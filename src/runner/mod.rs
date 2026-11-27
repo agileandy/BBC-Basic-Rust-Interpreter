@@ -978,6 +978,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::TypeMismatch => 6,
         BBCBasicError::SubscriptOutOfRange => 15,
         BBCBasicError::NoRoom => 11,
+        BBCBasicError::BadDim => 10,
         BBCBasicError::StringTooLong => 19,
         BBCBasicError::TooBig => 20,
         BBCBasicError::OnRange => 40,

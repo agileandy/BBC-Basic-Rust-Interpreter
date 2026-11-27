@@ -5,7 +5,7 @@
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::memory::MemoryManager;
-use crate::parser::{DataValue, Expression, Indirection, InputItem, Statement, TraceMode};
+use crate::parser::{DataValue, DimItem, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
 use crate::variables::{is_resident_integer, Variable, VariableStore};
 use rand::Rng;
@@ -301,6 +301,9 @@ pub struct Executor {
     start_time: std::time::Instant,
     // Size in bytes of the stored program: TOP is PAGE plus this size
     program_size: usize,
+    // Bytes that `DIM name size` reserved above TOP. The next block starts
+    // at TOP plus this count.
+    dim_space_used: usize,
     // Replies for INPUT, used before stdin (for testing)
     input_queue: VecDeque<String>,
     // Output buffer (for testing)
@@ -340,6 +343,7 @@ impl Executor {
             next_loop_line: None,
             start_time: std::time::Instant::now(),
             program_size: 0,
+            dim_space_used: 0,
             input_queue: VecDeque::new(),
             output: String::new(),
             column: 0,
@@ -405,7 +409,7 @@ impl Executor {
             Statement::Next { variables } => self.execute_next(variables),
             Statement::Input { items } => self.execute_input(items),
             Statement::InputLine { items } => self.execute_input_line(items),
-            Statement::Dim { arrays } => self.execute_dim(arrays),
+            Statement::Dim { items } => self.execute_dim(items),
             Statement::If {
                 condition,
                 then_part,
@@ -1021,8 +1025,15 @@ impl Executor {
     }
 
     /// Execute DIM statement
-    fn execute_dim(&mut self, arrays: &[(String, Vec<Expression>)]) -> Result<()> {
-        for (name, dimensions) in arrays {
+    fn execute_dim(&mut self, items: &[DimItem]) -> Result<()> {
+        for item in items {
+            let (name, dimensions) = match item {
+                DimItem::Array { name, dimensions } => (name, dimensions),
+                DimItem::Block { name, size } => {
+                    self.execute_dim_block(name, size)?;
+                    continue;
+                }
+            };
             // Evaluate dimension expressions
             let mut dim_sizes = Vec::new();
             for dim_expr in dimensions {
@@ -1049,6 +1060,30 @@ impl Executor {
                 .dim_array(name.clone(), dim_sizes, var_type)?;
         }
         Ok(())
+    }
+
+    /// Execute `DIM name size`: reserve `size + 1` bytes above TOP and put
+    /// the address of the first byte in `name`. A size of -1 gives the
+    /// address and reserves no bytes.
+    fn execute_dim_block(&mut self, name: &str, size: &Expression) -> Result<()> {
+        let size = self.eval_integer(size)?;
+        if size < -1 {
+            return Err(BBCBasicError::BadDim);
+        }
+        let bytes = (size as i64 + 1) as usize;
+        let address = self.top() as usize + self.dim_space_used;
+        if address + bytes > self.memory.get_himem() as usize {
+            return Err(BBCBasicError::NoRoom);
+        }
+        self.execute_assignment(name, &Expression::Integer(address as i32))?;
+        self.dim_space_used += bytes;
+        Ok(())
+    }
+
+    /// Free the blocks that `DIM name size` reserved. The next block
+    /// starts at TOP. `clear_variables` uses this.
+    pub fn reset_dim_space(&mut self) {
+        self.dim_space_used = 0;
     }
 
     /// Execute an IF statement
@@ -1186,12 +1221,13 @@ impl Executor {
         Ok(())
     }
 
-    /// Remove all variables and arrays, close the loops, the calls and the
+    /// Remove all variables, arrays and DIM blocks, close the loops, the calls and the
     /// LOCAL scopes, and move the DATA pointer to the first value. The
     /// resident integer variables A% to Z%, the procedures and the
     /// functions stay. CLEAR, RUN, NEW, LOAD and CHAIN use this.
     pub fn clear_variables(&mut self) {
         self.variables.clear();
+        self.reset_dim_space();
         self.clear_control_stacks();
         self.local_stack.clear();
         self.data_pointer = 0;
@@ -3846,12 +3882,19 @@ mod tests {
         assert_eq!(executor.get_variable_real("C").unwrap(), 0.0);
     }
 
+    fn dim_array(name: &str, dimensions: Vec<Expression>) -> DimItem {
+        DimItem::Array {
+            name: name.to_string(),
+            dimensions,
+        }
+    }
+
     #[test]
     fn test_dim_integer_array() {
         // RED: Test DIM A%(10)
         let mut executor = Executor::new();
         let stmt = Statement::Dim {
-            arrays: vec![("A%".to_string(), vec![Expression::Integer(10)])],
+            items: vec![dim_array("A%", vec![Expression::Integer(10)])],
         };
 
         executor.execute_statement(&stmt).unwrap();
@@ -3865,8 +3908,8 @@ mod tests {
         // RED: Test DIM B%(5, 10)
         let mut executor = Executor::new();
         let stmt = Statement::Dim {
-            arrays: vec![(
-                "B%".to_string(),
+            items: vec![dim_array(
+                "B%",
                 vec![Expression::Integer(5), Expression::Integer(10)],
             )],
         };
@@ -3880,9 +3923,9 @@ mod tests {
         // RED: Test DIM A%(10), B$(5)
         let mut executor = Executor::new();
         let stmt = Statement::Dim {
-            arrays: vec![
-                ("A%".to_string(), vec![Expression::Integer(10)]),
-                ("B$".to_string(), vec![Expression::Integer(5)]),
+            items: vec![
+                dim_array("A%", vec![Expression::Integer(10)]),
+                dim_array("B$", vec![Expression::Integer(5)]),
             ],
         };
 
