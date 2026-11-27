@@ -7,7 +7,7 @@ use crate::graphics::GraphicsSystem;
 use crate::memory::MemoryManager;
 use crate::parser::{DataValue, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
-use crate::variables::{Variable, VariableStore};
+use crate::variables::{is_resident_integer, Variable, VariableStore};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -1180,12 +1180,16 @@ impl Executor {
     }
 
     /// The LVAR text: one line for each scalar variable, then one line for
-    /// each array with its top index in each dimension, in name order
+    /// each array with its top index in each dimension, in name order.
+    /// A resident integer variable (A% to Z%) is not listed when it is 0.
     pub fn variable_listing(&self) -> Vec<String> {
         let scalars = self
             .variables
             .scalars()
             .into_iter()
+            .filter(|(name, variable)| {
+                !(is_resident_integer(name) && **variable == Variable::Integer(0))
+            })
             .map(|(name, variable)| match variable {
                 Variable::Integer(value) => format!("{} = {}", name, value),
                 Variable::Real(value) => format!("{} = {}", name, format_number(*value)),
@@ -3885,8 +3889,8 @@ mod tests {
 
         executor.execute_statement(&stmt).unwrap();
 
-        // Y% should not exist because condition is false
-        assert!(executor.get_variable_int("Y%").is_err());
+        // Y% keeps its start value 0 because condition is false
+        assert_eq!(executor.get_variable_int("Y%").unwrap(), 0);
     }
 
     #[test]

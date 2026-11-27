@@ -57,11 +57,12 @@ fn run_binary(input: &str) -> String {
 
 #[test]
 fn test_clear_in_program_removes_variable() {
-    let (result, output) = run(&["10 A% = 5", "20 PRINT A%", "30 CLEAR", "40 PRINT A%"]);
+    // AB% is not a resident variable (A% to Z% stay after CLEAR, issue #89)
+    let (result, output) = run(&["10 AB% = 5", "20 PRINT AB%", "30 CLEAR", "40 PRINT AB%"]);
 
     assert_eq!(output, "5\n");
     let error = result.expect_err("a read after CLEAR fails");
-    assert!(is_no_such_variable(&error, "A%"), "error: {error}");
+    assert!(is_no_such_variable(&error, "AB%"), "error: {error}");
     assert!(error.contains("line 40"), "error: {error}");
 }
 
@@ -151,9 +152,10 @@ fn test_lvar_lists_variables_and_array_in_name_order() {
 
 #[test]
 fn test_typed_clear_then_lvar_shows_nothing() {
-    let output = run_binary("A% = 3\nDIM B(2)\nCLEAR\nLVAR\nEXIT\n");
+    // AB% is not a resident variable (A% to Z% stay after CLEAR, issue #89)
+    let output = run_binary("AB% = 3\nDIM B(2)\nCLEAR\nLVAR\nEXIT\n");
 
-    assert!(!output.contains("A% ="), "output: {output}");
+    assert!(!output.contains("AB% ="), "output: {output}");
     assert!(!output.contains("B("), "output: {output}");
     assert!(!output.contains("Error"), "output: {output}");
 }
