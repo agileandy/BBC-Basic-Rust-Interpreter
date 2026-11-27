@@ -146,3 +146,4 @@ mod issue_158_not_bitwise;
 mod issue_164_power_of_negative_base;
 mod issue_161_point_colour_value;
 mod issue_141_for_each;
+mod issue_162_swap;
