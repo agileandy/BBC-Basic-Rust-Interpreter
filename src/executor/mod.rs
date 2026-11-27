@@ -2238,21 +2238,25 @@ impl Executor {
                 line: None,
             })?;
 
-        // LOCAL NAME() saves the array only, and makes it undimensioned
+        // LOCAL NAME() saves the array only, and makes it undimensioned.
+        // A second LOCAL for the same name in this frame keeps the first saved entry.
         if let Some(array_name) = name.strip_suffix("()") {
-            let saved_array = self.variables.save_array(array_name);
+            let variables = &self.variables;
             frame
                 .saved_arrays
-                .insert(array_name.to_string(), saved_array);
+                .entry(array_name.to_string())
+                .or_insert_with(|| variables.save_array(array_name));
             self.variables.declare_local_array(array_name.to_string());
             return Ok(());
         }
 
-        // Save current value (or None if doesn't exist)
-        let current_value = self.variables.get_variable(name).cloned();
+        // Save current value (or None if doesn't exist).
+        // A second LOCAL for the same name in this frame keeps the first saved value.
+        let variables = &self.variables;
         frame
             .saved_variables
-            .insert(name.to_string(), current_value);
+            .entry(name.to_string())
+            .or_insert_with(|| variables.get_variable(name).cloned());
 
         // Remove the variable from the main scope (creating a new local binding)
         // We'll set it to a default value for its type
