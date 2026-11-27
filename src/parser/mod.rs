@@ -1233,7 +1233,7 @@ fn parse_jump_target(
             "Expected line number after {}",
             keyword
         ))),
-        [Token::Integer(n)] => Ok(JumpTarget::Line(*n as u16)),
+        [Token::Integer(n)] => Ok(JumpTarget::Line(literal_line_number(*n, line_number)?)),
         [Token::Integer(_), ..] => Err(syntax_error(format!(
             "Expected end of statement after {} line number",
             keyword
@@ -1278,6 +1278,12 @@ fn syntax_error_at(message: &str, line_number: Option<u16>) -> BBCBasicError {
         message: message.to_string(),
         line: line_number,
     }
+}
+
+/// A literal line number after a keyword. It must be from 0 to 65535: a
+/// larger number must not change to a different line.
+fn literal_line_number(value: i32, line_number: Option<u16>) -> Result<u16> {
+    u16::try_from(value).map_err(|_| syntax_error_at("Line number out of range", line_number))
 }
 
 /// Parse the handler statements after ON ERROR. The handler runs from one
@@ -1353,7 +1359,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
                 match tokens[2] {
                     Token::Integer(n) | Token::HexInteger(n) => {
                         return Ok(Statement::OnError {
-                            line_number: n as u16,
+                            line_number: literal_line_number(n, line_number)?,
                         });
                     }
                     _ => {
@@ -1449,7 +1455,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     while pos < line_tokens.len() {
         match &line_tokens[pos] {
             Token::Integer(n) | Token::HexInteger(n) => {
-                targets.push(*n as u16);
+                targets.push(literal_line_number(*n, line_number)?);
                 pos += 1;
 
                 // Skip comma if present
@@ -2203,7 +2209,7 @@ fn parse_read_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 
 /// Parse RESTORE statement
 /// Supports: RESTORE [line_number]
-fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Result<Statement> {
+fn parse_restore_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     if tokens.is_empty() {
         // RESTORE with no line number - reset to beginning
         Ok(Statement::Restore { line_number: None })
@@ -2211,7 +2217,7 @@ fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Resul
         // RESTORE with line number
         match &tokens[0] {
             Token::Integer(num) | Token::HexInteger(num) => Ok(Statement::Restore {
-                line_number: Some(*num as u16),
+                line_number: Some(literal_line_number(*num, line_number)?),
             }),
             Token::LineNumber(num) => Ok(Statement::Restore {
                 line_number: Some(*num),
@@ -2786,7 +2792,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 /// A block IF cannot be in a branch, because the branch ends with its line.
 fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
     let target = match tokens.first() {
-        Some(Token::Integer(n) | Token::HexInteger(n)) => *n as u16,
+        Some(Token::Integer(n) | Token::HexInteger(n)) => literal_line_number(*n, line_number)?,
         Some(Token::LineNumber(n)) => *n,
         _ => {
             let statements = parse_statements(tokens, line_number)?;
