@@ -93,6 +93,22 @@ fn ends_with_value(tokens: &[Token]) -> bool {
     )
 }
 
+/// True if an apostrophe after these tokens is a new line item, not a
+/// comment. The rule: the statement starts after the last colon, THEN or
+/// ELSE, it contains PRINT or INPUT, and the line has no REM.
+fn apostrophe_is_new_line(tokens: &[Token]) -> bool {
+    if tokens.iter().any(|t| matches!(t, Token::Keyword(0xF4))) {
+        return false;
+    }
+    let start = tokens
+        .iter()
+        .rposition(|t| matches!(t, Token::Separator(':') | Token::Keyword(0x8B | 0x8C)))
+        .map_or(0, |i| i + 1);
+    tokens[start..]
+        .iter()
+        .any(|t| matches!(t, Token::Keyword(0xE8 | 0xF1))) // INPUT, PRINT
+}
+
 /// Tokenize a BBC BASIC source line
 pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
     tokenize_text(source_line, true)
@@ -169,10 +185,11 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 }
                 // Check if what follows looks like a statement (keyword or identifier, not
                 // operator). A `=expr` line ends a multi-line function. A
-                // `?addr=v` or `!addr=v` line writes to memory.
+                // `?addr=v` or `!addr=v` line writes to memory. A `'` line
+                // is a comment (issue 159).
                 let next_is_statement = temp_chars
                     .peek()
-                    .map(|c| c.is_alphabetic() || matches!(c, '_' | '=' | '?' | '!'))
+                    .map(|c| c.is_alphabetic() || matches!(c, '_' | '=' | '?' | '!' | '\''))
                     .unwrap_or(false);
 
                 if next_is_statement {
@@ -386,6 +403,11 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
 
         // Operators and separators
         match ch {
+            '\'' if apostrophe_is_new_line(&tokens) => {
+                // In PRINT and INPUT, an apostrophe prints a new line (issue 159)
+                chars.next();
+                tokens.push(Token::Separator(ch));
+            }
             '\'' => {
                 // Apostrophe is shorthand for REM - rest of line is a comment
                 chars.next(); // consume apostrophe
@@ -464,6 +486,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Separator(')'), Token::Identifier(name)) if name == "OF" => true,
                 // No space before/after certain operators
                 (Token::Separator(_), _) => false,
+                // The new line item lists as typed: PRINT ''"X", PRINT "A"'"B"
+                (Token::Keyword(0xE8 | 0xF1), Token::Separator('\'')) => true,
+                (_, Token::Separator('\'')) => false,
                 (_, Token::Separator(',')) => false,
                 (_, Token::Separator(';')) => false,
                 (_, Token::Separator(':')) => false,
@@ -1264,15 +1289,16 @@ mod tests {
 
     #[test]
     fn test_apostrophe_comment() {
-        // RED: Test that apostrophe (') is tokenized as REM
-        let line = tokenize("10 PRINT 42 ' This is a comment").unwrap();
+        // An apostrophe outside PRINT and INPUT is tokenized as REM. In
+        // PRINT it is a new line item (issue 159).
+        let line = tokenize("10 GOTO 42 ' This is a comment").unwrap();
 
-        // Should tokenize as: LineNumber(10), Keyword(PRINT), Integer(42), Keyword(REM)
+        // Should tokenize as: LineNumber(10), Keyword(GOTO), Integer(42), Keyword(REM)
         assert_eq!(line.line_number, Some(10));
-        assert_eq!(line.tokens.len(), 3); // PRINT, 42, REM
+        assert_eq!(line.tokens.len(), 3); // GOTO, 42, REM
 
         // Check tokens
-        assert!(matches!(line.tokens[0], Token::Keyword(0xF1))); // PRINT
+        assert!(matches!(line.tokens[0], Token::Keyword(0xE5))); // GOTO
         assert!(matches!(line.tokens[1], Token::Integer(42)));
         assert!(matches!(line.tokens[2], Token::Keyword(0xF4))); // REM
     }

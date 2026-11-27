@@ -902,6 +902,7 @@ impl Executor {
                     let next_zone = (self.column / 10 + 1) * 10;
                     self.print_output(&" ".repeat(next_zone - self.column));
                 }
+                PrintItem::NewLine => self.print_new_line(),
                 PrintItem::Tab(expr) => {
                     // TAB evaluates its value one time and truncates a real
                     let pos = self.eval_number(expr)?.floor().max(0.0) as usize;
@@ -1359,6 +1360,10 @@ impl Executor {
                     question_mark = *shows;
                     continue;
                 }
+                InputItem::NewLine => {
+                    self.print_new_line();
+                    continue;
+                }
                 InputItem::Variable(var) => (var, None),
                 InputItem::ArrayElement { name, indices } => (name, Some(indices)),
             };
@@ -1424,6 +1429,10 @@ impl Executor {
                 } => {
                     self.print_output(text);
                     question_mark = *shows;
+                    continue;
+                }
+                InputItem::NewLine => {
+                    self.print_new_line();
                     continue;
                 }
                 InputItem::Variable(var) => (var, None),
@@ -1614,7 +1623,7 @@ impl Executor {
             let (var_name, indices) = match target {
                 InputItem::Variable(name) => (name, None),
                 InputItem::ArrayElement { name, indices } => (name, Some(indices.as_slice())),
-                InputItem::Prompt { .. } => {
+                InputItem::Prompt { .. } | InputItem::NewLine => {
                     return Err(BBCBasicError::SyntaxError {
                         message: "Expected variable name in READ".to_string(),
                         line: None,
@@ -1684,8 +1693,8 @@ impl Executor {
                 }
                 Ok((name, Some(index_values)))
             }
-            // The parser gives no prompt text in SWAP
-            InputItem::Prompt { .. } => Err(BBCBasicError::SyntaxError {
+            // The parser gives no prompt text and no ' in SWAP
+            InputItem::Prompt { .. } | InputItem::NewLine => Err(BBCBasicError::SyntaxError {
                 message: "Expected variable name in SWAP".to_string(),
                 line: None,
             }),
@@ -4372,8 +4381,11 @@ impl Executor {
         for item in items {
             match item {
                 PrintItem::Expression(expr) => records.push(self.format_print_item(expr, hex)?),
-                // The parser does not permit TAB and SPC in PRINT#
-                PrintItem::Tab(_) | PrintItem::TabXY(..) | PrintItem::Spc(_) => {}
+                // The parser does not permit TAB, SPC and ' in PRINT#
+                PrintItem::Tab(_)
+                | PrintItem::TabXY(..)
+                | PrintItem::Spc(_)
+                | PrintItem::NewLine => {}
                 PrintItem::Hex => hex = true,
                 PrintItem::Semicolon | PrintItem::Comma => hex = false,
             }
@@ -4395,8 +4407,8 @@ impl Executor {
             let (var_name, indices) = match target {
                 InputItem::Variable(var) => (var, None),
                 InputItem::ArrayElement { name, indices } => (name, Some(indices)),
-                // The parser gives no prompt text in INPUT#
-                InputItem::Prompt { .. } => continue,
+                // The parser gives no prompt text and no ' in INPUT#
+                InputItem::Prompt { .. } | InputItem::NewLine => continue,
             };
             let record = self.read_file_record(handle)?;
 

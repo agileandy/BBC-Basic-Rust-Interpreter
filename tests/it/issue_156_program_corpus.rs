@@ -101,10 +101,7 @@ corpus!(rem_at_line_end);
 corpus!(local_arrays);
 corpus!(on_error_trap);
 corpus!(restore_lookup);
-corpus!(
-    #[ignore = "defect F4: an apostrophe in PRINT starts a REM, not a new line"]
-    print_separators
-);
+corpus!(print_separators);
 corpus!(bit_masks_not);
 corpus!(
     #[ignore = "defect F5: IF with no THEN gives a syntax error"]
