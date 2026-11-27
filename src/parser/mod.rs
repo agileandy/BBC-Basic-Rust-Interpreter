@@ -204,6 +204,12 @@ pub enum Statement {
         end: Expression,
         step: Option<Expression>,
     },
+    /// `FOR EACH variable IN collection` (issue #141, a modern extension):
+    /// a loop for each element of a list or each key of a map
+    ForEach {
+        variable: String,
+        collection: Expression,
+    },
     /// NEXT statement
     Next { variables: Vec<String> },
     /// IF statement
@@ -469,6 +475,7 @@ impl Statement {
         matches!(
             self,
             Statement::For { .. }
+                | Statement::ForEach { .. }
                 | Statement::Next { .. }
                 | Statement::If { .. }
                 | Statement::Goto { .. }
@@ -1372,6 +1379,14 @@ fn parse_memory_assignment(tokens: &[Token], line_number: Option<u16>) -> Result
 
 /// Parse FOR statement
 fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // FOR EACH variable IN collection. EACH with `=` after it is the name
+    // of the variable of a normal FOR.
+    if matches!(tokens.first(), Some(Token::Identifier(word)) if word == "EACH")
+        && !matches!(tokens.get(1), Some(Token::Operator('=')))
+    {
+        return parse_for_each_statement(&tokens[1..], line_number);
+    }
+
     // FOR variable = start TO end [STEP step]
     if tokens.len() < 5 {
         return Err(BBCBasicError::SyntaxError {
@@ -1427,6 +1442,28 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         start,
         end,
         step,
+    })
+}
+
+/// Parse the tokens after `FOR EACH`: `variable IN collection` (issue #141).
+/// EACH and IN are words of this statement only, not keywords.
+fn parse_for_each_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let syntax_error = |message: &str| BBCBasicError::SyntaxError {
+        message: message.to_string(),
+        line: line_number,
+    };
+    let Some(Token::Identifier(variable)) = tokens.first() else {
+        return Err(syntax_error("Expected variable name after FOR EACH"));
+    };
+    if !matches!(tokens.get(1), Some(Token::Identifier(word)) if word == "IN") {
+        return Err(syntax_error("Expected IN in FOR EACH statement"));
+    }
+    if tokens.len() < 3 {
+        return Err(syntax_error("Expected a collection after IN"));
+    }
+    Ok(Statement::ForEach {
+        variable: variable.clone(),
+        collection: parse_expression(&tokens[2..])?,
     })
 }
 
@@ -6547,5 +6584,50 @@ mod tests {
                 source
             );
         }
+    }
+
+    #[test]
+    fn test_parse_for_each_statement() {
+        assert_eq!(
+            line_statements("10 FOR EACH S$ IN L%"),
+            Ok(vec![Statement::ForEach {
+                variable: "S$".to_string(),
+                collection: Expression::Variable("L%".to_string()),
+            }])
+        );
+    }
+
+    #[test]
+    fn test_parse_for_each_named_variable_is_a_normal_for() {
+        assert!(matches!(
+            line_statements("10 FOR EACH = 1 TO 3").as_deref(),
+            Ok([Statement::For { variable, .. }]) if variable == "EACH"
+        ));
+    }
+
+    #[test]
+    fn test_parse_next_each_is_a_next_with_the_name_each() {
+        assert_eq!(
+            line_statements("10 NEXT EACH"),
+            Ok(vec![Statement::Next {
+                variables: vec!["EACH".to_string()],
+            }])
+        );
+    }
+
+    #[test]
+    fn test_parse_for_each_errors() {
+        assert_eq!(
+            syntax_message(line_statements("10 FOR EACH N L")),
+            "Expected IN in FOR EACH statement"
+        );
+        assert_eq!(
+            syntax_message(line_statements("10 FOR EACH N IN")),
+            "Expected a collection after IN"
+        );
+        assert_eq!(
+            syntax_message(line_statements("10 FOR EACH 5 IN L")),
+            "Expected variable name after FOR EACH"
+        );
     }
 }

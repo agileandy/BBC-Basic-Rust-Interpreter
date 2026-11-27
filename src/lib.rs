@@ -119,6 +119,8 @@ pub mod error {
         BadCollection,
         // A map with no value for the key, with the key text (issue #140)
         NoSuchKey(String),
+        // A FOR EACH of an empty collection with no NEXT after it (issue #141)
+        MissingNext,
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -174,6 +176,7 @@ pub mod error {
                 BBCBasicError::BadPath(path) => write!(f, "Bad path: {}", path),
                 BBCBasicError::BadCollection => write!(f, "Bad collection"),
                 BBCBasicError::NoSuchKey(key) => write!(f, "No such key: {}", key),
+                BBCBasicError::MissingNext => write!(f, "FOR EACH without matching NEXT"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }
