@@ -1,4 +1,5 @@
-//! Collections: lists that grow (issue 139). This is a modern extension,
+//! Collections: lists that grow (issue 139) and maps from a text key to a
+//! value (issue 140). This is a modern extension,
 //! not BBC BASIC.
 //!
 //! A collection lives in a store of the interpreter. A program holds its
@@ -7,6 +8,7 @@
 //! handle is a number, so a list can hold the handle of a collection.
 
 use crate::error::{BBCBasicError, Result};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 /// One element of a collection: a number or a string.
@@ -16,10 +18,12 @@ pub enum Element {
     Text(String),
 }
 
-/// One collection in the store. Issue 140 adds maps.
+/// One collection in the store: a list (issue 139) or a map (issue 140).
+/// The keys of a map stay in the order in which they were put.
 #[derive(Debug, Clone, PartialEq)]
 enum Collection {
     List(Vec<Element>),
+    Map(IndexMap<String, Element>),
 }
 
 /// The collections of a program, found by handle. A handle is never used
@@ -129,17 +133,107 @@ impl CollectionStore {
         Ok(())
     }
 
+    /// Make an empty map and give its handle. If no handle is free, give No room.
+    pub fn new_map(&mut self) -> Result<i32> {
+        let handle = self.next_handle;
+        self.next_handle = handle.checked_add(1).ok_or(BBCBasicError::NoRoom)?;
+        self.collections
+            .insert(handle, Collection::Map(IndexMap::new()));
+        Ok(handle)
+    }
+
+    /// The count of keys in a map.
+    pub fn map_length(&self, handle: i32) -> Result<usize> {
+        Ok(self.map(handle)?.len())
+    }
+
+    /// The key at an index (from 0) of a map, in the order of the puts.
+    pub fn map_key(&self, handle: i32, index: i32) -> Result<String> {
+        let map = self.map(handle)?;
+        let index = element_index(index, map.len())?;
+        Ok(map.get_index(index).expect("index is checked").0.clone())
+    }
+
+    /// The value of a key of a map. A key that is not there gives No such key.
+    pub fn map_get(&self, handle: i32, key: &str) -> Result<&Element> {
+        self.map(handle)?
+            .get(key)
+            .ok_or_else(|| BBCBasicError::NoSuchKey(key.to_string()))
+    }
+
+    /// The number of a key of a map. A string gives Type mismatch.
+    pub fn map_get_number(&self, handle: i32, key: &str) -> Result<f64> {
+        match self.map_get(handle, key)? {
+            Element::Number(value) => Ok(*value),
+            Element::Text(_) => Err(BBCBasicError::TypeMismatch),
+        }
+    }
+
+    /// The string of a key of a map. A number gives Type mismatch.
+    pub fn map_get_text(&self, handle: i32, key: &str) -> Result<String> {
+        match self.map_get(handle, key)? {
+            Element::Text(text) => Ok(text.clone()),
+            Element::Number(_) => Err(BBCBasicError::TypeMismatch),
+        }
+    }
+
+    /// Tell if the value of a key of a map is a string.
+    pub fn map_is_text(&self, handle: i32, key: &str) -> Result<bool> {
+        Ok(matches!(self.map_get(handle, key)?, Element::Text(_)))
+    }
+
+    /// Put a value for a key of a map. If the key is there, replace its
+    /// value and keep the place of the key.
+    pub fn put(&mut self, handle: i32, key: &str, element: Element) -> Result<()> {
+        self.map_mut(handle)?.insert(key.to_string(), element);
+        Ok(())
+    }
+
+    /// Tell if a map has a key.
+    pub fn has(&self, handle: i32, key: &str) -> Result<bool> {
+        Ok(self.map(handle)?.contains_key(key))
+    }
+
+    /// Remove a key of a map. The other keys keep their order. A key that
+    /// is not there gives No such key.
+    pub fn remove_key(&mut self, handle: i32, key: &str) -> Result<()> {
+        self.map_mut(handle)?
+            .shift_remove(key)
+            .map(|_| ())
+            .ok_or_else(|| BBCBasicError::NoSuchKey(key.to_string()))
+    }
+
+    /// Remove all keys of a map. The map stays.
+    pub fn clear_map(&mut self, handle: i32) -> Result<()> {
+        self.map_mut(handle)?.clear();
+        Ok(())
+    }
+
+    fn map(&self, handle: i32) -> Result<&IndexMap<String, Element>> {
+        match self.collections.get(&handle) {
+            Some(Collection::Map(map)) => Ok(map),
+            _ => Err(BBCBasicError::BadCollection),
+        }
+    }
+
+    fn map_mut(&mut self, handle: i32) -> Result<&mut IndexMap<String, Element>> {
+        match self.collections.get_mut(&handle) {
+            Some(Collection::Map(map)) => Ok(map),
+            _ => Err(BBCBasicError::BadCollection),
+        }
+    }
+
     fn list(&self, handle: i32) -> Result<&Vec<Element>> {
         match self.collections.get(&handle) {
             Some(Collection::List(list)) => Ok(list),
-            None => Err(BBCBasicError::BadCollection),
+            _ => Err(BBCBasicError::BadCollection),
         }
     }
 
     fn list_mut(&mut self, handle: i32) -> Result<&mut Vec<Element>> {
         match self.collections.get_mut(&handle) {
             Some(Collection::List(list)) => Ok(list),
-            None => Err(BBCBasicError::BadCollection),
+            _ => Err(BBCBasicError::BadCollection),
         }
     }
 }
@@ -256,5 +350,72 @@ mod tests {
         assert_eq!(store.length(old), Err(BBCBasicError::BadCollection));
         let new = store.new_list().unwrap();
         assert_ne!(new, old);
+    }
+
+    #[test]
+    fn test_map_put_get_and_replace_keep_the_key_order() {
+        let mut store = CollectionStore::new();
+        let map = store.new_map().unwrap();
+        store.put(map, "b", number(1.0)).unwrap();
+        store.put(map, "A", text("X")).unwrap();
+        store.put(map, "a", number(3.0)).unwrap();
+        store.put(map, "b", text("Y")).unwrap();
+
+        assert_eq!(store.map_length(map), Ok(3));
+        assert_eq!(store.map_get_text(map, "b"), Ok("Y".to_string()));
+        assert_eq!(store.map_get_number(map, "a"), Ok(3.0));
+        assert_eq!(store.map_is_text(map, "A"), Ok(true));
+        assert_eq!(store.map_key(map, 0), Ok("b".to_string()));
+        assert_eq!(store.map_key(map, 1), Ok("A".to_string()));
+        assert_eq!(store.map_key(map, 2), Ok("a".to_string()));
+    }
+
+    #[test]
+    fn test_map_has_remove_and_clear_map() {
+        let mut store = CollectionStore::new();
+        let map = store.new_map().unwrap();
+        for key in ["x", "", "z"] {
+            store.put(map, key, number(1.0)).unwrap();
+        }
+
+        assert_eq!(store.has(map, ""), Ok(true));
+        assert_eq!(store.has(map, "X"), Ok(false));
+        store.remove_key(map, "x").unwrap();
+        assert_eq!(store.has(map, "x"), Ok(false));
+        assert_eq!(store.map_key(map, 0), Ok("".to_string()));
+        assert_eq!(store.map_key(map, 1), Ok("z".to_string()));
+
+        store.clear_map(map).unwrap();
+        assert_eq!(store.map_length(map), Ok(0));
+    }
+
+    #[test]
+    fn test_a_key_that_is_not_there_gives_no_such_key() {
+        let mut store = CollectionStore::new();
+        let map = store.new_map().unwrap();
+        let missing = Err(BBCBasicError::NoSuchKey("K".to_string()));
+
+        assert_eq!(store.map_get_number(map, "K").map(|_| ()), missing);
+        assert_eq!(store.map_get_text(map, "K").map(|_| ()), missing);
+        assert_eq!(store.map_is_text(map, "K").map(|_| ()), missing);
+        assert_eq!(store.remove_key(map, "K"), missing);
+        assert_eq!(
+            store.map_key(map, 0),
+            Err(BBCBasicError::SubscriptOutOfRange)
+        );
+    }
+
+    #[test]
+    fn test_a_list_handle_is_not_a_map_and_a_map_handle_is_not_a_list() {
+        let mut store = CollectionStore::new();
+        let list = store.new_list().unwrap();
+        let map = store.new_map().unwrap();
+        let bad = Err(BBCBasicError::BadCollection);
+
+        assert_eq!(store.map_length(list).map(|_| ()), bad);
+        assert_eq!(store.put(list, "K", number(0.0)), bad);
+        assert_eq!(store.has(list, "K").map(|_| ()), bad);
+        assert_eq!(store.length(map).map(|_| ()), bad);
+        assert_eq!(store.add(map, number(0.0)), bad);
     }
 }

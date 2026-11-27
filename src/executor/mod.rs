@@ -616,6 +616,21 @@ impl Executor {
                 let list = self.eval_integer(list)?;
                 self.collections.clear_list(list)
             }
+            Statement::MapPut { map, key, value } => {
+                let map = self.eval_integer(map)?;
+                let key = self.eval_string(key)?;
+                let value = self.eval_list_element(value)?;
+                self.collections.put(map, &key, value)
+            }
+            Statement::MapRemove { map, key } => {
+                let map = self.eval_integer(map)?;
+                let key = self.eval_string(key)?;
+                self.collections.remove_key(map, &key)
+            }
+            Statement::MapClear { map } => {
+                let map = self.eval_integer(map)?;
+                self.collections.clear_map(map)
+            }
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
                 Ok(())
@@ -1754,9 +1769,7 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => real_to_integer(*val),
-            Expression::Variable(name) if self.is_new_list_call(name) => {
-                self.collections.new_list()
-            }
+            Expression::Variable(name) if self.is_new_list_call(name) => self.new_collection(name),
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 real_to_integer(self.eval_list_function(name, indices)?)
             }
@@ -1975,7 +1988,7 @@ impl Executor {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
             Expression::Variable(name) if self.is_new_list_call(name) => {
-                self.collections.new_list().map(f64::from)
+                self.new_collection(name).map(f64::from)
             }
             Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
                 self.eval_list_function(name, indices)
@@ -2252,6 +2265,24 @@ impl Executor {
                 let list = self.eval_integer(list)?;
                 let index = self.eval_integer(index)?;
                 self.collections.get_text(list, index)
+            }
+            // MAPGET$(m, key$) and MAPKEY$(m, n) are extensions (issue #140).
+            // An array with that name keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if matches!(name.as_str(), "MAPGET$" | "MAPKEY$")
+                    && !self.variables.has_array(name) =>
+            {
+                let [map, key] = indices.as_slice() else {
+                    return Err(list_arguments_error(name, 2));
+                };
+                let map = self.eval_integer(map)?;
+                if name == "MAPKEY$" {
+                    let index = self.eval_integer(key)?;
+                    self.collections.map_key(map, index)
+                } else {
+                    let key = self.eval_string(key)?;
+                    self.collections.map_get_text(map, &key)
+                }
             }
             Expression::ArrayAccess { name, indices } if self.is_json_call(name, "LOADJSON$") => {
                 let file = self.eval_json_argument(name, indices)?;
@@ -3048,24 +3079,64 @@ impl Executor {
         name == function && !self.variables.has_array(name)
     }
 
-    /// Tell if `name` with no bracket is a call of NEWLIST (issue #139). A
-    /// variable named NEWLIST has priority, so that old programs do not change.
+    /// Tell if `name` with no bracket is a call of NEWLIST (issue #139) or
+    /// NEWMAP (issue #140). A variable with that name has priority, so that
+    /// old programs do not change.
     fn is_new_list_call(&self, name: &str) -> bool {
-        name == "NEWLIST" && !self.variables.has_variable(name)
+        matches!(name, "NEWLIST" | "NEWMAP") && !self.variables.has_variable(name)
     }
 
-    /// Tell if `name(...)` is a call of a numeric list function (issue #139).
-    /// An array of the same name has priority.
+    /// Make a new list or a new map, for NEWLIST or NEWMAP with no bracket.
+    fn new_collection(&mut self, name: &str) -> Result<i32> {
+        if name == "NEWMAP" {
+            self.collections.new_map()
+        } else {
+            self.collections.new_list()
+        }
+    }
+
+    /// Tell if `name(...)` is a call of a numeric list function (issue #139)
+    /// or a numeric map function (issue #140). An array of the same name has
+    /// priority.
     fn is_list_call(&self, name: &str) -> bool {
-        matches!(name, "NEWLIST" | "LISTLEN" | "LISTGET" | "LISTISSTR")
-            && !self.variables.has_array(name)
+        matches!(
+            name,
+            "NEWLIST"
+                | "LISTLEN"
+                | "LISTGET"
+                | "LISTISSTR"
+                | "NEWMAP"
+                | "MAPLEN"
+                | "MAPGET"
+                | "MAPHAS"
+                | "MAPISSTR"
+        ) && !self.variables.has_array(name)
     }
 
     /// Evaluate a numeric list function: NEWLIST(), LISTLEN(l), LISTGET(l, i)
-    /// or LISTISSTR(l, i). LISTISSTR gives TRUE (-1) or FALSE (0).
+    /// or LISTISSTR(l, i). Or evaluate a numeric map function: NEWMAP(),
+    /// MAPLEN(m), MAPGET(m, key$), MAPHAS(m, key$) or MAPISSTR(m, key$).
+    /// LISTISSTR, MAPHAS and MAPISSTR give TRUE (-1) or FALSE (0).
     fn eval_list_function(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
+        let truth = |value: bool| if value { -1.0 } else { 0.0 };
         match (name, args) {
             ("NEWLIST", []) => self.collections.new_list().map(f64::from),
+            ("NEWMAP", []) => self.collections.new_map().map(f64::from),
+            ("MAPLEN", [map]) => {
+                let map = self.eval_integer(map)?;
+                Ok(self.collections.map_length(map)? as f64)
+            }
+            ("MAPGET" | "MAPHAS" | "MAPISSTR", [map, key]) => {
+                let map = self.eval_integer(map)?;
+                let key = self.eval_string(key)?;
+                match name {
+                    "MAPGET" => self.collections.map_get_number(map, &key),
+                    "MAPHAS" => self.collections.has(map, &key).map(truth),
+                    _ => self.collections.map_is_text(map, &key).map(truth),
+                }
+            }
+            ("NEWMAP", _) => Err(list_arguments_error(name, 0)),
+            ("MAPLEN", _) => Err(list_arguments_error(name, 1)),
             ("LISTLEN", [list]) => {
                 let list = self.eval_integer(list)?;
                 Ok(self.collections.length(list)? as f64)
