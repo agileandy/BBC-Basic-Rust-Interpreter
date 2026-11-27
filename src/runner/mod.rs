@@ -10,7 +10,7 @@ use std::ops::Bound;
 use std::rc::Rc;
 
 use crate::error::BBCBasicError;
-use crate::executor::{Executor, FunctionBody, ResultEvaluator};
+use crate::executor::{ErrorHandler, Executor, FunctionBody, ResultEvaluator};
 use crate::parser::{parse_line, Expression, Statement};
 use crate::program::{Position, ProgramStore, TYPED_LINE};
 use crate::tokenizer::TokenizedLine;
@@ -91,6 +91,15 @@ fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
                 items.push(Item::Skip(0));
                 flatten(else_part, items);
             }
+            continue;
+        }
+
+        // The handler statements follow the ON ERROR, so that each has a
+        // position on the line
+        if let Statement::OnErrorStatements { statements } = &mut statement {
+            let statements = std::mem::take(statements);
+            items.push(Item::Statement(statement));
+            flatten(statements, items);
             continue;
         }
 
@@ -402,6 +411,10 @@ pub fn run_typed_line(
             Item::Statement(Statement::IfBlock { .. }) => {
                 return Err("Block IF needs a line number".to_string());
             }
+            // The handler is on the line, and the typed line is not kept
+            Item::Statement(Statement::OnErrorStatements { .. }) => {
+                return Err("ON ERROR with statements needs a line number".to_string());
+            }
             _ => {}
         }
     }
@@ -631,15 +644,28 @@ fn run_lines(
                 // Handle an error in a stored line with the ON ERROR handler
                 // if one is set
                 let handler = executor.get_error_handler();
-                let (Some(handler_line), Ok(_)) = (handler, u16::try_from(error_line)) else {
+                let (Some(handler), Ok(_)) = (handler, u16::try_from(error_line)) else {
                     return Err(error_text(&e, error_line));
                 };
 
-                if !cursor.goto_line(handler_line) {
-                    return Err(format!(
-                        "Error handler line {} not found (from error at line {})",
-                        handler_line, error_line
-                    ));
+                match handler {
+                    ErrorHandler::Line(handler_line) => {
+                        if !cursor.goto_line(handler_line) {
+                            return Err(format!(
+                                "Error handler line {} not found (from error at line {})",
+                                handler_line, error_line
+                            ));
+                        }
+                    }
+                    // An error in the handler statements themselves stops
+                    // the run, so that the handler does not loop without end
+                    ErrorHandler::Statements(handler_position)
+                        if position.line == handler_position.line
+                            && position.index >= handler_position.index =>
+                    {
+                        return Err(error_text(&e, error_line));
+                    }
+                    ErrorHandler::Statements(handler_position) => cursor.goto(handler_position),
                 }
                 // As in BBC BASIC, the handler runs outside each PROC, FN,
                 // GOSUB and loop that was open: it sees the values that
@@ -783,6 +809,16 @@ fn step(
             return Ok(Flow::Jumped);
         }
         Statement::EndIf => return Ok(Flow::Next),
+        // Store the handler and continue at the next line. The handler
+        // statements run only when an error occurs.
+        Statement::OnErrorStatements { .. } => {
+            executor.set_error_handler_statements(Position {
+                line: line_number,
+                index: position.index + 1,
+            });
+            program.skip_rest_of_line();
+            return Ok(Flow::Next);
+        }
         _ => {}
     }
 

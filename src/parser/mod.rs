@@ -298,6 +298,8 @@ pub enum Statement {
     OnError { line_number: u16 },
     /// ON ERROR OFF statement - clear error handler
     OnErrorOff,
+    /// ON ERROR followed by statements. The handler is the rest of the line.
+    OnErrorStatements { statements: Vec<Statement> },
     /// PRINT# statement - write to file
     PrintFile {
         handle: Expression,
@@ -524,7 +526,8 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
         let uses_rest_of_line = matches!(
             rest.first(),
             Some(Token::Keyword(0xF4 | 0xDC | 0xE7)) // REM, DATA, IF
-        ) || is_on_with_else(rest);
+        ) || is_on_with_else(rest)
+            || is_on_error_with_statements(rest);
         let end = if uses_rest_of_line {
             rest.len()
         } else {
@@ -555,6 +558,16 @@ fn is_on_with_else(tokens: &[Token]) -> bool {
         .iter()
         .take_while(|t| !matches!(t, Token::Separator(':')))
         .any(|t| matches!(t, Token::Keyword(0x8B)))
+}
+
+/// True if the tokens start with ON ERROR and a statement that is not GOTO,
+/// OFF or LOCAL. The handler statements are the rest of the line.
+fn is_on_error_with_statements(tokens: &[Token]) -> bool {
+    matches!(
+        tokens,
+        [Token::Keyword(0xEE), Token::Keyword(0x85), next, ..]
+            if !matches!(next, Token::Keyword(0xE5 | 0x87 | 0xEA))
+    )
 }
 
 /// Parse a tokenized line into a statement
@@ -1261,6 +1274,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     // Syntax: ON <expression> GOTO|GOSUB <line1>, <line2>, ...
     // or: ON ERROR GOTO <line>
     // or: ON ERROR OFF
+    // or: ON ERROR <statements>
 
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
@@ -1306,10 +1320,17 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
                     }
                 }
             }
-            _ => {
+            Token::Keyword(0xEA) => {
+                // LOCAL keyword (0xEA)
                 return Err(BBCBasicError::SyntaxError {
-                    message: "Expected GOTO or OFF after ON ERROR".to_string(),
+                    message: "ON ERROR LOCAL is not supported".to_string(),
                     line: line_number,
+                });
+            }
+            _ => {
+                // The handler is the rest of the line
+                return Ok(Statement::OnErrorStatements {
+                    statements: parse_statements(&tokens[1..], line_number)?,
                 });
             }
         }
@@ -4148,6 +4169,77 @@ mod tests {
                 else_part: Some(vec![print_string("bad")]),
             }]
         );
+    }
+
+    #[test]
+    fn test_parse_on_error_statements_use_rest_of_line() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("PRINT \"a\" : ON ERROR PRINT \"b\" : END").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![
+                print_string("a"),
+                Statement::OnErrorStatements {
+                    statements: vec![print_string("b"), Statement::End],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_error_statements_with_if() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON ERROR IF ERR = 18 THEN END ELSE REPORT").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::OnErrorStatements {
+                statements: vec![Statement::If {
+                    condition: Expression::BinaryOp {
+                        left: Box::new(Expression::Variable("ERR".to_string())),
+                        op: BinaryOperator::Equal,
+                        right: Box::new(Expression::Integer(18)),
+                    },
+                    then_part: vec![Statement::End],
+                    else_part: Some(vec![Statement::Report]),
+                }],
+            }]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_error_goto_ends_at_colon() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON ERROR GOTO 100 : PRINT \"a\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::OnError { line_number: 100 }, print_string("a")]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_error_off_ends_at_colon() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON ERROR OFF : PRINT \"a\"").unwrap();
+
+        assert_eq!(
+            parse_line(&line).unwrap(),
+            vec![Statement::OnErrorOff, print_string("a")]
+        );
+    }
+
+    #[test]
+    fn test_parse_on_error_local_is_error() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("ON ERROR LOCAL PRINT \"a\"").unwrap();
+
+        assert!(matches!(
+            parse_line(&line),
+            Err(BBCBasicError::SyntaxError { message, .. })
+                if message == "ON ERROR LOCAL is not supported"
+        ));
     }
 
     fn input_var(name: &str) -> InputItem {

@@ -280,6 +280,15 @@ pub struct ErrorInfo {
     pub message: String,
 }
 
+/// Where the run continues when an error occurs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorHandler {
+    /// ON ERROR GOTO: the first statement of this line
+    Line(u16),
+    /// ON ERROR <statements>: the first statement after ON ERROR
+    Statements(Position),
+}
+
 /// BBC BASIC statement executor
 #[derive(Debug)]
 pub struct Executor {
@@ -313,8 +322,8 @@ pub struct Executor {
     function_body_runner: BodyRunnerSlot,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
-    // Error handler: line number to jump to on error (None = no handler)
-    error_handler: Option<u16>,
+    // Error handler: where the run continues on error (None = no handler)
+    error_handler: Option<ErrorHandler>,
     // TRACE: the run prints each stored line number below this limit (None = off)
     trace_limit: Option<u32>,
     // Last error information (for ERL and ERR functions)
@@ -547,6 +556,10 @@ impl Executor {
             }
             Statement::OnErrorOff => {
                 self.clear_error_handler();
+                Ok(())
+            }
+            Statement::OnErrorStatements { .. } => {
+                // The run loop sets the handler, because it knows the position
                 Ok(())
             }
             Statement::Trace { mode } => self.execute_trace(mode),
@@ -3088,7 +3101,13 @@ impl Executor {
 
     /// Set error handler (ON ERROR GOTO line)
     pub fn set_error_handler(&mut self, line_number: u16) {
-        self.error_handler = Some(line_number);
+        self.error_handler = Some(ErrorHandler::Line(line_number));
+    }
+
+    /// Set the error handler to the statements at a position
+    /// (ON ERROR <statements>)
+    pub fn set_error_handler_statements(&mut self, position: Position) {
+        self.error_handler = Some(ErrorHandler::Statements(position));
     }
 
     /// Clear error handler (ON ERROR OFF)
@@ -3096,8 +3115,8 @@ impl Executor {
         self.error_handler = None;
     }
 
-    /// Get error handler line number (returns None if no handler set)
-    pub fn get_error_handler(&self) -> Option<u16> {
+    /// Get the error handler (returns None if no handler set)
+    pub fn get_error_handler(&self) -> Option<ErrorHandler> {
         self.error_handler
     }
 
@@ -5757,7 +5776,7 @@ mod tests {
 
         // Set error handler
         executor.set_error_handler(1000);
-        assert_eq!(executor.get_error_handler(), Some(1000));
+        assert_eq!(executor.get_error_handler(), Some(ErrorHandler::Line(1000)));
 
         // Clear error handler
         executor.clear_error_handler();
@@ -5795,7 +5814,7 @@ mod tests {
         let stmt = Statement::OnError { line_number: 1000 };
         executor.execute_statement(&stmt).unwrap();
 
-        assert_eq!(executor.get_error_handler(), Some(1000));
+        assert_eq!(executor.get_error_handler(), Some(ErrorHandler::Line(1000)));
     }
 
     #[test]
