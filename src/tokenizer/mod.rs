@@ -445,8 +445,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Keyword(FN | PROC), Token::Identifier(_)) => false,
                 // A keyword after a closing bracket: IF (A) THEN
                 (Token::Separator(')'), Token::Keyword(_)) => true,
-                // A subtract after a closing bracket: LEN("ABC") - 1
-                (Token::Separator(')'), Token::Operator('-')) => true,
+                // An operator after a closing bracket, as after a name:
+                // LEN("ABC") - 1, (A) = 1. The memory forms list as typed: A%(1)?2
+                (Token::Separator(')'), Token::Operator(op)) if !matches!(op, '?' | '!') => true,
                 // The OF of a CASE after a closing bracket: CASE LEN(A$) OF
                 (Token::Separator(')'), Token::Identifier(name)) if name == "OF" => true,
                 // No space before/after certain operators
@@ -469,6 +470,16 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // The memory forms ?A, !A, A?1 and A!1 list as typed
                 (Token::Operator('?' | '!'), _) => false,
                 (Token::Identifier(_), Token::Operator('?' | '!')) => false,
+                // A unary minus joins its value: ABS(-X), X = -Y, 2 * -Y
+                (Token::Operator('-'), _)
+                    if i < 2
+                        || matches!(
+                            &tokenized_line.tokens[i - 2],
+                            Token::Operator(_) | Token::Separator('(' | ',' | ';' | ':')
+                        ) =>
+                {
+                    false
+                }
                 // Need space between most tokens
                 _ => true,
             };

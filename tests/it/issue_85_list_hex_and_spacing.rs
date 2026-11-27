@@ -15,7 +15,7 @@ const PROGRAM: [&str; 7] = [
     "40 GOTO &46",
     "50 PRINT \"NO\"",
     "70 END",
-    "80 DEF FNa(X)= X * 2",
+    "80 DEF FNa(X) = X * 2",
 ];
 
 /// The output of RUN before the correction
