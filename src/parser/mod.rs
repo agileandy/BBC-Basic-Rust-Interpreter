@@ -342,6 +342,8 @@ pub enum Statement {
     Clg,
     /// MODE statement - select a screen mode from 0 to 7
     Mode { mode: Expression },
+    /// COLOUR statement - set the text foreground or background colour
+    Colour { colour: Expression },
     /// VDU statement - send bytes to the display
     Vdu { items: Vec<VduItem> },
     /// ELLIPSE statement - draw an ellipse
@@ -755,6 +757,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // MODE statement
         Token::Keyword(0xEB) => parse_mode_statement(&tokens[1..], line.line_number),
+
+        // COLOUR statement
+        Token::Keyword(0xFB) => parse_colour_statement(&tokens[1..], line.line_number),
 
         // VDU statement
         Token::Keyword(0xEF) => parse_vdu_statement(&tokens[1..], line.line_number),
@@ -2128,6 +2133,20 @@ fn parse_mode_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 
     let mode = parse_expression(tokens)?;
     Ok(Statement::Mode { mode })
+}
+
+/// Parse COLOUR statement: COLOUR n, where n is an expression. The palette
+/// forms with 2 or 4 values are not supported, so they are a syntax error.
+fn parse_colour_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    if tokens.is_empty() {
+        return Err(BBCBasicError::SyntaxError {
+            message: "COLOUR requires a colour number".to_string(),
+            line: line_number,
+        });
+    }
+
+    let colour = parse_expression(tokens)?;
+    Ok(Statement::Colour { colour })
 }
 
 /// Parse VDU statement: VDU a, b; c
@@ -5036,6 +5055,40 @@ mod tests {
     #[test]
     fn test_parse_mode_with_no_operand_gives_error() {
         assert!(parse_trace("MODE").is_err());
+    }
+
+    #[test]
+    fn test_parse_colour_number() {
+        assert_eq!(
+            parse_trace("COLOUR 1").unwrap(),
+            Statement::Colour {
+                colour: Expression::Integer(1)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_colour_expression() {
+        assert_eq!(
+            parse_trace("COLOUR X% + 128").unwrap(),
+            Statement::Colour {
+                colour: Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("X%".to_string())),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Integer(128)),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_colour_with_no_operand_gives_error() {
+        assert!(parse_trace("COLOUR").is_err());
+    }
+
+    #[test]
+    fn test_parse_colour_with_two_operands_gives_error() {
+        assert!(parse_trace("COLOUR 1, 2").is_err());
     }
 
     fn vdu_item(value: Expression, two_bytes: bool) -> VduItem {

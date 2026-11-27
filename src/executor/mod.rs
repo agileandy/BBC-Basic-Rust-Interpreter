@@ -333,6 +333,10 @@ pub struct Executor {
     // Current screen mode (MODE). A BBC Micro starts in mode 7, but the
     // executor starts in mode 0 so that graphics work with no MODE statement.
     screen_mode: ScreenMode,
+    // Text colours (COLOUR and VDU 17). MODE sets the defaults: foreground is
+    // the highest colour of the mode, and background is 0.
+    text_foreground: u8,
+    text_background: u8,
     // Bytes of a VDU command that waits for more parameter bytes. They stay
     // between VDU statements.
     vdu_queue: Vec<u8>,
@@ -372,6 +376,9 @@ impl Executor {
             output: String::new(),
             column: 0,
             screen_mode: ScreenMode::from_number(0).expect("mode 0 is in the mode table"),
+            // The defaults of mode 0, which has 2 colours
+            text_foreground: 1,
+            text_background: 0,
             vdu_queue: Vec::new(),
         }
     }
@@ -475,6 +482,7 @@ impl Executor {
             Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
             Statement::Clg => self.execute_clg(),
             Statement::Mode { mode } => self.execute_mode(mode),
+            Statement::Colour { colour } => self.execute_colour(colour),
             Statement::Vdu { items } => self.execute_vdu(items),
             Statement::Ellipse { x, y, major, minor } => self.execute_ellipse(x, y, major, minor),
             Statement::Rectangle {
@@ -1363,7 +1371,40 @@ impl Executor {
 
         self.screen_mode = screen_mode;
         self.graphics.reset_for_mode(&screen_mode);
+        self.text_foreground = screen_mode.colours - 1;
+        self.text_background = 0;
         self.execute_cls()
+    }
+
+    /// Execute COLOUR statement - set the text foreground or background colour
+    fn execute_colour(&mut self, colour: &Expression) -> Result<()> {
+        let value = self.eval_integer(colour)?;
+        self.set_text_colour(value as u8);
+        Ok(())
+    }
+
+    /// Set a text colour from 1 byte, as COLOUR and VDU 17 do. A byte below
+    /// 128 sets the foreground and a byte from 128 sets the background. The
+    /// colour is reduced to the colour count of the current mode, as on a BBC
+    /// Micro. No escape code goes to the output: colour output to a real
+    /// terminal is out of scope (issue #101).
+    fn set_text_colour(&mut self, byte: u8) {
+        let colour = (byte & 0x7F) % self.screen_mode.colours;
+        if byte < 128 {
+            self.text_foreground = colour;
+        } else {
+            self.text_background = colour;
+        }
+    }
+
+    /// The current text foreground colour
+    pub fn text_foreground(&self) -> u8 {
+        self.text_foreground
+    }
+
+    /// The current text background colour
+    pub fn text_background(&self) -> u8 {
+        self.text_background
     }
 
     /// Execute PLOT statement - plot with mode code

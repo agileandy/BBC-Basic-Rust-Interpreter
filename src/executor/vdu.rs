@@ -65,6 +65,7 @@ impl Executor {
                 self.column = 0;
             }
             16 => self.execute_clg()?,
+            17 => self.set_text_colour(parameters[0]),
             18 => self.execute_gcol(&integer(0), &integer(1))?,
             22 => self.execute_mode(&integer(0))?,
             25 => self.execute_plot(
@@ -80,7 +81,7 @@ impl Executor {
             // TAB(x, y): the executor keeps only a print column, so y has no effect
             31 => self.column = parameters[0] as usize,
             32..=126 => self.print_output(&char::from(code).to_string()),
-            // 7 (bell), 17 (COLOUR, no text colours yet), 127 (delete), the
+            // 7 (bell), 127 (delete), the
             // other control codes and the codes from 128 to 255 do nothing
             _ => {}
         }
