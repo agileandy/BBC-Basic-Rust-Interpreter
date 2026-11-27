@@ -139,3 +139,4 @@ mod issue_155_empty_argument;
 mod issue_154_input_file_array_element;
 mod issue_153_read_array_element;
 mod issue_142_json_collections;
+mod issue_157_print_file_records;

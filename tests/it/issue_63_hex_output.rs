@@ -113,7 +113,8 @@ fn test_print_file_writes_hex_text() {
 
     output_of(&[&open_out, "20 PRINT#F%, ~255;255", "30 CLOSE#F%"]);
 
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "FF255\n");
+    // Each item is one record (issue #157)
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "FF\n255\n");
 }
 
 #[test]

@@ -173,6 +173,19 @@ fn format_hex(value: i32) -> String {
     format!("{:X}", value as u32)
 }
 
+/// Make the text for a real value. If `exact` is false, the text is the PRINT text.
+/// If `exact` is true (PRINT#, issue #157), the text reads back as the same value:
+/// it is the PRINT text if that text gives the same value, otherwise the shortest
+/// text that gives the same value, for example `0.3333333333333333`.
+fn format_real(value: f64, exact: bool) -> String {
+    let text = format_number(value);
+    if !exact || !value.is_finite() || text.parse::<f64>() == Ok(value) {
+        text
+    } else {
+        format!("{:?}", value)
+    }
+}
+
 /// Make the PRINT text for a real value, as a BBC Micro does. The value is rounded
 /// to 9 significant digits, without trailing zeros. If the absolute value is from
 /// 1E-7 up to (not including) 1E9, the text is plain decimal. Otherwise the text
@@ -398,6 +411,9 @@ pub struct Executor {
     output: String,
     // Column of the print position: 0 after a newline, updated by print_output
     column: usize,
+    // True while PRINT# formats its items: a real value gets all its digits,
+    // so that INPUT# reads the same value (issue #157)
+    exact_reals: bool,
     // Current screen mode (MODE). A BBC Micro starts in mode 7, but the
     // executor starts in mode 0 so that graphics work with no MODE statement.
     screen_mode: ScreenMode,
@@ -446,6 +462,7 @@ impl Executor {
             key_queue: VecDeque::new(),
             output: String::new(),
             column: 0,
+            exact_reals: false,
             screen_mode: ScreenMode::from_number(0).expect("mode 0 is in the mode table"),
             // The defaults of mode 0, which has 2 colours
             text_foreground: 1,
@@ -872,7 +889,7 @@ impl Executor {
     fn format_expression(&mut self, expr: &Expression) -> Result<String> {
         match expr {
             Expression::Integer(_) => Ok(self.eval_integer(expr)?.to_string()),
-            Expression::Real(_) => Ok(format_number(self.eval_real(expr)?)),
+            Expression::Real(_) => Ok(format_real(self.eval_real(expr)?, self.exact_reals)),
             Expression::String(_) => self.eval_string(expr),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
@@ -880,12 +897,12 @@ impl Executor {
                 } else if name.ends_with('$') {
                     self.eval_string(expr)
                 } else {
-                    Ok(format_number(self.eval_real(expr)?))
+                    Ok(format_real(self.eval_real(expr)?, self.exact_reals))
                 }
             }
             // VAL gives a real value, so do not try it as an integer first
             Expression::FunctionCall { name, .. } if name == "VAL" => {
-                Ok(format_number(self.eval_real(expr)?))
+                Ok(format_real(self.eval_real(expr)?, self.exact_reals))
             }
             // A user function with no $ in its name can give a string or a
             // number. Run its body one time and format the result by its type.
@@ -904,7 +921,9 @@ impl Executor {
             // string first, because `is_real_expr` is true for each user
             // function, also for a string function such as FNx$.
             _ if self.is_string_expr(expr) => self.eval_string(expr),
-            _ if self.is_real_expr(expr) => Ok(format_number(self.eval_real(expr)?)),
+            _ if self.is_real_expr(expr) => {
+                Ok(format_real(self.eval_real(expr)?, self.exact_reals))
+            }
             _ => Ok(self.eval_integer(expr)?.to_string()),
         }
     }
@@ -920,7 +939,7 @@ impl Executor {
             {
                 self.format_expression(expr)
             }
-            _ => Ok(format_number(self.eval_real(expr)?)),
+            _ => Ok(format_real(self.eval_real(expr)?, self.exact_reals)),
         }
     }
 
@@ -3997,41 +4016,26 @@ impl Executor {
         // Evaluate the handle
         let handle = self.eval_integer(handle_expr)?;
 
-        // Process print items and build output string first (to avoid borrow issues)
+        // Each item is one record: its text and a line feed (issue #157). The
+        // separators `,` and `;` have no effect on the file. A real value gets
+        // all its digits, so that INPUT# reads the same value. A record cannot
+        // hold a line feed or a carriage return, so a string with one of them
+        // gives "Bad record" and nothing is written. With no item, PRINT#
+        // writes one empty record.
         use crate::parser::PrintItem;
-        let mut output = String::new();
-
-        // After ~, numeric items are hex until the next comma or semicolon
-        let mut hex = false;
-        for item in items {
-            match item {
-                PrintItem::Expression(expr) => {
-                    output.push_str(&self.format_print_item(expr, hex)?);
-                }
-                PrintItem::Tab(_) | PrintItem::TabXY(..) | PrintItem::Spc(_) => {
-                    // The parser does not permit TAB and SPC in PRINT#
-                }
-                PrintItem::Hex => hex = true,
-                PrintItem::Semicolon => {
-                    // Semicolon suppresses newline - do nothing
-                    hex = false;
-                }
-                PrintItem::Comma => {
-                    hex = false;
-                    // Comma outputs a tab
-                    output.push('\t');
-                }
-            }
+        self.exact_reals = true;
+        let records = self.format_file_records(items);
+        self.exact_reals = false;
+        let records = records?;
+        if records.iter().any(|r| r.contains(['\n', '\r'])) {
+            return Err(BBCBasicError::BadRecord);
         }
-
-        // Add newline unless last item was semicolon
-        if !items.is_empty() {
-            if let Some(last) = items.last() {
-                if !matches!(last, PrintItem::Semicolon) {
-                    output.push('\n');
-                }
-            }
-        } else {
+        let mut output = String::new();
+        for record in &records {
+            output.push_str(record);
+            output.push('\n');
+        }
+        if !items.iter().any(|i| matches!(i, PrintItem::Expression(_))) {
             output.push('\n');
         }
 
@@ -4063,6 +4067,24 @@ impl Executor {
         Ok(())
     }
 
+    /// Give the text of each expression item of a PRINT# statement.
+    fn format_file_records(&mut self, items: &[crate::parser::PrintItem]) -> Result<Vec<String>> {
+        use crate::parser::PrintItem;
+        let mut records = Vec::new();
+        // After ~, numeric items are hex until the next comma or semicolon
+        let mut hex = false;
+        for item in items {
+            match item {
+                PrintItem::Expression(expr) => records.push(self.format_print_item(expr, hex)?),
+                // The parser does not permit TAB and SPC in PRINT#
+                PrintItem::Tab(_) | PrintItem::TabXY(..) | PrintItem::Spc(_) => {}
+                PrintItem::Hex => hex = true,
+                PrintItem::Semicolon | PrintItem::Comma => hex = false,
+            }
+        }
+        Ok(records)
+    }
+
     /// Execute INPUT# statement - read from file
     fn execute_input_file(
         &mut self,
@@ -4072,7 +4094,35 @@ impl Executor {
         // Evaluate the handle
         let handle = self.eval_integer(handle_expr)?;
 
-        // Get the file handle
+        // Each target reads one record: one line of the file (issue #157)
+        for target in targets {
+            let (var_name, indices) = match target {
+                InputItem::Variable(var) => (var, None),
+                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
+                // The parser gives no prompt text in INPUT#
+                InputItem::Prompt { .. } => continue,
+            };
+            let record = self.read_file_record(handle)?;
+
+            // The value type comes from the name of the target. A string gets
+            // the full record. A number that is not valid gives 0.
+            let value = if var_name.ends_with('%') {
+                Variable::Integer(record.trim().parse::<i32>().unwrap_or(0))
+            } else if var_name.ends_with('$') {
+                Variable::String(record)
+            } else {
+                Variable::Real(record.trim().parse::<f64>().unwrap_or(0.0))
+            };
+            // The indices of an element are evaluated now (issue #154)
+            self.store_input_value(var_name, indices.map(Vec::as_slice), value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Read one record of an INPUT# file: one line, with no line end. A last
+    /// line with no line feed is one record. If no line is left, give "EOF".
+    fn read_file_record(&mut self, handle: i32) -> Result<String> {
         let file_handle = self
             .open_files
             .get_mut(&handle)
@@ -4084,45 +4134,20 @@ impl Executor {
             FileHandle::Output(_) => return Err(BBCBasicError::BadCall),
         };
 
-        // Read a line from the file
         let mut line = String::new();
-        reader
+        let count = reader
             .read_line(&mut line)
             .map_err(|e| BBCBasicError::DiskError(format!("Read error: {}", e)))?;
-
-        // Remove trailing newline
+        if count == 0 {
+            return Err(BBCBasicError::Eof);
+        }
         if line.ends_with('\n') {
             line.pop();
             if line.ends_with('\r') {
                 line.pop();
             }
         }
-
-        // Parse the line and assign to variables (simplified - just split by commas)
-        let values: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-
-        for (i, target) in targets.iter().enumerate() {
-            let value_str = values.get(i).unwrap_or(&"");
-            let (var_name, indices) = match target {
-                InputItem::Variable(var) => (var, None),
-                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
-                // The parser gives no prompt text in INPUT#
-                InputItem::Prompt { .. } => continue,
-            };
-
-            // The value type comes from the name of the target
-            let value = if var_name.ends_with('%') {
-                Variable::Integer(value_str.parse::<i32>().unwrap_or(0))
-            } else if var_name.ends_with('$') {
-                Variable::String(value_str.to_string())
-            } else {
-                Variable::Real(value_str.parse::<f64>().unwrap_or(0.0))
-            };
-            // The indices of an element are evaluated now (issue #154)
-            self.store_input_value(var_name, indices.map(Vec::as_slice), value)?;
-        }
-
-        Ok(())
+        Ok(line)
     }
 
     /// Execute CLOSE# statement - close file
@@ -6573,7 +6598,8 @@ mod tests {
 
         // Read back the content
         let content = fs::read_to_string(test_file).unwrap();
-        assert_eq!(content, "Hello\tWorld\n");
+        // Each item is one record (issue #157)
+        assert_eq!(content, "Hello\nWorld\n");
 
         // Clean up
         let _ = fs::remove_file(test_file);
@@ -6586,7 +6612,8 @@ mod tests {
         let test_file = "test_input.txt";
 
         // Create test file with data
-        fs::write(test_file, "42,Hello,3.14").unwrap();
+        // One record on each line (issue #157)
+        fs::write(test_file, "42\nHello\n3.14").unwrap();
 
         let mut executor = Executor::new();
         let handle = executor.open_file_for_reading(test_file).unwrap();
