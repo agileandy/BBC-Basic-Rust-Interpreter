@@ -142,6 +142,14 @@ fn main() {
             continue;
         }
 
+        if let Some(range) = delete_command(input) {
+            match range {
+                Ok((start, end)) => program.delete_range(start, end),
+                Err(e) => println!("Error: {}", e),
+            }
+            continue;
+        }
+
         // Process the line (either store or execute)
         match process_line(&mut executor, &mut program, input) {
             Ok(RunOutcome::Ended) => {}
@@ -291,6 +299,23 @@ fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String
     Ok(())
 }
 
+/// Match `DELETE start, end` (any case). Return the range, or a syntax error.
+fn delete_command(input: &str) -> Option<Result<(u16, u16), String>> {
+    if !input.get(..6)?.eq_ignore_ascii_case("delete") {
+        return None;
+    }
+    let rest = &input[6..];
+    if rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        return None;
+    }
+    let numbers: Vec<Option<u16>> = rest.split(',').map(|n| n.trim().parse().ok()).collect();
+    Some(match numbers[..] {
+        [Some(start), Some(end)] if start <= end => Ok((start, end)),
+        [Some(_), Some(_)] => Err("Syntax error: DELETE start is more than end".to_string()),
+        _ => Err("Syntax error: use DELETE start, end".to_string()),
+    })
+}
+
 /// Match `*CAT` or `*CAT <directory>` (any case). Return the directory, or "" for none.
 fn cat_directory(input: &str) -> Option<&str> {
     let input = input.trim();
@@ -391,6 +416,7 @@ fn print_help() {
     println!("  LIST                     - List the program");
     println!("  RUN                      - Run the stored program");
     println!("  NEW                      - Clear the program");
+    println!("  DELETE 20, 40            - Delete lines 20 to 40");
     println!("  SAVE \"filename\"          - Save program to filename.bbas");
     println!("  LOAD \"filename\"          - Load program from filename.bbas");
     println!("  CHAIN \"filename\"         - Load and run program");
