@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::{run_typed_line, RunOutcome};
+use bbc_basic_interpreter::runner::{run_program_with_outcome, run_typed_line, RunOutcome};
 use bbc_basic_interpreter::tokenizer::tokenize;
 
 /// Store the program lines, then run each typed line in turn. Return the
@@ -257,6 +257,213 @@ fn test_stored_line_that_does_not_parse_does_not_stop_typed_line() {
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
     assert_eq!(output, "SUB\nB\n");
+}
+
+/// Run `session` in a thread with a time limit, so that a loop defect fails
+/// the test and does not hang the test run.
+fn with_limit<T: Send + 'static>(session: impl FnOnce() -> T + Send + 'static) -> T {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(session());
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("session stops in 5 seconds")
+}
+
+/// Store the source lines in `program`.
+fn store(program: &mut ProgramStore, source: &[&str]) {
+    for line in source {
+        program.store_line(tokenize(line).expect("line tokenizes"));
+    }
+}
+
+/// Run one typed line.
+fn type_line(
+    executor: &mut Executor,
+    program: &ProgramStore,
+    line: &str,
+) -> Result<RunOutcome, String> {
+    let line = tokenize(line).expect("typed line tokenizes");
+    run_typed_line(executor, program, &line)
+}
+
+const PROC_WITH_LOCAL_ERROR: [&str; 4] = [
+    "100 DEF PROCp",
+    "110 LOCAL X",
+    "120 X=5:PRINT 1/0",
+    "130 ENDPROC",
+];
+
+#[test]
+fn test_error_in_typed_proc_call_restores_local_variable() {
+    let (results, output) = typed(&PROC_WITH_LOCAL_ERROR, &["X=1", "PROCp", "PRINT X"]);
+
+    assert_eq!(
+        results[1],
+        Err("Runtime error at line 120: DivisionByZero".to_string())
+    );
+    assert_eq!(output, "1\n");
+}
+
+#[test]
+fn test_end_in_typed_proc_call_restores_local_variable() {
+    let (results, output) = typed(
+        &["100 DEF PROCp", "110 LOCAL X", "120 X=5:END", "130 ENDPROC"],
+        &["X=1", "PROCp", "PRINT X"],
+    );
+
+    assert_eq!(results, vec![Ok(RunOutcome::Ended); 3]);
+    assert_eq!(output, "1\n");
+}
+
+#[test]
+fn test_error_in_run_restores_local_variable() {
+    let output = with_limit(|| {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        store(&mut program, &["10 X=1", "20 PROCp", "30 END"]);
+        store(&mut program, &PROC_WITH_LOCAL_ERROR);
+        let result = run_program_with_outcome(&mut executor, &mut program);
+        assert_eq!(
+            result,
+            Err("Runtime error at line 120: DivisionByZero".to_string())
+        );
+        let typed = type_line(&mut executor, &program, "PRINT X");
+        assert_eq!(typed, Ok(RunOutcome::Ended));
+        executor.get_output().to_string()
+    });
+
+    assert_eq!(output, "1\n");
+}
+
+#[test]
+fn test_typed_goto_reaches_stored_line_that_does_not_parse() {
+    let (results, output) = typed(
+        &["10 PRINT \"A\"", "20 PRINT )(", "30 PRINT \"C\""],
+        &["GOTO 10", "GOTO 20", "GOTO 30"],
+    );
+
+    for result in &results[..2] {
+        let message = result.clone().expect_err("line 20 gives its parse error");
+        assert!(
+            message.starts_with("Parse error at line 20:"),
+            "message was {message:?}"
+        );
+    }
+    assert_eq!(results[2], Ok(RunOutcome::Ended));
+    assert_eq!(output, "A\nC\n");
+}
+
+#[test]
+fn test_typed_goto_reads_data_of_stored_program() {
+    let (results, output) = typed(
+        &["10 READ A", "20 PRINT A", "30 DATA 42, 43"],
+        &["GOTO 10", "READ B : PRINT B"],
+    );
+
+    assert_eq!(results, vec![Ok(RunOutcome::Ended); 2]);
+    assert_eq!(output, "42\n43\n");
+}
+
+#[test]
+fn test_typed_read_continues_after_run() {
+    let output = with_limit(|| {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        store(&mut program, &["10 READ A", "20 PRINT A", "30 DATA 42, 43"]);
+        assert_eq!(
+            run_program_with_outcome(&mut executor, &mut program),
+            Ok(RunOutcome::Ended)
+        );
+        let typed = type_line(&mut executor, &program, "READ B : PRINT B");
+        assert_eq!(typed, Ok(RunOutcome::Ended));
+        executor.get_output().to_string()
+    });
+
+    assert_eq!(output, "42\n43\n");
+}
+
+#[test]
+fn test_changed_data_starts_again() {
+    let output = with_limit(|| {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        store(&mut program, &["30 DATA 42, 43"]);
+        let first = type_line(&mut executor, &program, "READ A : PRINT A");
+        assert_eq!(first, Ok(RunOutcome::Ended));
+        store(&mut program, &["30 DATA 7, 8"]);
+        let second = type_line(&mut executor, &program, "READ A : PRINT A");
+        assert_eq!(second, Ok(RunOutcome::Ended));
+        executor.get_output().to_string()
+    });
+
+    assert_eq!(output, "42\n7\n");
+}
+
+#[test]
+fn test_typed_goto_reaches_line_65535() {
+    let (results, output) = typed(&["65535 PRINT \"LAST\""], &["GOTO 65535"]);
+
+    assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
+    assert_eq!(output, "LAST\n");
+}
+
+#[test]
+fn test_run_error_on_line_65535_gives_line_number() {
+    let result = with_limit(|| {
+        let mut executor = Executor::new();
+        let mut program = ProgramStore::new();
+        store(&mut program, &["65535 PRINT 1/0"]);
+        run_program_with_outcome(&mut executor, &mut program)
+    });
+
+    assert_eq!(
+        result,
+        Err("Runtime error at line 65535: DivisionByZero".to_string())
+    );
+}
+
+#[test]
+fn test_typed_def_proc_gives_error() {
+    let (results, output) = typed(&[], &["DEF PROCq:PRINT \"Q\":ENDPROC"]);
+
+    assert_eq!(
+        results,
+        vec![Err("DEF PROC needs a line number".to_string())]
+    );
+    assert_eq!(output, "");
+}
+
+#[test]
+fn test_typed_multi_line_def_fn_gives_error() {
+    let (results, output) = typed(&[], &["PRINT \"A\" : DEF FNm"]);
+
+    assert_eq!(results, vec![Err("DEF FN needs a line number".to_string())]);
+    assert_eq!(output, "");
+}
+
+const PROGRAM_WITH_HANDLER: [&str; 4] = [
+    "10 ON ERROR GOTO 100",
+    "20 PRINT 1/0",
+    "30 END",
+    "100 PRINT \"HANDLED\"",
+];
+
+#[test]
+fn test_error_in_stored_line_after_typed_goto_uses_handler() {
+    let (results, output) = typed(&PROGRAM_WITH_HANDLER, &["GOTO 10"]);
+
+    assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
+    assert_eq!(output, "HANDLED\n");
+}
+
+#[test]
+fn test_error_in_typed_line_does_not_use_handler() {
+    let (results, output) = typed(&PROGRAM_WITH_HANDLER, &["GOTO 10", "PRINT 1/0"]);
+
+    assert_eq!(results[1], Err("Runtime error: DivisionByZero".to_string()));
+    assert_eq!(output, "HANDLED\n");
 }
 
 /// Run the real binary with `input` on stdin. Fail if it does not stop in 5 seconds.

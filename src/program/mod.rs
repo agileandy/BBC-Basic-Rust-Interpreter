@@ -5,18 +5,30 @@
 use crate::tokenizer::TokenizedLine;
 use std::collections::BTreeMap;
 
-/// The position of a statement in a running program: a line number and an
-/// index in the statements of that line.
+/// The line key of a line typed with no line number. It is wider than a
+/// stored line number, so it cannot be the key of a stored line.
+pub const TYPED_LINE: u32 = u16::MAX as u32 + 1;
+
+/// The position of a statement in a running program: a line key (a stored
+/// line number or `TYPED_LINE`) and an index in the statements of that line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
-    pub line: u16,
+    pub line: u32,
     pub index: usize,
 }
 
 impl Position {
-    /// The first statement of a line
+    /// The first statement of a stored line
     pub fn line_start(line: u16) -> Self {
-        Self { line, index: 0 }
+        Self {
+            line: line.into(),
+            index: 0,
+        }
+    }
+
+    /// The stored line number of the position (None for the typed line)
+    pub fn stored_line(&self) -> Option<u16> {
+        u16::try_from(self.line).ok()
     }
 }
 
