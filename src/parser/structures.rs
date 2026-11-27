@@ -12,7 +12,12 @@
 //! In this issue a member is a real, an integer or a string. The forms of the
 //! later child issues give a syntax error: an array member, a nested
 //! structure, an array of structures, a structure from a prototype, and a
-//! reference to a whole structure, such as `b{} = a{}` or `PROCa(s{})`.
+//! reference to a whole structure, such as `b{} = a{}`.
+//!
+//! Issue #194 adds a whole structure as a parameter and as an argument of a
+//! PROC or FN, `DEF PROCmove(p{}, dx)` and `PROCmove(point{}, 5)`, and the
+//! LOCAL structure, `LOCAL s{}`. The manual section is "Passing structures
+//! to procedures and functions" on the same page.
 
 use super::{
     missing_value_at_a_comma, parse_expression, tokens_text, DimItem, Expression, InputItem,
@@ -35,11 +40,13 @@ pub(super) fn array_member_error(line_number: Option<u16>) -> BBCBasicError {
 }
 
 /// A `{` in a statement that is not a DIM is a reference to a whole
-/// structure, a form of a later issue. Give its syntax error.
+/// structure. A statement with PROC, FN, DEF or LOCAL can have `name{}`
+/// (issue #194): the parse of the statement checks where it is. Each other
+/// reference is a form of a later issue: give its syntax error.
 pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16>) -> Result<()> {
     let has_brace = tokens.contains(&Token::Separator('{'));
     let has_dim = tokens.contains(&Token::Keyword(0xDE));
-    if has_brace && !has_dim {
+    if has_brace && !has_dim && !(has_routine_keyword(tokens) && only_empty_braces(tokens)) {
         return Err(syntax_error(
             "A reference to a whole structure is not supported",
             line_number,
@@ -48,14 +55,27 @@ pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16
     Ok(())
 }
 
-/// Parse a structure of a DIM. The tokens start at the `{` after the
-/// name. Give the item and the number of tokens that it uses, to the `}`.
-pub(super) fn parse_dim_structure(
-    name: String,
-    tokens: &[Token],
-    line_number: Option<u16>,
-) -> Result<(DimItem, usize)> {
-    if is_short_form(&name) {
+/// True if the tokens have PROC, FN, DEF or LOCAL
+fn has_routine_keyword(tokens: &[Token]) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token, Token::Keyword(0xF2 | 0xA4 | 0xDD | 0xEA)))
+}
+
+/// True if each `{` of the tokens is a `name{}`
+fn only_empty_braces(tokens: &[Token]) -> bool {
+    tokens.iter().enumerate().all(|(index, token)| {
+        *token != Token::Separator('{')
+            || (index > 0
+                && matches!(tokens[index - 1], Token::Identifier(_))
+                && tokens.get(index + 1) == Some(&Token::Separator('}')))
+    })
+}
+
+/// Check that a name can be a structure name. A keyword short form cannot,
+/// because `P.x` is `PRINT x`. A name with `%` or `$` cannot.
+fn check_structure_name(name: &str, line_number: Option<u16>) -> Result<()> {
+    if is_short_form(name) {
         let message =
             format!("{name}. is a keyword short form, so {name} cannot be a structure name");
         return Err(syntax_error(&message, line_number));
@@ -66,6 +86,46 @@ pub(super) fn parse_dim_structure(
             line_number,
         ));
     }
+    Ok(())
+}
+
+/// If the tokens after a name start with `{}`, give the structure name of a
+/// parameter or a LOCAL, `name{}` (issue #194). The 2 brace tokens are the
+/// caller's to skip.
+pub(super) fn structure_name(
+    name: &str,
+    after: &[Token],
+    line_number: Option<u16>,
+) -> Result<Option<String>> {
+    match after {
+        [Token::Separator('{'), Token::Separator('}'), ..] => {
+            check_structure_name(name, line_number)?;
+            Ok(Some(format!("{name}{{}}")))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// If the tokens at `pos` are `{}` after a name in an expression, consume
+/// them and give the whole structure, an argument of a PROC or FN (issue #194)
+pub(super) fn whole_structure(name: &str, tokens: &[Token], pos: &mut usize) -> Option<Expression> {
+    match tokens.get(*pos..*pos + 2) {
+        Some([Token::Separator('{'), Token::Separator('}')]) => {
+            *pos += 2;
+            Some(Expression::Structure(name.to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Parse a structure of a DIM. The tokens start at the `{` after the
+/// name. Give the item and the number of tokens that it uses, to the `}`.
+pub(super) fn parse_dim_structure(
+    name: String,
+    tokens: &[Token],
+    line_number: Option<u16>,
+) -> Result<(DimItem, usize)> {
+    check_structure_name(&name, line_number)?;
     match tokens.get(1..3) {
         Some([Token::Separator('}'), Token::Operator('=')]) => {
             return Err(syntax_error(
@@ -291,9 +351,9 @@ mod tests {
     fn test_whole_structure_outside_dim_is_an_error() {
         for text in [
             "b{} = a{}",
-            "PROCa(a{})",
-            "LOCAL a{}",
             "IF 1 THEN b{} = a{}",
+            "PROCa(a{x})",
+            "LOCAL a{x}",
         ] {
             assert!(
                 matches!(
@@ -305,5 +365,51 @@ mod tests {
             );
         }
         assert!(parse("IF 1 THEN DIM p{x}").is_ok());
+    }
+
+    #[test]
+    fn test_structure_parameters_arguments_and_local() {
+        assert_eq!(
+            parse("DEF PROCmove(p{}, dx)").unwrap(),
+            vec![Statement::DefProc {
+                name: "move".to_string(),
+                params: vec!["p{}".to_string(), "dx".to_string()],
+            }]
+        );
+        assert!(matches!(
+            &parse("DEF FNlen(p{}) = p.x").unwrap()[0],
+            Statement::DefFn { params, .. } if params == &["p{}".to_string()]
+        ));
+        assert_eq!(
+            parse("PROCmove(point{}, 5)").unwrap(),
+            vec![Statement::ProcCall {
+                name: "move".to_string(),
+                args: vec![
+                    Expression::Structure("point".to_string()),
+                    Expression::Integer(5)
+                ],
+            }]
+        );
+        assert_eq!(
+            parse("LOCAL s{}, n").unwrap(),
+            vec![Statement::Local {
+                variables: vec!["s{}".to_string(), "n".to_string()],
+            }]
+        );
+        assert!(matches!(
+            &parse("x = FNlen(a{})").unwrap()[0],
+            Statement::Assignment { expression: Expression::FunctionCall { args, .. }, .. }
+                if args == &[Expression::Structure("a".to_string())]
+        ));
+    }
+
+    #[test]
+    fn test_a_structure_parameter_name_must_be_a_structure_name() {
+        for text in ["DEF PROCa(n%{})", "DEF FNa(s${}) = 1", "LOCAL P{}"] {
+            assert!(
+                matches!(parse(text), Err(BBCBasicError::SyntaxError { .. })),
+                "{text}"
+            );
+        }
     }
 }
