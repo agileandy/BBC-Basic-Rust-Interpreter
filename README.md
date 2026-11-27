@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **260 tests** covering all major components
+- **331 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -211,17 +211,17 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **260 total tests** - All passing (203 library + 29 graphics + 28 program)
+- **331 total tests** - All passing (205 library + 29 graphics + 97 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **Multi-line functions**: `RETURN` with a value does nothing. Only single-line `DEF FN` works.
-- **LOCAL**: an array is not restored when a procedure ends.
-- **INPUT**: a reply that is not a number leaves a numeric variable unchanged, with no error.
-- **Trigonometry**: SIN, COS and TAN take degrees and ATN gives degrees. BBC BASIC uses radians.
+- **Statements on one line**: only the first statement on a line runs. Statements after a colon are ignored (issue #13).
+- **Arrays**: `DIM A(N)` makes N elements. BBC BASIC makes N + 1 (issue #14).
+- **FOR**: a real `STEP` such as 0.5 is truncated to an integer.
+- **Numbers**: `PRINT` shows up to 17 significant digits. An exponent literal such as `1E10` is not read correctly.
 
 ### Non-Standard Extensions
 
