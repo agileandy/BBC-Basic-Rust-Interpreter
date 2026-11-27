@@ -102,7 +102,8 @@ fn main() {
 
         // SAVE command
         let input_upper = input.to_uppercase();
-        if input_upper.starts_with("SAVE ") {
+        let is_file_command = !is_lower_case_assignment(input);
+        if is_file_command && input_upper.starts_with("SAVE ") {
             match extract_filename(input) {
                 Ok(filename) => {
                     if let Err(e) = save_program(&program, &filename) {
@@ -115,7 +116,7 @@ fn main() {
         }
 
         // LOAD command
-        if input_upper.starts_with("LOAD ") {
+        if is_file_command && input_upper.starts_with("LOAD ") {
             match extract_filename(input) {
                 Ok(filename) => {
                     if let Err(e) = load_program(&mut executor, &mut program, &filename) {
@@ -128,7 +129,7 @@ fn main() {
         }
 
         // CHAIN command (LOAD and RUN)
-        if input_upper.starts_with("CHAIN ") {
+        if is_file_command && input_upper.starts_with("CHAIN ") {
             match extract_filename(input) {
                 Ok(filename) => match load_program(&mut executor, &mut program, &filename) {
                     Ok(_) => match run_program_with_outcome(&mut executor, &mut program) {
@@ -228,11 +229,24 @@ fn list_command(input: &str) -> Option<Result<(u16, u16), String>> {
     {
         return None;
     }
-    let range = parse_list_range(rest);
-    if range.is_err() && word != "LIST" {
-        return None;
+    match parse_list_range(rest) {
+        Err(e) => argument_error(word, e),
+        range => Some(range),
     }
-    Some(range)
+}
+
+/// Give the error for a bad command argument only after the word in upper case.
+/// After the word in lower or mixed case, the line is a statement, such as `list = 5`.
+fn argument_error<T>(word: &str, message: impl Into<String>) -> Option<Result<T, String>> {
+    (word == word.to_ascii_uppercase()).then(|| Err(message.into()))
+}
+
+/// True if the line is `<word> = ...` with the first word not in upper case.
+/// `save = 5` is an assignment, but `SAVE = 5` is the command.
+fn is_lower_case_assignment(input: &str) -> bool {
+    input.split_once(' ').is_some_and(|(word, rest)| {
+        word != word.to_ascii_uppercase() && rest.trim_start().starts_with('=')
+    })
 }
 
 fn list_program(program: &ProgramStore, start: u16, end: u16) {
@@ -364,8 +378,10 @@ fn load_program(
 }
 
 /// Match `DELETE start, end` (any case). Return the range, or a syntax error.
+/// A bad range after `delete` in lower or mixed case is a statement, such as `delete = 5`.
 fn delete_command(input: &str) -> Option<Result<(u16, u16), String>> {
-    if !input.get(..6)?.eq_ignore_ascii_case("delete") {
+    let word = input.get(..6)?;
+    if !word.eq_ignore_ascii_case("delete") {
         return None;
     }
     let rest = &input[6..];
@@ -373,17 +389,21 @@ fn delete_command(input: &str) -> Option<Result<(u16, u16), String>> {
         return None;
     }
     let numbers: Vec<Option<u16>> = rest.split(',').map(|n| n.trim().parse().ok()).collect();
-    Some(match numbers[..] {
-        [Some(start), Some(end)] if start <= end => Ok((start, end)),
-        [Some(_), Some(_)] => Err("Syntax error: DELETE start is more than end".to_string()),
-        _ => Err("Syntax error: use DELETE start, end".to_string()),
-    })
+    match numbers[..] {
+        [Some(start), Some(end)] if start <= end => Some(Ok((start, end))),
+        [Some(_), Some(_)] => Some(Err(
+            "Syntax error: DELETE start is more than end".to_string()
+        )),
+        _ => argument_error(word, "Syntax error: use DELETE start, end"),
+    }
 }
 
 /// Match `RENUMBER`, `RENUMBER start` or `RENUMBER start, step` (any case).
 /// Return the start and the step (default 10 and 10), or an error for bad arguments.
+/// Bad arguments after `renumber` in lower or mixed case are a statement, such as `renumber = 6`.
 fn renumber_arguments(input: &str) -> Option<Result<(u16, u16), String>> {
-    if !input.get(..8)?.eq_ignore_ascii_case("renumber") {
+    let word = input.get(..8)?;
+    if !word.eq_ignore_ascii_case("renumber") {
         return None;
     }
     let rest = &input[8..];
@@ -392,14 +412,14 @@ fn renumber_arguments(input: &str) -> Option<Result<(u16, u16), String>> {
     }
     let parts: Vec<&str> = rest.split(',').map(str::trim).collect();
     if parts.len() > 2 || (parts.len() == 2 && parts.contains(&"")) {
-        return Some(Err("Syntax error".to_string()));
+        return argument_error(word, "Syntax error");
     }
     let mut numbers = [10, 10];
     for (number, part) in numbers.iter_mut().zip(&parts) {
         if !part.is_empty() {
             match part.parse() {
                 Ok(value) => *number = value,
-                Err(_) => return Some(Err("Syntax error".to_string())),
+                Err(_) => return argument_error(word, "Syntax error"),
             }
         }
     }
@@ -421,8 +441,10 @@ fn renumber_program(program: &mut ProgramStore, arguments: Result<(u16, u16), St
 
 /// Match `AUTO`, `AUTO start` or `AUTO start, step` (any case).
 /// Return the start and the step (default 10 and 10), or an error for bad arguments.
+/// Bad arguments after `auto` in lower or mixed case are a statement, such as `auto = 7`.
 fn auto_arguments(input: &str) -> Option<Result<(u32, u32), String>> {
-    if !input.get(..4)?.eq_ignore_ascii_case("auto") {
+    let word = input.get(..4)?;
+    if !word.eq_ignore_ascii_case("auto") {
         return None;
     }
     let rest = &input[4..];
@@ -431,14 +453,14 @@ fn auto_arguments(input: &str) -> Option<Result<(u32, u32), String>> {
     }
     let parts: Vec<&str> = rest.split(',').map(str::trim).collect();
     if parts.len() > 2 || (parts.len() == 2 && parts.contains(&"")) {
-        return Some(Err("Syntax error".to_string()));
+        return argument_error(word, "Syntax error");
     }
     let mut numbers = [10, 10];
     for (number, part) in numbers.iter_mut().zip(&parts) {
         if !part.is_empty() {
             match part.parse() {
                 Ok(value) => *number = value,
-                Err(_) => return Some(Err("Syntax error".to_string())),
+                Err(_) => return argument_error(word, "Syntax error"),
             }
         }
     }
