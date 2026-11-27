@@ -1190,6 +1190,14 @@ fn step(
             executor.set_for_loop_line(position);
             Ok(Flow::Next)
         }
+        Statement::ForEach { .. } => {
+            // Record this position for NEXT to loop back to
+            executor.set_for_loop_line(position);
+            if executor.for_each_is_empty() {
+                skip_empty_for_each(executor, program, line_number)?;
+            }
+            Ok(Flow::Next)
+        }
         Statement::Next { .. } => {
             if let Some(for_position) = executor.should_loop_back() {
                 // Loop continues: go to the statement after the FOR statement
@@ -1258,6 +1266,48 @@ fn step(
         }
         Statement::FnReturn { value } => Ok(Flow::FnReturn(value.clone())),
         _ => Ok(Flow::Next),
+    }
+}
+
+/// Skip the body of a FOR EACH loop of an empty collection (issue #141).
+/// Scan forward to the NEXT that closes the loop, and count the nested FOR
+/// and FOR EACH loops: `NEXT I, J` closes 2. Then run the part of that NEXT
+/// that closes the FOR EACH loop and the loops outside it. The loop is on
+/// the FOR stack, so this NEXT ends it as it ends a loop with elements.
+fn skip_empty_for_each(
+    executor: &mut Executor,
+    program: &mut Cursor,
+    line_number: u32,
+) -> Result<(), StepError> {
+    let mut depth = 1;
+    loop {
+        let Some(current) = program.next() else {
+            return Err(format!("FOR EACH without matching NEXT{}", at_line(line_number)).into());
+        };
+        match program.lines.item(current) {
+            // An IF uses the rest of its line. A FOR or NEXT in its
+            // branches does not count.
+            Some(Item::If { .. }) => program.skip_rest_of_line(),
+            Some(Item::Statement(Statement::For { .. } | Statement::ForEach { .. })) => depth += 1,
+            Some(Item::Statement(Statement::Next { variables })) => {
+                let closes = variables.len().max(1);
+                if closes < depth {
+                    depth -= closes;
+                    continue;
+                }
+                let next = Statement::Next {
+                    variables: variables[depth - 1..].to_vec(),
+                };
+                executor
+                    .execute_statement(&next)
+                    .map_err(|error| StepError::RuntimeAt(error, current.line))?;
+                if let Some(for_position) = executor.should_loop_back() {
+                    program.goto(for_position);
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
     }
 }
 

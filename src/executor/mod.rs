@@ -349,6 +349,26 @@ struct LoopDepths {
     while_depth: usize,
 }
 
+/// What one entry of the FOR stack counts
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ForKind {
+    /// `FOR v = start TO end STEP step`. An integer loop (`%` variable)
+    /// holds whole values, which f64 holds with no loss.
+    Count { end: f64, step: f64 },
+    /// `FOR EACH v IN collection` (issue #141): the handle of the list or
+    /// map, and the index of the element that `v` has
+    Each { handle: i32, index: usize },
+}
+
+/// One entry of the FOR stack
+#[derive(Debug, Clone, PartialEq)]
+struct ForLoop {
+    variable: String,
+    kind: ForKind,
+    /// The FOR statement. The run loop sets it (set_for_loop_line).
+    position: Position,
+}
+
 /// BBC BASIC statement executor
 #[derive(Debug)]
 pub struct Executor {
@@ -357,9 +377,8 @@ pub struct Executor {
     graphics: GraphicsSystem,
     // Control flow stack for GOSUB/RETURN and PROC/ENDPROC
     return_stack: Vec<(ReturnKind, Position)>,
-    // FOR loop state: (variable, end_value, step_value, FOR position).
-    // An integer loop (`%` variable) holds whole values, which f64 holds with no loss.
-    for_loops: Vec<(String, f64, f64, Position)>,
+    // FOR loop state: FOR and FOR EACH loops, the newest last
+    for_loops: Vec<ForLoop>,
     // REPEAT loop stack: stores the positions of REPEAT statements
     repeat_stack: Vec<Position>,
     // WHILE loop stack: stores the positions of WHILE statements
@@ -527,6 +546,10 @@ impl Executor {
                 end,
                 step,
             } => self.execute_for(variable, start, end, step.as_ref()),
+            Statement::ForEach {
+                variable,
+                collection,
+            } => self.execute_for_each(variable, collection),
             Statement::Next { variables } => self.execute_next(variables),
             Statement::Input { items } => self.execute_input(items),
             Statement::InputLine { items } => self.execute_input_line(items),
@@ -1067,16 +1090,105 @@ impl Executor {
             (end_val, step_val)
         };
 
-        // Store loop state: (variable, end_value, step_value, FOR position)
         // The run loop sets the FOR position (set_for_loop_line)
-        self.for_loops.push((
-            variable.to_string(),
-            end_val,
-            step_val,
-            Position::line_start(0),
-        ));
+        self.for_loops.push(ForLoop {
+            variable: variable.to_string(),
+            kind: ForKind::Count {
+                end: end_val,
+                step: step_val,
+            },
+            position: Position::line_start(0),
+        });
 
         Ok(())
+    }
+
+    /// Execute `FOR EACH variable IN collection` (issue #141). The
+    /// collection is evaluated one time. If it has a first element, the
+    /// variable gets it. The loop goes on the FOR stack also when the
+    /// collection is empty: the run loop then skips to the matching NEXT.
+    fn execute_for_each(&mut self, variable: &str, collection: &Expression) -> Result<()> {
+        let handle = self.eval_integer(collection)?;
+        self.set_each_variable(variable, handle, 0)?;
+        // The run loop sets the FOR position (set_for_loop_line)
+        self.for_loops.push(ForLoop {
+            variable: variable.to_string(),
+            kind: ForKind::Each { handle, index: 0 },
+            position: Position::line_start(0),
+        });
+        Ok(())
+    }
+
+    /// The count of elements of a list or of keys of a map at this time.
+    fn collection_count(&self, handle: i32) -> Result<usize> {
+        self.collections
+            .length(handle)
+            .or_else(|_| self.collections.map_length(handle))
+    }
+
+    /// Give the FOR EACH variable the element at `index` of a list, or the
+    /// key at `index` of a map. If `index` is not below the count at this
+    /// time, change nothing and return false. A variable of the wrong type
+    /// gives Type mismatch: a map needs a string variable.
+    fn set_each_variable(&mut self, variable: &str, handle: i32, index: usize) -> Result<bool> {
+        let is_map = self.collections.length(handle).is_err();
+        let count = self.collection_count(handle)?;
+        let is_string = variable.ends_with('$');
+        if is_map && !is_string {
+            return Err(BBCBasicError::TypeMismatch);
+        }
+        if index >= count {
+            return Ok(false);
+        }
+        let index = i32::try_from(index).map_err(|_| BBCBasicError::TooBig)?;
+        let element = if is_map {
+            Element::Text(self.collections.map_key(handle, index)?)
+        } else {
+            self.collections.get(handle, index)?.clone()
+        };
+        match element {
+            Element::Text(text) if is_string => {
+                self.variables.set_string_var(variable.to_string(), text)?
+            }
+            Element::Number(value) if variable.ends_with('%') => self
+                .variables
+                .set_integer_var(variable.to_string(), real_to_integer(value)?),
+            Element::Number(value) if !is_string => {
+                self.variables.set_real_var(variable.to_string(), value)
+            }
+            _ => return Err(BBCBasicError::TypeMismatch),
+        }
+        Ok(true)
+    }
+
+    /// Step a FOR EACH loop to the element at `index`. NEXT reads the count
+    /// at this time, so the loop sees the elements that its body adds.
+    fn next_each(&mut self, loop_index: usize, handle: i32, index: usize) -> Result<()> {
+        // A NEXT for an outer loop closes the loops inside it
+        self.for_loops.truncate(loop_index + 1);
+        let variable = self.for_loops[loop_index].variable.clone();
+        if self.set_each_variable(&variable, handle, index)? {
+            self.for_loops[loop_index].kind = ForKind::Each { handle, index };
+            self.next_loop_line = Some(self.for_loops[loop_index].position);
+        } else {
+            self.for_loops.remove(loop_index);
+            self.next_loop_line = None;
+        }
+        Ok(())
+    }
+
+    /// Tell if the newest FOR loop is a FOR EACH loop with no element at
+    /// its index: a FOR EACH of an empty collection (issue #141).
+    pub fn for_each_is_empty(&self) -> bool {
+        match self.for_loops.last() {
+            Some(ForLoop {
+                kind: ForKind::Each { handle, index },
+                ..
+            }) => self
+                .collection_count(*handle)
+                .map_or(true, |count| *index >= count),
+            _ => false,
+        }
     }
 
     /// Execute NEXT statement
@@ -1086,10 +1198,10 @@ impl Executor {
     fn execute_next(&mut self, variables: &[String]) -> Result<()> {
         // If no variables specified, use the most recent FOR loop
         if variables.is_empty() {
-            let Some((name, _, _, _)) = self.for_loops.last() else {
+            let Some(newest) = self.for_loops.last() else {
                 return Err(BBCBasicError::NoFor);
             };
-            return self.next_loop(name.clone());
+            return self.next_loop(newest.variable.clone());
         }
 
         for var_name in variables {
@@ -1105,18 +1217,27 @@ impl Executor {
     /// Step the FOR loop of one variable. Set the position to jump back to
     /// if the loop continues, or clear it if the loop ends.
     fn next_loop(&mut self, var_name: String) -> Result<()> {
-        // Find the matching FOR loop
+        // Find the matching FOR loop. `NEXT EACH` also matches a FOR EACH
+        // loop (issue #141), and a FOR loop of a variable named EACH.
         let loop_index = self
             .for_loops
             .iter()
-            .rposition(|(name, _, _, _)| name == &var_name)
+            .rposition(|entry| {
+                entry.variable == var_name
+                    || (var_name == "EACH" && matches!(entry.kind, ForKind::Each { .. }))
+            })
             .ok_or(if self.for_loops.is_empty() {
                 BBCBasicError::NoFor
             } else {
                 BBCBasicError::CantMatchFor
             })?;
 
-        let (_, end_val, step_val, _) = self.for_loops[loop_index];
+        let (end_val, step_val) = match self.for_loops[loop_index].kind {
+            ForKind::Count { end, step } => (end, step),
+            ForKind::Each { handle, index } => {
+                return self.next_each(loop_index, handle, index + 1)
+            }
+        };
 
         // Increment the loop variable
         let next_val = if var_name.ends_with('%') {
@@ -1162,7 +1283,7 @@ impl Executor {
             self.next_loop_line = None;
         } else {
             // The run loop jumps back to the FOR line of this loop
-            self.next_loop_line = Some(self.for_loops[loop_index].3);
+            self.next_loop_line = Some(self.for_loops[loop_index].position);
         }
 
         Ok(())
@@ -3400,7 +3521,7 @@ impl Executor {
     /// Set the position of a FOR loop (called when FOR is executed)
     pub fn set_for_loop_line(&mut self, position: Position) {
         if let Some(loop_state) = self.for_loops.last_mut() {
-            loop_state.3 = position;
+            loop_state.position = position;
         }
     }
 
@@ -4695,9 +4816,14 @@ mod tests {
 
         // Loop should be on the stack
         assert_eq!(executor.for_loops.len(), 1);
-        assert_eq!(executor.for_loops[0].0, "I%");
-        assert_eq!(executor.for_loops[0].1, 10.0); // end value
-        assert_eq!(executor.for_loops[0].2, 1.0); // step value
+        assert_eq!(executor.for_loops[0].variable, "I%");
+        assert_eq!(
+            executor.for_loops[0].kind,
+            ForKind::Count {
+                end: 10.0,
+                step: 1.0
+            }
+        );
     }
 
     #[test]
@@ -4718,7 +4844,13 @@ mod tests {
 
         // Loop should be on the stack with correct step
         assert_eq!(executor.for_loops.len(), 1);
-        assert_eq!(executor.for_loops[0].2, -1.0); // step value
+        assert_eq!(
+            executor.for_loops[0].kind,
+            ForKind::Count {
+                end: 1.0,
+                step: -1.0
+            }
+        );
     }
 
     #[test]
