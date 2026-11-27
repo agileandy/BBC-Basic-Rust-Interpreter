@@ -1039,6 +1039,11 @@ fn run_lines(
                 // handler catches the error
                 record_error(executor, &e, lines.erl(error_line));
 
+                // ERROR 0 is fatal: no handler traps it (issue #201)
+                if matches!(e, BBCBasicError::UserError { number: 0, .. }) {
+                    return Err(lines.error_text(&e, error_line));
+                }
+
                 // Handle an error in a stored line with the ON ERROR handler
                 // if one is set
                 let handler = executor.get_error_handler();
@@ -1715,6 +1720,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         // Bad library is an extension error. The manual names no error for
         // INSTALL, and BBC BASIC does not use ERR 158 (issue #185).
         BBCBasicError::BadLibrary(_) => 158,
+        // The number that the statement ERROR gives (issue #201)
+        BBCBasicError::UserError { number, .. } => i32::from(*number),
         _ => 255,
     }
 }

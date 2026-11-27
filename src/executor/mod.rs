@@ -904,6 +904,13 @@ impl Executor {
                 self.print_output(&text.unwrap_or_default());
                 Ok(())
             }
+            // ERROR makes an error with the number and the text. The error
+            // number is one byte, as ERR is 0 to 255 (issue #201).
+            Statement::Error { number, text } => {
+                let number = (self.eval_integer(number)? & 0xFF) as u8;
+                let message = self.eval_string(text)?;
+                Err(BBCBasicError::UserError { number, message })
+            }
             Statement::Clear => self.execute_clear(),
             // Graphics statements
             Statement::Plot { mode, x, y } => self.execute_plot(mode, x, y),
