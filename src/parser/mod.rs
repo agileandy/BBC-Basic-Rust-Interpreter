@@ -2210,14 +2210,22 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 }
 
 /// Parse a THEN or an ELSE branch. A line number at the start of the branch
-/// is a short form of GOTO. The statements after it can never run.
+/// is a short form of GOTO. The statements after it can never run. Only the
+/// end of the branch or a colon can follow the line number.
 fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
-    match tokens.first() {
-        Some(Token::Integer(n)) => Ok(vec![Statement::Goto {
-            line_number: *n as u16,
+    let target = match tokens.first() {
+        Some(Token::Integer(n)) => *n as u16,
+        Some(Token::LineNumber(n)) => *n,
+        _ => return parse_statements(tokens, line_number),
+    };
+    match tokens.get(1) {
+        None | Some(Token::Separator(':')) => Ok(vec![Statement::Goto {
+            line_number: target,
         }]),
-        Some(Token::LineNumber(n)) => Ok(vec![Statement::Goto { line_number: *n }]),
-        _ => parse_statements(tokens, line_number),
+        Some(_) => Err(BBCBasicError::SyntaxError {
+            message: "Expected end of statement after line number".to_string(),
+            line: line_number,
+        }),
     }
 }
 
@@ -3164,6 +3172,59 @@ mod tests {
         let (then_part, _) = if_branches(r#"IF X THEN 30 : PRINT "A""#);
 
         assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
+    }
+
+    /// Parse one numbered IF line and return its error.
+    fn if_line_error(source: &str) -> BBCBasicError {
+        use crate::tokenizer::tokenize;
+        parse_line(&tokenize(source).unwrap()).expect_err("line gives an error")
+    }
+
+    fn line_number_error(line: u16) -> BBCBasicError {
+        BBCBasicError::SyntaxError {
+            message: "Expected end of statement after line number".to_string(),
+            line: Some(line),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_with_calculation_is_error() {
+        assert_eq!(if_line_error("20 IF X THEN 30+1"), line_number_error(20));
+    }
+
+    #[test]
+    fn test_parse_if_then_two_line_numbers_is_error() {
+        assert_eq!(if_line_error("20 IF X THEN 30 40"), line_number_error(20));
+    }
+
+    #[test]
+    fn test_parse_if_else_line_number_with_calculation_is_error() {
+        assert_eq!(
+            if_line_error("20 IF X THEN 30 ELSE 50+1"),
+            line_number_error(20)
+        );
+    }
+
+    #[test]
+    fn test_parse_if_else_two_line_numbers_is_error() {
+        assert_eq!(
+            if_line_error("20 IF X THEN 30 ELSE 50 60"),
+            line_number_error(20)
+        );
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_colon_print_1_is_goto() {
+        let (then_part, _) = if_branches("IF X THEN 30 : PRINT 1");
+
+        assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
+    }
+
+    #[test]
+    fn test_parse_if_else_line_number_colon_print_1_is_goto() {
+        let (_, else_part) = if_branches("IF X THEN 30 ELSE 50 : PRINT 1");
+
+        assert_eq!(else_part, Some(vec![Statement::Goto { line_number: 50 }]));
     }
 
     #[test]
