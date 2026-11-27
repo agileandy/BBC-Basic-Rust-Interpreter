@@ -98,7 +98,8 @@ fn shift_tab_goes_back() {
 #[test]
 fn each_mode_shows_its_placeholder_pane() {
     let mut app = App::new(None);
-    assert!(screen_text(&draw(&app, 80, 24)).contains("EDIT mode"));
+    // Issue #170 gives the edit mode the editor in place of a placeholder.
+    assert!(screen_text(&draw(&app, 80, 24)).contains("Ln 1 Col 1"));
     app.key(press(KeyCode::Tab));
     assert!(screen_text(&draw(&app, 80, 24)).contains("RUN mode"));
     app.key(press(KeyCode::Tab));

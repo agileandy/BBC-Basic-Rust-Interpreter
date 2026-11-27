@@ -21,6 +21,8 @@ pub(super) struct Status<'a> {
     pub file_name: Option<&'a str>,
     pub changed: bool,
     pub message: &'a str,
+    /// The text of the pane, such as the cursor position. Empty for none.
+    pub detail: &'a str,
 }
 
 /// One line that asks for a larger window.
@@ -48,17 +50,20 @@ pub(super) fn draw_tabs(frame: &mut Frame, area: Rect, current: Mode) {
     frame.render_widget(Paragraph::new(Line::from(spans)).style(plain()), area);
 }
 
-/// The mode in yellow, then the file name, the changed mark, the message and
-/// the keys in cyan, all on black.
+/// The mode in yellow, then the file name, the changed mark, the message, the
+/// text of the pane and the keys in cyan, all on black.
 pub(super) fn draw_status(frame: &mut Frame, area: Rect, status: &Status) {
     let yellow = Style::new().fg(Color::Yellow).bg(Color::Black);
     let cyan = Style::new().fg(Color::Cyan).bg(Color::Black);
     let name = status.file_name.unwrap_or("(no name)");
     let mark = if status.changed { " *" } else { "" };
-    let left = Line::from(vec![
+    let mut left = Line::from(vec![
         Span::styled(format!(" {} ", status.mode.title()), yellow),
         Span::styled(format!(" {}{}  {}", name, mark, status.message), cyan),
     ]);
+    if !status.detail.is_empty() {
+        left.push_span(Span::styled(format!("  {}", status.detail), cyan));
+    }
     // The message is more important than the keys: show the keys only if
     // they fit after it, with 2 spaces between.
     let keys_width = KEYS.len() as u16;
