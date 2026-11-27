@@ -15,6 +15,17 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::rc::Rc;
 
+/// Convert a real value to an integer. The fraction part is truncated toward zero.
+/// A value outside the range of an i32, or a value that is not finite, gives "Too big".
+fn real_to_integer(value: f64) -> Result<i32> {
+    let truncated = value.trunc();
+    if truncated.is_finite() && truncated >= i32::MIN as f64 && truncated <= i32::MAX as f64 {
+        Ok(truncated as i32)
+    } else {
+        Err(BBCBasicError::TooBig)
+    }
+}
+
 /// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
 /// The number has an optional sign, digits with one optional decimal point, and an
 /// optional exponent. If there is no number, the result is 0.
@@ -703,7 +714,7 @@ impl Executor {
 
             // A reply that is not a number gives 0, as on a BBC Micro
             if var.ends_with('%') {
-                let val = parse_leading_number(reply) as i32;
+                let val = real_to_integer(parse_leading_number(reply))?;
                 self.variables.set_integer_var(var.clone(), val);
             } else if var.ends_with('$') {
                 self.variables
@@ -1040,12 +1051,12 @@ impl Executor {
             Expression::BinaryOp { .. } | Expression::UnaryOp { .. }
         ) && self.is_real_expr(expr)
         {
-            return Ok(self.eval_real(expr)? as i32);
+            return real_to_integer(self.eval_real(expr)?);
         }
 
         match expr {
             Expression::Integer(val) => Ok(*val),
-            Expression::Real(val) => Ok(*val as i32),
+            Expression::Real(val) => real_to_integer(*val),
             Expression::Variable(name) => {
                 // Check for pseudo-variables first
                 if name == "TIME" {
@@ -1082,7 +1093,7 @@ impl Executor {
                 } else {
                     // Try as real variable first, then as integer (for loop vars without % suffix)
                     if let Some(real_val) = self.variables.get_real_var(name) {
-                        Ok(real_val as i32)
+                        real_to_integer(real_val)
                     } else if let Some(int_val) = self.variables.get_integer_var(name) {
                         Ok(int_val)
                     } else {
@@ -1105,7 +1116,7 @@ impl Executor {
                 let element = self.variables.get_array_element(name, &index_values)?;
                 match element {
                     Variable::Integer(val) => Ok(val),
-                    Variable::Real(val) => Ok(val as i32),
+                    Variable::Real(val) => real_to_integer(val),
                     _ => Err(BBCBasicError::TypeMismatch),
                 }
             }
@@ -1162,13 +1173,6 @@ impl Executor {
                     BinaryOperator::Add => Ok(left_val + right_val),
                     BinaryOperator::Subtract => Ok(left_val - right_val),
                     BinaryOperator::Multiply => Ok(left_val * right_val),
-                    BinaryOperator::Divide => {
-                        if right_val == 0 {
-                            Err(BBCBasicError::DivisionByZero)
-                        } else {
-                            Ok(left_val / right_val)
-                        }
-                    }
                     BinaryOperator::IntegerDivide => {
                         if right_val == 0 {
                             Err(BBCBasicError::DivisionByZero)
@@ -1508,7 +1512,7 @@ impl Executor {
                 }
                 let s = self.eval_string(&args[0])?;
                 // BBC BASIC returns 0 for non-numeric strings. A real value is truncated.
-                Ok(parse_leading_number(&s) as i32)
+                real_to_integer(parse_leading_number(&s))
             }
             "ERL" => {
                 // Error line number - returns 0 if no error has occurred

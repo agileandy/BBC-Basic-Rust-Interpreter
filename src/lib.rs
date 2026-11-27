@@ -48,6 +48,7 @@ pub mod error {
         SubscriptOutOfRange,
         DivisionByZero,
         StringTooLong,
+        TooBig,
 
         // Variable and array errors
         NoSuchVariable(String),
@@ -87,6 +88,7 @@ pub mod error {
                 BBCBasicError::SubscriptOutOfRange => write!(f, "Subscript out of range"),
                 BBCBasicError::DivisionByZero => write!(f, "Division by zero"),
                 BBCBasicError::StringTooLong => write!(f, "String too long"),
+                BBCBasicError::TooBig => write!(f, "Too big"),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
                 BBCBasicError::ArrayNotDimensioned(name) => {
                     write!(f, "Array not dimensioned: {}", name)

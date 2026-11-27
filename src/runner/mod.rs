@@ -655,6 +655,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::SubscriptOutOfRange => 15,
         BBCBasicError::NoRoom => 11,
         BBCBasicError::StringTooLong => 19,
+        BBCBasicError::TooBig => 20,
         BBCBasicError::NoSuchVariable(_) => 26,
         BBCBasicError::ArrayNotDimensioned(_) => 14,
         BBCBasicError::SyntaxError { .. } => 220,
