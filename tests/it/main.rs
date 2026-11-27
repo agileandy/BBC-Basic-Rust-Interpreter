@@ -114,3 +114,4 @@ mod issue_122_array_error;
 mod issue_124_print_function_string_result;
 mod issue_131_tab_two_values;
 mod issue_126_ellipse_last_point;
+mod issue_123_endproc_after_gosub;

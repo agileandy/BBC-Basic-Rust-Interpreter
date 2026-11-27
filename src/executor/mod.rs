@@ -302,14 +302,23 @@ pub enum ErrorHandler {
 /// The number of files that a program can open at one time.
 const DEFAULT_OPEN_FILE_LIMIT: usize = 255;
 
+/// The statement that put an entry on the return stack
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReturnKind {
+    /// GOSUB or ON GOSUB: RETURN goes back
+    Gosub,
+    /// A PROC call: ENDPROC goes back
+    Proc,
+}
+
 /// BBC BASIC statement executor
 #[derive(Debug)]
 pub struct Executor {
     variables: VariableStore,
     memory: MemoryManager,
     graphics: GraphicsSystem,
-    // Control flow stack for GOSUB/RETURN
-    return_stack: Vec<Position>,
+    // Control flow stack for GOSUB/RETURN and PROC/ENDPROC
+    return_stack: Vec<(ReturnKind, Position)>,
     // FOR loop state: (variable, end_value, step_value, FOR position).
     // An integer loop (`%` variable) holds whole values, which f64 holds with no loss.
     for_loops: Vec<(String, f64, f64, Position)>,
@@ -3039,12 +3048,37 @@ impl Executor {
 
     /// Push a return address onto the GOSUB stack
     pub fn push_gosub_return(&mut self, position: Position) {
-        self.return_stack.push(position);
+        self.return_stack.push((ReturnKind::Gosub, position));
     }
 
-    /// Pop a return address from the GOSUB stack
+    /// Pop a return address from the GOSUB stack. With a PROC call on top,
+    /// give an error and change nothing.
     pub fn pop_gosub_return(&mut self) -> Result<Position> {
-        self.return_stack.pop().ok_or(BBCBasicError::BadCall)
+        match self.return_stack.last() {
+            Some(&(ReturnKind::Gosub, position)) => {
+                self.return_stack.pop();
+                Ok(position)
+            }
+            _ => Err(BBCBasicError::BadCall),
+        }
+    }
+
+    /// Push the position of a PROC call onto the return stack
+    pub fn push_proc_return(&mut self, position: Position) {
+        self.return_stack.push((ReturnKind::Proc, position));
+    }
+
+    /// Pop the newest PROC call, and the GOSUBs that this PROC left open.
+    /// With no PROC call on the stack, give an error and change nothing.
+    pub fn pop_proc_return(&mut self) -> Result<Position> {
+        let index = self
+            .return_stack
+            .iter()
+            .rposition(|&(kind, _)| kind == ReturnKind::Proc)
+            .ok_or(BBCBasicError::BadCall)?;
+        let (_, position) = self.return_stack[index];
+        self.return_stack.truncate(index);
+        Ok(position)
     }
 
     /// Define a procedure at the position of its DEF PROC statement
