@@ -141,3 +141,4 @@ mod issue_153_read_array_element;
 mod issue_142_json_collections;
 mod issue_157_print_file_records;
 mod issue_156_program_corpus;
+mod issue_163_dim_empty_index;
