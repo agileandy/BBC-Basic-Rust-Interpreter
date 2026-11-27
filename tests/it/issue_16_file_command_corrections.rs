@@ -1,45 +1,7 @@
 //! Issue 16: *CAT lists .bas files, the SAVE error names the file, and the examples load.
 
-use std::io::Write;
+use crate::common::run_in_dir as run;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-
-const TIME_LIMIT: Duration = Duration::from_secs(5);
-
-/// Start the interpreter in `dir`, send the commands, and return the exit status and the output.
-fn run(dir: &Path, commands: &[&str]) -> (std::process::ExitStatus, String) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bbc-basic-interpreter"))
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("interpreter starts");
-
-    {
-        let mut stdin = child.stdin.take().expect("stdin is piped");
-        for command in commands {
-            writeln!(stdin, "{}", command).expect("command is written");
-        }
-    }
-
-    let deadline = Instant::now() + TIME_LIMIT;
-    let status = loop {
-        if let Some(status) = child.try_wait().expect("child status is read") {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            child.kill().ok();
-            child.wait().ok();
-            panic!("interpreter did not end within {:?}", TIME_LIMIT);
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-
-    let output = child.wait_with_output().expect("output is read");
-    (status, String::from_utf8_lossy(&output.stdout).into_owned())
-}
 
 /// Make an empty directory for one test.
 fn temp_dir(name: &str) -> PathBuf {

@@ -7,31 +7,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use crate::common::run_timed_stops as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::{run_program, run_typed_line};
+use bbc_basic_interpreter::runner::run_typed_line;
 use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-///
-/// The program runs in a thread with a time limit, so a loop defect fails
-/// the test and does not hang the test run.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let lines: Vec<String> = source.iter().map(|line| line.to_string()).collect();
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut executor = Executor::new();
-        let mut program = ProgramStore::new();
-        for line in &lines {
-            program.store_line(tokenize(line).expect("line tokenizes"));
-        }
-        let result = run_program(&mut executor, &mut program);
-        let _ = sender.send((result, executor.get_output().to_string()));
-    });
-    receiver
-        .recv_timeout(Duration::from_secs(5))
-        .expect("program stops in 5 seconds")
-}
 
 /// Run the program and check that it gives an error at the line and prints nothing.
 fn check_error(source: &[&str], line: &str) {

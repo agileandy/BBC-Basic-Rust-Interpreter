@@ -1,44 +1,6 @@
 //! Tests that DELETE start, end removes a range of lines (issue #32).
 
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-
-/// Run the binary with the given input lines and return its stdout.
-/// Kill the binary and fail if it runs for more than 5 seconds.
-fn run_binary(input: &str) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bbc-basic-interpreter"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("binary starts");
-    child
-        .stdin
-        .take()
-        .expect("stdin is piped")
-        .write_all(input.as_bytes())
-        .expect("input is written");
-
-    let mut stdout = child.stdout.take().expect("stdout is piped");
-    let reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        stdout
-            .read_to_string(&mut text)
-            .expect("stdout is readable");
-        text
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while child.try_wait().expect("child status").is_none() {
-        if Instant::now() > deadline {
-            child.kill().expect("child is killed");
-            panic!("the binary ran for more than 5 seconds");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    reader.join().expect("reader thread ends")
-}
+use crate::common::run_binary_write_first as run_binary;
 
 const PROGRAM: &str = "10 PRINT \"ONE\"\n20 PRINT \"TWO\"\n30 PRINT \"THREE\"\n40 PRINT \"FOUR\"\n50 PRINT \"FIVE\"\n";
 const ALL_TEXT: [&str; 5] = ["ONE", "TWO", "THREE", "FOUR", "FIVE"];

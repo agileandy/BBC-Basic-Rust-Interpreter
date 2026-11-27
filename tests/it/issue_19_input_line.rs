@@ -1,24 +1,7 @@
 //! Issue 19: INPUT LINE stores the full reply in a string variable.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
+use crate::common::run_with_replies;
 use bbc_basic_interpreter::tokenizer::{detokenize, tokenize};
-
-/// Store the source lines, give the replies to INPUT, run the program and return
-/// the result and the output.
-fn run_with_replies(source: &[&str], replies: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    for reply in replies {
-        executor.queue_input(reply);
-    }
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
 
 #[test]
 fn test_input_line_keeps_commas_and_spaces() {

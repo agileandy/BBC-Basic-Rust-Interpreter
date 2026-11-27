@@ -1,21 +1,11 @@
 //! Tests for functions that have more than one line (issue 6).
 
+use crate::common::run_lines as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::parser::parse_statement;
 use bbc_basic_interpreter::program::ProgramStore;
 use bbc_basic_interpreter::runner::run_program;
 use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
 
 #[test]
 fn test_function_with_local_gives_result_and_keeps_caller_variable() {

@@ -1,20 +1,6 @@
 //! Issue 60: two LOCAL statements for one name restore the value from before the call.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
+use crate::common::run_lines as run;
 
 #[test]
 fn test_integer_local_two_times_restores_first_value() {

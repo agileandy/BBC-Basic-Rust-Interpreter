@@ -1,20 +1,6 @@
 //! Tests for issue 1: a comparison of two strings.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
+use crate::common::run_lines as run;
 
 /// Run a program that prints "T" if the condition is true and "F" if it is false.
 fn check(setup: &[&str], condition: &str) -> String {

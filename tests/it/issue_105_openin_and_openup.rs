@@ -1,22 +1,8 @@
 //! Issue #105: OPENIN gives 0 for a file that is not there, and OPENUP opens
 //! a file for read and write.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
+use crate::common::run_lines as run;
 use std::path::PathBuf;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
 
 /// Make an empty temporary directory for one test and return a file path in it.
 fn temp_file(name: &str) -> String {

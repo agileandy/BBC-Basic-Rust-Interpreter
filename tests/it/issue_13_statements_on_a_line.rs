@@ -3,12 +3,11 @@
 //! A colon separates statements on one line. Control flow (loops, jumps,
 //! calls and IF) works across the statements of one line.
 
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::common::run_binary_read_first as run_binary;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
 use bbc_basic_interpreter::runner::run_program;
@@ -315,48 +314,6 @@ fn test_else_after_rem_in_then_branch_is_comment() {
 
     assert_eq!(result, Ok(()));
     assert_eq!(output, "A\nB\n");
-}
-
-/// Give the input lines to the interpreter binary and return its output.
-/// The binary has 5 seconds to stop.
-fn run_binary(input: &str) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bbc-basic-interpreter"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("binary starts");
-
-    // Read stdout on a thread, so that a full pipe cannot block the child.
-    let mut stdout = child.stdout.take().expect("stdout is piped");
-    let reader = thread::spawn(move || {
-        let mut output = String::new();
-        let _ = stdout.read_to_string(&mut output);
-        output
-    });
-
-    child
-        .stdin
-        .take()
-        .expect("stdin is piped")
-        .write_all(input.as_bytes())
-        .expect("input is written");
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while child
-        .try_wait()
-        .expect("child status is readable")
-        .is_none()
-    {
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("interpreter did not stop within 5 seconds");
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-
-    reader.join().expect("reader thread completes")
 }
 
 #[test]

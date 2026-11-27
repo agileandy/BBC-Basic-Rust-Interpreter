@@ -4,35 +4,7 @@
 //! body does not change the loop variable, a loop with a start value that is
 //! not larger than the end value does not end.
 
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
-
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-///
-/// The run has a time limit, so that a loop defect fails the test and does
-/// not stop the test run.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let source: Vec<String> = source.iter().map(|line| line.to_string()).collect();
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut executor = Executor::new();
-        let mut program = ProgramStore::new();
-        for line in &source {
-            program.store_line(tokenize(line).expect("line tokenizes"));
-        }
-        let result = run_program(&mut executor, &mut program);
-        let _ = sender.send((result, executor.get_output().to_string()));
-    });
-    receiver
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the program stops in 5 seconds")
-}
+use crate::common::run_timed_the_program_stops as run;
 
 #[test]
 fn test_step_zero_start_below_end_loops_until_body_passes_end() {

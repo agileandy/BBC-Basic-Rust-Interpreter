@@ -1,34 +1,11 @@
 //! Tests that UNTIL with no open REPEAT loop, and ENDWHILE with no open
 //! WHILE loop, stop with an error (issue #96).
 
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
-
+use crate::common::run_timed_ran_for as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::{run_program, run_typed_line};
+use bbc_basic_interpreter::runner::run_typed_line;
 use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the
-/// output. The run is in a thread with a time limit, so that a loop defect
-/// fails the test and does not hang the test run.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let source: Vec<String> = source.iter().map(|line| line.to_string()).collect();
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut executor = Executor::new();
-        let mut program = ProgramStore::new();
-        for line in &source {
-            program.store_line(tokenize(line).expect("line tokenizes"));
-        }
-        let result = run_program(&mut executor, &mut program);
-        let _ = sender.send((result, executor.get_output().to_string()));
-    });
-    receiver
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the program ran for more than 5 seconds")
-}
 
 /// Run one typed line with no stored program and return its error text.
 fn typed_error_of(line: &str) -> String {

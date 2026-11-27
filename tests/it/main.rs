@@ -4,6 +4,7 @@
 //! one module with `cargo test --locked --test it <module name>`.
 
 mod advanced_graphics_tests;
+mod common;
 mod graphics_tests;
 mod issue_101_colour;
 mod issue_102_json_load_save;

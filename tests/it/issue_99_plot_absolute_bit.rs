@@ -1,21 +1,7 @@
 //! Issue 99: bit 2 of the PLOT mode selects absolute (set) or relative
 //! (clear) coordinates for each group of 8 modes.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
+use crate::common::run_lines as run;
 
 #[test]
 fn test_plot_69_sets_an_absolute_point() {

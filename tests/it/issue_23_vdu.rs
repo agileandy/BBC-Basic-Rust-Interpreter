@@ -1,21 +1,11 @@
 //! Issue #23: VDU sends bytes to the display. A control code waits for its
 //! parameter bytes, then has the same effect as its statement.
 
+use crate::common::run_lines as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
 use bbc_basic_interpreter::runner::run_program;
 use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
 
 #[test]
 fn test_vdu_prints_printable_characters() {

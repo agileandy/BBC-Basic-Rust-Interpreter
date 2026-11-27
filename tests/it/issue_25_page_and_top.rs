@@ -1,20 +1,10 @@
 //! Issue 25: the memory values PAGE and TOP, and LOMEM equal to TOP.
 
+use crate::common::run_lines as run;
 use bbc_basic_interpreter::executor::Executor;
 use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::{run_program, run_typed_line};
+use bbc_basic_interpreter::runner::run_typed_line;
 use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
 
 /// Run a program that prints one integer value, and return that value.
 fn printed_value(source: &[&str]) -> i64 {

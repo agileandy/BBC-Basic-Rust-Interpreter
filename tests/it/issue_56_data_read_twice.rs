@@ -1,20 +1,6 @@
 //! Tests that each DATA value is read one time in a program run (issue #56).
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
+use crate::common::run_lines as run;
 
 /// Assert that the run stopped with "Out of DATA" at the given line.
 fn assert_out_of_data_at(result: Result<(), String>, line: u16) {

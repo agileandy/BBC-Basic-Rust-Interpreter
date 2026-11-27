@@ -1,35 +1,7 @@
 //! Issue 65: LEFT$, RIGHT$, MID$ and STRING$ with a negative or zero count
 //! give the result of the BBC BASIC rule, and never stop the interpreter.
 
-use bbc_basic_interpreter::executor::Executor;
-use bbc_basic_interpreter::program::ProgramStore;
-use bbc_basic_interpreter::runner::run_program;
-use bbc_basic_interpreter::tokenizer::tokenize;
-
-/// Store the source lines, run the program and return the result and the output.
-fn run(source: &[&str]) -> (Result<(), String>, String) {
-    let mut executor = Executor::new();
-    let mut program = ProgramStore::new();
-    for line in source {
-        program.store_line(tokenize(line).expect("line tokenizes"));
-    }
-    let result = run_program(&mut executor, &mut program);
-    (result, executor.get_output().to_string())
-}
-
-/// Run the program in a separate thread with a time limit of 5 seconds, so that
-/// a panic or a very large string fails the test and does not stop the test run.
-fn run_with_limit(source: &[&str]) -> (Result<(), String>, String) {
-    let source: Vec<String> = source.iter().map(|line| line.to_string()).collect();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let lines: Vec<&str> = source.iter().map(String::as_str).collect();
-        let _ = sender.send(run(&lines));
-    });
-    receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("program ends within 5 seconds and does not panic")
-}
+use crate::common::run_with_limit;
 
 /// Print the expression between two bars and return the output.
 fn print_of(expression: &str) -> String {
