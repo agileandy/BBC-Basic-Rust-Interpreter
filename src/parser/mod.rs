@@ -750,11 +750,16 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
             Some(Token::Keyword(0xF4 | 0xDC | 0xE7)) // REM, DATA, IF
         ) || is_on_with_else(rest)
             || is_on_error_with_statements(rest);
+        // An apostrophe comment (REM and its DataText) also ends a statement,
+        // as in `X = 1 ' note` (issue 178). The comment is the next statement.
         let end = if uses_rest_of_line {
             rest.len()
         } else {
-            rest.iter()
-                .position(|t| matches!(t, Token::Separator(':')))
+            rest.windows(2)
+                .position(|pair| matches!(pair, [Token::Keyword(0xF4), Token::DataText(_)]))
+                .into_iter()
+                .chain(rest.iter().position(|t| matches!(t, Token::Separator(':'))))
+                .min()
                 .unwrap_or(rest.len())
         };
         let part = TokenizedLine::new(line_number, rest[..end].to_vec());
@@ -762,7 +767,8 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
         if end == rest.len() {
             return Ok(statements);
         }
-        rest = &rest[end + 1..];
+        let separator = usize::from(matches!(rest[end], Token::Separator(':')));
+        rest = &rest[end + separator..];
     }
 }
 
