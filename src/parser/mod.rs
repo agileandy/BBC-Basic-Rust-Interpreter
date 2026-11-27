@@ -3514,8 +3514,52 @@ const ONE_VALUE_FUNCTIONS: &[&str] = &[
 const TWO_OR_MORE_VALUE_FUNCTIONS: &[&str] =
     &["INSTR", "LEFT$", "MID$", "POINT", "RIGHT$", "STRING$"];
 
-/// Parse an operand (literal, variable, function call, or parenthesized expression)
+/// The maximum nesting depth of an expression: brackets, unary operators
+/// and function arguments. A deeper nest gives No room, so that the parse
+/// cannot overflow the native stack (issue 151).
+///
+/// On the 64 MiB interpreter thread, a debug build overflows at about 5900
+/// levels. EVAL can parse when the evaluation levels already use 42% of the
+/// stack, so this limit keeps the total below half of the stack.
+const EXPRESSION_NESTING_LIMIT: usize = 500;
+
+thread_local! {
+    /// The number of `parse_operand` calls that are open on this thread
+    static OPERAND_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One open level of `parse_operand`. The level closes when the guard
+/// drops, on each exit path.
+struct NestingLevel;
+
+impl NestingLevel {
+    /// Open one more level, or give No room at the limit
+    fn enter() -> Result<Self> {
+        OPERAND_DEPTH.with(|depth| {
+            if depth.get() >= EXPRESSION_NESTING_LIMIT {
+                return Err(BBCBasicError::NoRoom);
+            }
+            depth.set(depth.get() + 1);
+            Ok(NestingLevel)
+        })
+    }
+}
+
+impl Drop for NestingLevel {
+    fn drop(&mut self) {
+        OPERAND_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+/// Parse an operand (literal, variable, function call, or parenthesized
+/// expression), as one level of the nesting limit
 fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
+    let _level = NestingLevel::enter()?;
+    parse_operand_level(tokens, pos)
+}
+
+/// The body of `parse_operand`, inside its nesting level
+fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
     if *pos >= tokens.len() {
         return Err(BBCBasicError::SyntaxError {
             message: "Unexpected end of expression".to_string(),
