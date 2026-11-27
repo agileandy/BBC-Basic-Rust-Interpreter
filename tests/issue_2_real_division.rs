@@ -37,6 +37,20 @@ fn test_print_division_by_zero_reports_division_by_zero() {
 }
 
 #[test]
+fn test_print_evaluates_a_user_function_one_time() {
+    let source = [
+        "10 N% = 0",
+        "20 PRINT FNhalf",
+        "30 PRINT N%",
+        "40 END",
+        "100 DEF FNhalf",
+        "110 N% = N% + 1",
+        "120 = N% / 2",
+    ];
+    assert_eq!(run(&source), (Ok(()), "0.5\n1\n".to_string()));
+}
+
+#[test]
 fn test_print_exact_division_shows_whole_number() {
     assert_eq!(run(&["10 PRINT 6 / 2"]), (Ok(()), "3\n".to_string()));
 }
