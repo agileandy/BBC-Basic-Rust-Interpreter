@@ -49,7 +49,7 @@ fn test_goto_skips_lines() {
 fn test_goto_missing_line_gives_error() {
     let (result, _) = run(&["10 GOTO 99"]);
 
-    assert_eq!(result, Err("Line 99 not found (GOTO)".to_string()));
+    assert_eq!(result, Err("No such line: 99 at line 10".to_string()));
 }
 
 #[test]

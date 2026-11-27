@@ -111,13 +111,12 @@ fn test_memory_operators_in_a_loop() {
     assert_eq!(output, "100925952\n");
 }
 
-/// Assert that the run stopped at the line with an address error. The test
-/// does not compare the message text, because issue 74 changes it.
+/// Assert that the run stopped at the line with an address error, such as
+/// "Invalid address: $8000 at line 10".
 fn assert_address_error(result: Result<(), String>, line: u16) {
     let message = result.expect_err("an address error");
     assert!(
-        message.starts_with(&format!("Runtime error at line {line}: "))
-            && message.to_lowercase().contains("address"),
+        message.starts_with("Invalid address: $") && message.ends_with(&format!(" at line {line}")),
         "{message}"
     );
 }

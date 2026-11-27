@@ -183,7 +183,7 @@ fn test_second_typed_next_after_complete_loop_gives_error() {
 fn test_error_in_typed_loop_leaves_no_open_loop() {
     let (results, output) = typed(&[], &["FOR I%=1 TO 3 : PRINT 1/0 : NEXT", "NEXT"]);
 
-    assert_eq!(results[0], Err("Runtime error: DivisionByZero".to_string()));
+    assert_eq!(results[0], Err("Division by zero".to_string()));
     assert!(results[1].is_err(), "results were {results:?}");
     assert_eq!(output, "");
 }
@@ -195,10 +195,7 @@ fn test_error_in_stored_subroutine_leaves_no_return_entry() {
         &["GOSUB 10 : PRINT \"B\"", "RETURN"],
     );
 
-    assert_eq!(
-        results[0],
-        Err("Runtime error at line 10: DivisionByZero".to_string())
-    );
+    assert_eq!(results[0], Err("Division by zero at line 10".to_string()));
     assert!(results[1].is_err(), "results were {results:?}");
 }
 
@@ -299,10 +296,7 @@ const PROC_WITH_LOCAL_ERROR: [&str; 4] = [
 fn test_error_in_typed_proc_call_restores_local_variable() {
     let (results, output) = typed(&PROC_WITH_LOCAL_ERROR, &["X=1", "PROCp", "PRINT X"]);
 
-    assert_eq!(
-        results[1],
-        Err("Runtime error at line 120: DivisionByZero".to_string())
-    );
+    assert_eq!(results[1], Err("Division by zero at line 120".to_string()));
     assert_eq!(output, "1\n");
 }
 
@@ -325,10 +319,7 @@ fn test_error_in_run_restores_local_variable() {
         store(&mut program, &["10 X=1", "20 PROCp", "30 END"]);
         store(&mut program, &PROC_WITH_LOCAL_ERROR);
         let result = run_program_with_outcome(&mut executor, &mut program);
-        assert_eq!(
-            result,
-            Err("Runtime error at line 120: DivisionByZero".to_string())
-        );
+        assert_eq!(result, Err("Division by zero at line 120".to_string()));
         let typed = type_line(&mut executor, &program, "PRINT X");
         assert_eq!(typed, Ok(RunOutcome::Ended));
         executor.get_output().to_string()
@@ -347,7 +338,7 @@ fn test_typed_goto_reaches_stored_line_that_does_not_parse() {
     for result in &results[..2] {
         let message = result.clone().expect_err("line 20 gives its parse error");
         assert!(
-            message.starts_with("Parse error at line 20:"),
+            message.starts_with("Syntax error at line 20:"),
             "message was {message:?}"
         );
     }
@@ -418,10 +409,7 @@ fn test_run_error_on_line_65535_gives_line_number() {
         run_program_with_outcome(&mut executor, &mut program)
     });
 
-    assert_eq!(
-        result,
-        Err("Runtime error at line 65535: DivisionByZero".to_string())
-    );
+    assert_eq!(result, Err("Division by zero at line 65535".to_string()));
 }
 
 #[test]
@@ -462,7 +450,7 @@ fn test_error_in_stored_line_after_typed_goto_uses_handler() {
 fn test_error_in_typed_line_does_not_use_handler() {
     let (results, output) = typed(&PROGRAM_WITH_HANDLER, &["GOTO 10", "PRINT 1/0"]);
 
-    assert_eq!(results[1], Err("Runtime error: DivisionByZero".to_string()));
+    assert_eq!(results[1], Err("Division by zero".to_string()));
     assert_eq!(output, "HANDLED\n");
 }
 

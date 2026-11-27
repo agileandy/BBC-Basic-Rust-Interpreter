@@ -148,14 +148,14 @@ fn test_constant_then_more_tokens_is_syntax_error() {
 fn test_calculated_target_to_missing_line_gives_goto_error() {
     let (result, _) = run(&["10 X% = 5", "20 GOTO (100 + X%)", "100 END"]);
 
-    assert_eq!(result, Err("Line 105 not found (GOTO)".to_string()));
+    assert_eq!(result, Err("No such line: 105 at line 20".to_string()));
 }
 
 #[test]
 fn test_calculated_gosub_to_missing_line_gives_gosub_error() {
     let (result, _) = run(&["10 X% = 5", "20 GOSUB (100 + X%)", "100 END"]);
 
-    assert_eq!(result, Err("Line 105 not found (GOSUB)".to_string()));
+    assert_eq!(result, Err("No such line: 105 at line 20".to_string()));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn test_calculated_target_out_of_range_gives_goto_error() {
         let line_10 = format!("10 X% = {}", value);
         let (result, _) = run(&[&line_10, "20 GOTO (X%)", "100 END"]);
 
-        assert_eq!(result, Err(format!("Line {} not found (GOTO)", shown)));
+        assert_eq!(result, Err(format!("No such line: {} at line 20", shown)));
     }
 }
 

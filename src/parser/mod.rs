@@ -5,7 +5,30 @@
 
 use crate::error::BBCBasicError;
 use crate::error::Result;
-use crate::tokenizer::{create_reverse_keyword_maps, Token, TokenizedLine};
+use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, TokenizedLine};
+
+/// The tokens as the user typed them, for an error message. An empty list
+/// shows as "end of line". A whole real number shows with no exponent, so
+/// `2.0` shows as `2`, not as the LIST form `2E0`.
+fn tokens_text(tokens: &[Token]) -> String {
+    let tokens = tokens
+        .iter()
+        .map(|token| match token {
+            Token::Real(value)
+                if value.fract() == 0.0
+                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(value) =>
+            {
+                Token::Integer(*value as i32)
+            }
+            _ => token.clone(),
+        })
+        .collect();
+    let line = TokenizedLine::new(None, tokens);
+    match detokenize(&line) {
+        Ok(text) if !text.is_empty() => text,
+        _ => "end of line".to_string(),
+    }
+}
 
 /// Binary operators in BBC BASIC
 #[derive(Debug, Clone, PartialEq)]
@@ -243,6 +266,8 @@ pub enum Statement {
     EndWhile,
     /// CLS statement - clear screen
     Cls,
+    /// REPORT statement - print the text of the last error
+    Report,
     /// CLEAR statement - remove all variables and close the loops and calls
     Clear,
     /// TRACE statement - show the number of each line that runs
@@ -522,10 +547,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         return Ok(Statement::Empty);
     }
 
-    // END, STOP, CLS and CLEAR take no argument
-    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8), unexpected, ..] = tokens.as_slice() {
+    // END, STOP, CLS, CLEAR and REPORT take no argument
+    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8 | 0xF6), unexpected, ..] = tokens.as_slice() {
         return Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected {:?} after statement", unexpected),
+            message: format!(
+                "Unexpected {} after statement",
+                tokens_text(std::slice::from_ref(unexpected))
+            ),
             line: line.line_number,
         });
     }
@@ -650,6 +678,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // CLS statement
         Token::Keyword(0xDB) => Ok(Statement::Cls),
 
+        // REPORT statement
+        Token::Keyword(0xF6) => Ok(Statement::Report),
+
         // CLEAR statement
         Token::Keyword(0xD8) => Ok(Statement::Clear),
 
@@ -739,13 +770,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             // QUIT statement
             0x98 => Ok(Statement::Quit),
             _ => Err(BBCBasicError::SyntaxError {
-                message: format!("Unknown extended statement: {:?}", tokens[0]),
+                message: format!("Unknown extended statement: {}", tokens_text(&tokens[..1])),
                 line: line.line_number,
             }),
         },
 
         _ => Err(BBCBasicError::SyntaxError {
-            message: format!("Unknown statement: {:?}", tokens[0]),
+            message: format!("Unknown statement: {}", tokens_text(&tokens[..1])),
             line: line.line_number,
         }),
     }
@@ -1956,7 +1987,7 @@ fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
         [Token::DataText(text)] => text,
         _ => {
             return Err(BBCBasicError::SyntaxError {
-                message: format!("Invalid DATA value: {:?}", tokens),
+                message: format!("Invalid DATA value: {}", tokens_text(tokens)),
                 line: line_number,
             });
         }
@@ -2594,7 +2625,10 @@ pub fn parse_expression(tokens: &[Token]) -> Result<Expression> {
     let expression = parse_expr_precedence(tokens, &mut pos, 0)?;
     if let Some(token) = tokens.get(pos) {
         return Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected {:?} after expression", token),
+            message: format!(
+                "Unexpected {} after expression",
+                tokens_text(std::slice::from_ref(token))
+            ),
             line: None,
         });
     }
@@ -2983,7 +3017,10 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
         }
 
         _ => Err(BBCBasicError::SyntaxError {
-            message: format!("Unexpected token in expression: {:?}", token),
+            message: format!(
+                "Unexpected token in expression: {}",
+                tokens_text(std::slice::from_ref(token))
+            ),
             line: None,
         }),
     }

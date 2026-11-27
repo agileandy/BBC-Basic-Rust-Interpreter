@@ -442,6 +442,12 @@ impl Executor {
                 Ok(())
             }
             Statement::Cls => self.execute_cls(),
+            // REPORT prints the text of the last error, with no new line
+            Statement::Report => {
+                let text = self.last_error.as_ref().map(|e| e.message.clone());
+                self.print_output(&text.unwrap_or_default());
+                Ok(())
+            }
             Statement::Clear => self.execute_clear(),
             // Graphics statements
             Statement::Plot { mode, x, y } => self.execute_plot(mode, x, y),
@@ -835,7 +841,7 @@ impl Executor {
         // If no variables specified, use the most recent FOR loop
         if variables.is_empty() {
             let Some((name, _, _, _)) = self.for_loops.last() else {
-                return Err(BBCBasicError::BadCall);
+                return Err(BBCBasicError::NoFor);
             };
             return self.next_loop(name.clone());
         }
@@ -858,7 +864,11 @@ impl Executor {
             .for_loops
             .iter()
             .rposition(|(name, _, _, _)| name == &var_name)
-            .ok_or(BBCBasicError::BadCall)?;
+            .ok_or(if self.for_loops.is_empty() {
+                BBCBasicError::NoFor
+            } else {
+                BBCBasicError::CantMatchFor
+            })?;
 
         let (_, end_val, step_val, _) = self.for_loops[loop_index];
 
@@ -1183,10 +1193,7 @@ impl Executor {
         for var_name in variables {
             // Check if we've run out of data
             if self.data_pointer >= self.data_values.len() {
-                return Err(BBCBasicError::SyntaxError {
-                    message: "Out of DATA".to_string(),
-                    line: None,
-                });
+                return Err(BBCBasicError::OutOfData);
             }
 
             // Get next data value
@@ -2706,13 +2713,7 @@ impl Executor {
 
     /// Declare a local variable (called on LOCAL statement)
     pub fn declare_local(&mut self, name: &str) -> Result<()> {
-        let frame = self
-            .local_stack
-            .last_mut()
-            .ok_or_else(|| BBCBasicError::SyntaxError {
-                message: "LOCAL outside of procedure".to_string(),
-                line: None,
-            })?;
+        let frame = self.local_stack.last_mut().ok_or(BBCBasicError::NotLocal)?;
 
         // LOCAL NAME() saves the array only, and makes it undimensioned.
         // A second LOCAL for the same name in this frame keeps the first saved entry.
@@ -3855,7 +3856,7 @@ mod tests {
 
         let result = executor.execute_statement(&stmt);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BBCBasicError::BadCall));
+        assert!(matches!(result.unwrap_err(), BBCBasicError::NoFor));
     }
 
     #[test]

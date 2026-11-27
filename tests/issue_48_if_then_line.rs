@@ -110,7 +110,7 @@ fn test_if_then_line_number_else_print() {
 fn test_if_then_missing_line_gives_goto_error() {
     let (result, _) = run(&["10 IF 1 THEN 99"]);
 
-    assert_eq!(result, Err("Line 99 not found (GOTO)".to_string()));
+    assert_eq!(result, Err("No such line: 99 at line 10".to_string()));
 }
 
 #[test]

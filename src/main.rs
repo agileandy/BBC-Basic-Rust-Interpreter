@@ -190,7 +190,7 @@ fn process_line(
     line: &str,
 ) -> Result<RunOutcome, String> {
     // Tokenize
-    let tokenized = tokenize(line).map_err(|e| format!("Tokenization error: {:?}", e))?;
+    let tokenized = tokenize(line).map_err(|e| e.to_string())?;
 
     // Check if this is a numbered line (program mode) or immediate mode
     if let Some(line_number) = tokenized.line_number {
@@ -219,7 +219,7 @@ fn list_program(program: &ProgramStore) {
     for (line_number, line) in program.list() {
         match detokenize(line) {
             Ok(text) => println!("{}", text),
-            Err(e) => println!("Error listing line {}: {:?}", line_number, e),
+            Err(e) => println!("Error listing line {}: {}", line_number, e),
         }
     }
 }
@@ -280,7 +280,7 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     use std::io::Write;
     for (line_number, line) in program.list() {
         let text = detokenize(line)
-            .map_err(|e| format!("Failed to detokenize line {}: {:?}", line_number, e))?;
+            .map_err(|e| format!("Failed to detokenize line {}: {}", line_number, e))?;
         writeln!(file, "{}", text)
             .map_err(|e| format!("Failed to write line {}: {}", line_number, e))?;
     }
@@ -314,7 +314,7 @@ fn load_program(
 
         // Tokenize and store
         let tokenized =
-            tokenize(line).map_err(|e| format!("Parse error at line {}: {:?}", line_num + 1, e))?;
+            tokenize(line).map_err(|e| format!("Parse error at line {}: {}", line_num + 1, e))?;
 
         if let Some(line_number) = tokenized.line_number {
             // A line number with no statement deletes that line, as a typed line does.
@@ -453,7 +453,7 @@ fn auto_mode(
                 program.store_line(tokenized);
                 number = number.saturating_add(step);
             }
-            Err(e) => println!("Error: Tokenization error: {:?}", e),
+            Err(e) => println!("Error: {}", e),
         }
     }
     println!("Error: Too big");
