@@ -15,6 +15,7 @@ pub mod extensions;
 pub mod filesystem;
 pub mod graphics;
 pub mod json;
+pub mod matrix;
 pub mod memory;
 pub mod os;
 pub mod parser;
@@ -124,6 +125,8 @@ pub mod error {
         NoSuchKey(String),
         // A FOR EACH of an empty collection with no NEXT after it (issue #141)
         MissingNext,
+        // MATINVERSE of a matrix with no inverse (issue #190)
+        SingularMatrix,
         // The Escape key stopped the program. ERR 17 (issue #171).
         Escape,
 
@@ -182,6 +185,7 @@ pub mod error {
                 BBCBasicError::BadCollection => write!(f, "Bad collection"),
                 BBCBasicError::NoSuchKey(key) => write!(f, "No such key: {}", key),
                 BBCBasicError::MissingNext => write!(f, "FOR EACH without matching NEXT"),
+                BBCBasicError::SingularMatrix => write!(f, "Singular matrix"),
                 BBCBasicError::Escape => write!(f, "Escape"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),

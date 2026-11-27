@@ -9,6 +9,7 @@ use crate::tokenizer::{create_reverse_keyword_maps, detokenize, Token, Tokenized
 
 mod whole_array;
 pub use whole_array::{parse_array_reference, ArrayExpression, ArrayOperand};
+mod matrix;
 
 /// The tokens as the user typed them, for an error message. An empty list
 /// shows as "end of line". A whole real number shows with no exponent, so
@@ -196,6 +197,13 @@ pub enum Statement {
         target: String,
         operator: Option<BinaryOperator>,
         value: ArrayExpression,
+    },
+    /// A matrix statement such as `MATINVERSE dest(), src()` (extension,
+    /// issue #190). The names have no bracket.
+    Matrix {
+        statement: crate::matrix::MatrixStatement,
+        target: String,
+        source: String,
     },
     /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
     /// or `base!offset = value`. The address includes the offset.
@@ -901,6 +909,10 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                 Err(error) => match &tokens[0] {
                     Token::Identifier(name) if is_list_statement(name) => {
                         parse_list_statement(name, &tokens[1..], line.line_number)
+                    }
+                    // The matrix statements (issue #190) use the same rule.
+                    Token::Identifier(name) if matrix::is_matrix_statement(name) => {
+                        matrix::parse_matrix_statement(tokens, line.line_number)
                     }
                     _ => Err(error),
                 },
