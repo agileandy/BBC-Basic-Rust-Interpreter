@@ -52,6 +52,16 @@ fn json_argument_count_error(name: &str, count: usize) -> BBCBasicError {
     }
 }
 
+/// Give a JSON text that a function made, or "String too long" if it is
+/// longer than the string limit.
+fn json_text_in_limit(text: String) -> Result<String> {
+    if text.len() > crate::variables::MAX_STRING_LENGTH {
+        Err(BBCBasicError::StringTooLong)
+    } else {
+        Ok(text)
+    }
+}
+
 /// Remove the line end (`\n` or `\r\n`) of a reply, if there is one
 fn without_line_end(reply: &str) -> &str {
     reply
@@ -2035,6 +2045,39 @@ impl Executor {
                 let (json, path) = (self.eval_string(json)?, self.eval_string(path)?);
                 let n = self.eval_integer(n)?;
                 Ok(crate::json::key_at(&json, &path, n)?)
+            }
+            Expression::ArrayAccess { name, indices }
+                if self.is_json_call(name, "JSONSET$") || self.is_json_call(name, "JSONADD$") =>
+            {
+                let [json, path, value] = indices.as_slice() else {
+                    return Err(json_argument_count_error(name, 3));
+                };
+                let (json, path) = (self.eval_string(json)?, self.eval_string(path)?);
+                let value = if self.is_string_expr(value) {
+                    serde_json::Value::String(self.eval_string(value)?)
+                } else {
+                    crate::json::number_value(self.eval_real(value)?)?
+                };
+                let text = if name == "JSONSET$" {
+                    crate::json::set_value(&json, &path, value)?
+                } else {
+                    crate::json::add_value(&json, &path, value)?
+                };
+                json_text_in_limit(text)
+            }
+            Expression::ArrayAccess { name, indices }
+                if self.is_json_call(name, "JSONSETJSON$") =>
+            {
+                let [json, path, fragment] = indices.as_slice() else {
+                    return Err(json_argument_count_error(name, 3));
+                };
+                let (json, path) = (self.eval_string(json)?, self.eval_string(path)?);
+                let value = crate::json::fragment_value(&self.eval_string(fragment)?)?;
+                json_text_in_limit(crate::json::set_value(&json, &path, value)?)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_json_call(name, "JSONDEL$") => {
+                let (json, path) = self.eval_json_path_arguments(name, indices)?;
+                json_text_in_limit(crate::json::delete_value(&json, &path)?)
             }
             // LISTDIR$(path$) is an extension. The parser cannot tell it from
             // an array, so an array named LISTDIR$ keeps its old meaning.

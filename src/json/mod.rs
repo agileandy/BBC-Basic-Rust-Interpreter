@@ -11,6 +11,11 @@
 //! (`items[2]`), keys in JSON string form in square brackets (`["my key"]`),
 //! or no text for the root.
 //!
+//! The change functions (issue #104) give a new compact JSON text and do not
+//! change their argument: `JSONSET$(json$, path$, value)`,
+//! `JSONSETJSON$(json$, path$, fragment$)`, `JSONADD$(json$, path$, value)`
+//! and `JSONDEL$(json$, path$)`. An empty text is an empty object.
+//!
 //! The parse step and the print steps are separate functions, so that other
 //! JSON functions (a value at a path, a change to a text) can use them.
 //!
@@ -18,7 +23,7 @@
 //! has the `preserve_order` feature in this build.
 
 use crate::error::BBCBasicError;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::fs;
 
 /// An error from a JSON function. The executor converts it to a BASIC error.
@@ -203,6 +208,116 @@ pub fn key_at(json: &str, path: &str, n: i32) -> Result<String, JsonError> {
             .ok_or(JsonError::Subscript),
         _ => Err(JsonError::TypeMismatch),
     }
+}
+
+/// A number as a JSON value. A number with no fraction has no decimal point.
+/// A number that is not finite gives `TypeMismatch`.
+pub fn number_value(number: f64) -> Result<Value, JsonError> {
+    // Each whole number to 2^53 has an exact i64 value.
+    const EXACT_LIMIT: f64 = 9_007_199_254_740_992.0;
+    if number.fract() == 0.0 && number.abs() <= EXACT_LIMIT {
+        Ok(Value::from(number as i64))
+    } else {
+        serde_json::Number::from_f64(number)
+            .map(Value::Number)
+            .ok_or(JsonError::TypeMismatch)
+    }
+}
+
+/// `JSONSETJSON$`: the value of a JSON fragment. Text that is not JSON gives `BadJson`.
+pub fn fragment_value(text: &str) -> Result<Value, JsonError> {
+    parse(text)
+}
+
+/// Parse the text that a function changes. An empty text is an empty object.
+fn parse_for_change(json: &str) -> Result<Value, JsonError> {
+    if json.is_empty() {
+        Ok(Value::Object(Map::new()))
+    } else {
+        parse(json)
+    }
+}
+
+/// Go from `value` through `steps` and give the value at the end, or `None`
+/// if it does not exist. If `create` is true, a missing key makes an empty
+/// object, and the index equal to the length of an array appends an empty object.
+fn walk_mut<'a>(
+    mut value: &'a mut Value,
+    steps: &[PathStep],
+    create: bool,
+) -> Option<&'a mut Value> {
+    for step in steps {
+        value = match step {
+            PathStep::Key(key) => {
+                let members = value.as_object_mut()?;
+                if create {
+                    members
+                        .entry(key.clone())
+                        .or_insert_with(|| Value::Object(Map::new()))
+                } else {
+                    members.get_mut(key)?
+                }
+            }
+            PathStep::Index(index) => {
+                let elements = value.as_array_mut()?;
+                if create && *index == elements.len() {
+                    elements.push(Value::Object(Map::new()));
+                }
+                elements.get_mut(*index)?
+            }
+        };
+    }
+    Some(value)
+}
+
+/// `JSONSET$` and `JSONSETJSON$`: put a value at a path and give the new
+/// compact text. The missing parent objects are made.
+pub fn set_value(json: &str, path: &str, value: Value) -> Result<String, JsonError> {
+    let mut root = parse_for_change(json)?;
+    let steps = JsonPath::parse(path)?;
+    let slot = walk_mut(&mut root, steps.steps(), true)
+        .ok_or_else(|| JsonError::BadPath(path.to_string()))?;
+    *slot = value;
+    Ok(to_compact(&root))
+}
+
+/// `JSONADD$`: append a value to the array at a path and give the new compact
+/// text. A path that does not exist gets a new array. A value that is not an
+/// array gives `TypeMismatch`.
+pub fn add_value(json: &str, path: &str, value: Value) -> Result<String, JsonError> {
+    let mut root = parse_for_change(json)?;
+    let steps = JsonPath::parse(path)?;
+    let exists = steps.find(&root).is_some();
+    let slot = walk_mut(&mut root, steps.steps(), true)
+        .ok_or_else(|| JsonError::BadPath(path.to_string()))?;
+    if !exists {
+        *slot = Value::Array(Vec::new());
+    }
+    slot.as_array_mut()
+        .ok_or(JsonError::TypeMismatch)?
+        .push(value);
+    Ok(to_compact(&root))
+}
+
+/// `JSONDEL$`: remove the value at a path and give the new compact text. A
+/// value that does not exist, or the root, gives `BadPath`.
+pub fn delete_value(json: &str, path: &str) -> Result<String, JsonError> {
+    let bad = || JsonError::BadPath(path.to_string());
+    let mut root = parse_for_change(json)?;
+    let steps = JsonPath::parse(path)?;
+    let (last, parents) = steps.steps().split_last().ok_or_else(bad)?;
+    let parent = walk_mut(&mut root, parents, false).ok_or_else(bad)?;
+    let removed = match last {
+        PathStep::Key(key) => parent
+            .as_object_mut()
+            .and_then(|members| members.shift_remove(key)),
+        PathStep::Index(index) => parent
+            .as_array_mut()
+            .filter(|elements| *index < elements.len())
+            .map(|elements| elements.remove(*index)),
+    };
+    removed.ok_or_else(bad)?;
+    Ok(to_compact(&root))
 }
 
 /// Parse a JSON text.
@@ -419,6 +534,143 @@ mod tests {
         assert_eq!(
             length(DOC, "nope"),
             Err(JsonError::BadPath("nope".to_string()))
+        );
+    }
+
+    fn number(value: f64) -> Value {
+        number_value(value).unwrap()
+    }
+
+    fn text(value: &str) -> Value {
+        Value::String(value.to_string())
+    }
+
+    #[test]
+    fn test_number_value_with_no_fraction_has_no_decimal_point() {
+        assert_eq!(to_compact(&number(2.0)), "2");
+        assert_eq!(to_compact(&number(-7.0)), "-7");
+        assert_eq!(to_compact(&number(1.5)), "1.5");
+        assert_eq!(number_value(f64::NAN), Err(JsonError::TypeMismatch));
+    }
+
+    #[test]
+    fn test_set_builds_an_object_from_an_empty_text() {
+        let json = set_value("", "name", text("A")).unwrap();
+        assert_eq!(json, r#"{"name":"A"}"#);
+        let json = set_value(&json, "items", parse("[1,2]").unwrap()).unwrap();
+        assert_eq!(json, r#"{"name":"A","items":[1,2]}"#);
+    }
+
+    #[test]
+    fn test_set_changes_a_value_and_keeps_the_key_order() {
+        let json = set_value(r#"{"a":1,"b":2}"#, "a", number(5.0)).unwrap();
+        assert_eq!(json, r#"{"a":5,"b":2}"#);
+    }
+
+    #[test]
+    fn test_set_makes_missing_parent_objects() {
+        let json = set_value("{}", "a.b.c", number(1.0)).unwrap();
+        assert_eq!(json, r#"{"a":{"b":{"c":1}}}"#);
+    }
+
+    #[test]
+    fn test_set_of_an_array_index_changes_or_appends() {
+        assert_eq!(set_value("[1,2]", "[0]", number(9.0)).unwrap(), "[9,2]");
+        assert_eq!(set_value("[1,2]", "[2]", number(3.0)).unwrap(), "[1,2,3]");
+        assert_eq!(
+            set_value("[1,2]", "[3]", number(4.0)),
+            Err(JsonError::BadPath("[3]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_set_of_the_empty_path_replaces_the_root() {
+        assert_eq!(set_value("{}", "", number(3.0)).unwrap(), "3");
+    }
+
+    #[test]
+    fn test_set_through_a_value_that_is_not_an_object_gives_bad_path() {
+        assert_eq!(
+            set_value(r#"{"a":1}"#, "a.b", number(2.0)),
+            Err(JsonError::BadPath("a.b".to_string()))
+        );
+        assert_eq!(
+            set_value("{}", "[0]", number(2.0)),
+            Err(JsonError::BadPath("[0]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_set_escapes_a_quote_and_a_new_line() {
+        let json = set_value("", "s", text("say \"hi\"\nbye")).unwrap();
+        assert_eq!(json, r#"{"s":"say \"hi\"\nbye"}"#);
+    }
+
+    #[test]
+    fn test_set_of_bad_text_or_bad_path_gives_an_error() {
+        assert!(matches!(
+            set_value("{bad", "a", number(1.0)),
+            Err(JsonError::BadJson(_))
+        ));
+        assert_eq!(
+            set_value("{}", "a..b", number(1.0)),
+            Err(JsonError::BadPath("a..b".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_fragment_value_gives_the_value_or_bad_json() {
+        assert_eq!(fragment_value("true"), Ok(Value::Bool(true)));
+        assert!(matches!(fragment_value("[1,"), Err(JsonError::BadJson(_))));
+    }
+
+    #[test]
+    fn test_add_appends_to_an_array() {
+        let json = add_value(r#"{"items":[1]}"#, "items", number(2.0)).unwrap();
+        assert_eq!(json, r#"{"items":[1,2]}"#);
+        assert_eq!(add_value("[]", "", text("x")).unwrap(), r#"["x"]"#);
+    }
+
+    #[test]
+    fn test_add_makes_the_array_and_its_parents() {
+        let json = add_value("", "a.items", number(1.0)).unwrap();
+        assert_eq!(json, r#"{"a":{"items":[1]}}"#);
+    }
+
+    #[test]
+    fn test_add_to_a_value_that_is_not_an_array_gives_type_mismatch() {
+        assert_eq!(
+            add_value(r#"{"a":1}"#, "a", number(2.0)),
+            Err(JsonError::TypeMismatch)
+        );
+        assert_eq!(add_value("", "", number(2.0)), Err(JsonError::TypeMismatch));
+    }
+
+    #[test]
+    fn test_delete_removes_a_key_and_keeps_the_order() {
+        let json = delete_value(r#"{"a":1,"b":2,"c":3}"#, "a").unwrap();
+        assert_eq!(json, r#"{"b":2,"c":3}"#);
+        let json = delete_value(r#"{"a":{"b":1,"c":2}}"#, "a.b").unwrap();
+        assert_eq!(json, r#"{"a":{"c":2}}"#);
+    }
+
+    #[test]
+    fn test_delete_removes_an_array_element() {
+        assert_eq!(delete_value("[1,2,3]", "[1]").unwrap(), "[1,3]");
+    }
+
+    #[test]
+    fn test_delete_of_a_missing_value_gives_bad_path() {
+        for path in ["x", "a.x", "x.y", "[0]", ""] {
+            assert_eq!(
+                delete_value(r#"{"a":{}}"#, path),
+                Err(JsonError::BadPath(path.to_string())),
+                "path {path}"
+            );
+        }
+        assert_eq!(
+            delete_value("[1]", "[1]"),
+            Err(JsonError::BadPath("[1]".to_string()))
         );
     }
 

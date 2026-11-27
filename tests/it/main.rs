@@ -105,3 +105,4 @@ mod issue_115_string_array_limit;
 mod issue_119_line_feed_column;
 mod issue_118_mode_above_7;
 mod issue_125_lower_case_command_words;
+mod issue_104_json_change;
