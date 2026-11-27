@@ -2967,7 +2967,7 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
             } else if is_user_function
                 || matches!(
                     keyword.as_str(),
-                    "TRUE" | "FALSE" | "RND" | "COUNT" | "POS" | "VPOS"
+                    "TRUE" | "FALSE" | "RND" | "COUNT" | "POS" | "VPOS" | "GET" | "GET$"
                 )
             {
                 // A user-defined function with no parameters, or a keyword
@@ -3122,6 +3122,33 @@ mod tests {
         ] {
             let expr = parse_expression(&[Token::Keyword(byte)]).unwrap();
             assert_eq!(expr, constant(name), "{name} with no bracket");
+        }
+    }
+
+    #[test]
+    fn test_parse_get_and_get_string_without_bracket() {
+        // GET 0xA5, GET$ 0xBE
+        for (byte, name) in [(0xA5, "GET"), (0xBE, "GET$")] {
+            let expr = parse_expression(&[Token::Keyword(byte)]).unwrap();
+            assert_eq!(expr, constant(name), "{name} with no bracket");
+        }
+    }
+
+    #[test]
+    fn test_parse_assignment_from_get_and_get_string() {
+        use crate::tokenizer::tokenize;
+
+        for (source, target, name) in [("A% = GET", "A%", "GET"), ("A$ = GET$", "A$", "GET$")] {
+            match parse_statement(&tokenize(source).unwrap()).unwrap() {
+                Statement::Assignment {
+                    target: t,
+                    expression,
+                } => {
+                    assert_eq!(t, target, "{source}");
+                    assert_eq!(expression, constant(name), "{source}");
+                }
+                other => panic!("{source} parsed as {other:?}"),
+            }
         }
     }
 
