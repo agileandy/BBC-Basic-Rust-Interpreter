@@ -669,9 +669,7 @@ impl Executor {
             }
             Statement::Trace { mode } => self.execute_trace(mode),
             Statement::PrintFile { handle, items } => self.execute_print_file(handle, items),
-            Statement::InputFile { handle, variables } => {
-                self.execute_input_file(handle, variables)
-            }
+            Statement::InputFile { handle, targets } => self.execute_input_file(handle, targets),
             Statement::CloseFile { handle } => self.execute_close_file(handle),
             Statement::Bput { handle, value } => {
                 let handle = self.eval_integer(handle)?;
@@ -3999,7 +3997,11 @@ impl Executor {
     }
 
     /// Execute INPUT# statement - read from file
-    fn execute_input_file(&mut self, handle_expr: &Expression, variables: &[String]) -> Result<()> {
+    fn execute_input_file(
+        &mut self,
+        handle_expr: &Expression,
+        targets: &[InputItem],
+    ) -> Result<()> {
         // Evaluate the handle
         let handle = self.eval_integer(handle_expr)?;
 
@@ -4032,23 +4034,25 @@ impl Executor {
         // Parse the line and assign to variables (simplified - just split by commas)
         let values: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
 
-        for (i, var_name) in variables.iter().enumerate() {
+        for (i, target) in targets.iter().enumerate() {
             let value_str = values.get(i).unwrap_or(&"");
+            let (var_name, indices) = match target {
+                InputItem::Variable(var) => (var, None),
+                InputItem::ArrayElement { name, indices } => (name, Some(indices)),
+                // The parser gives no prompt text in INPUT#
+                InputItem::Prompt { .. } => continue,
+            };
 
-            // Assign based on variable type
-            if var_name.ends_with('%') {
-                // Integer variable
-                let value = value_str.parse::<i32>().unwrap_or(0);
-                self.variables.set_integer_var(var_name.clone(), value);
+            // The value type comes from the name of the target
+            let value = if var_name.ends_with('%') {
+                Variable::Integer(value_str.parse::<i32>().unwrap_or(0))
             } else if var_name.ends_with('$') {
-                // String variable
-                self.variables
-                    .set_string_var(var_name.clone(), value_str.to_string())?;
+                Variable::String(value_str.to_string())
             } else {
-                // Real variable
-                let value = value_str.parse::<f64>().unwrap_or(0.0);
-                self.variables.set_real_var(var_name.clone(), value);
-            }
+                Variable::Real(value_str.parse::<f64>().unwrap_or(0.0))
+            };
+            // The indices of an element are evaluated now (issue #154)
+            self.store_input_value(var_name, indices.map(Vec::as_slice), value)?;
         }
 
         Ok(())
@@ -6491,7 +6495,9 @@ mod tests {
 
         // Read data into variables
         let handle_expr = Expression::Integer(handle);
-        let variables = vec!["A%".to_string(), "B$".to_string(), "C".to_string()];
+        let variables: Vec<InputItem> = ["A%", "B$", "C"]
+            .map(|name| InputItem::Variable(name.to_string()))
+            .to_vec();
 
         let result = executor.execute_input_file(&handle_expr, &variables);
         assert!(result.is_ok());
@@ -6524,7 +6530,7 @@ mod tests {
 
         // Read the line
         let handle_expr = Expression::Integer(handle);
-        let variables = vec!["LINE$".to_string()];
+        let variables = vec![InputItem::Variable("LINE$".to_string())];
         executor
             .execute_input_file(&handle_expr, &variables)
             .unwrap();

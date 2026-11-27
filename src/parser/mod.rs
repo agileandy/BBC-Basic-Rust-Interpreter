@@ -318,10 +318,11 @@ pub enum Statement {
         handle: Expression,
         items: Vec<PrintItem>,
     },
-    /// INPUT# statement - read from file
+    /// INPUT# statement - read from file. Each target is a variable or an
+    /// array element.
     InputFile {
         handle: Expression,
-        variables: Vec<String>,
+        targets: Vec<InputItem>,
     },
     /// CLOSE# statement - close file
     CloseFile { handle: Expression },
@@ -1858,32 +1859,40 @@ fn parse_input_file_statement(tokens: &[Token], line_number: Option<u16>) -> Res
     // Parse handle expression
     let handle = parse_expression(&tokens[..comma_pos])?;
 
-    // Parse variable list after the comma
-    let mut variables = Vec::new();
-    let mut pos = comma_pos + 1;
-
-    while pos < tokens.len() {
-        match &tokens[pos] {
-            Token::Identifier(name) => {
-                variables.push(name.clone());
-                pos += 1;
-
-                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
-                    pos += 1; // skip comma
-                }
-            }
-            _ => break,
-        }
-    }
-
-    if variables.is_empty() {
+    if comma_pos + 1 == tokens.len() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected at least one variable in INPUT#".to_string(),
             line: line_number,
         });
     }
 
-    Ok(Statement::InputFile { handle, variables })
+    // Each part between the commas is one target (issue #154)
+    let targets = split_at_commas(&tokens[comma_pos + 1..])
+        .into_iter()
+        .map(|part| parse_input_file_target(part, line_number))
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(Statement::InputFile { handle, targets })
+}
+
+/// Parse one INPUT# target: a variable or an array element, in the target
+/// form of INPUT. Other tokens give a syntax error (issue #154).
+fn parse_input_file_target(part: &[Token], line_number: Option<u16>) -> Result<InputItem> {
+    let is_target = match part {
+        [Token::Identifier(_)] => true,
+        [Token::Identifier(_), Token::Separator('('), ..] => {
+            find_closing_bracket(part, 1) == Some(part.len() - 1)
+        }
+        _ => false,
+    };
+    if !is_target {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected a variable or an array element in INPUT#".to_string(),
+            line: line_number,
+        });
+    }
+    let mut items = parse_input_items(part, line_number)?;
+    Ok(items.remove(0))
 }
 
 /// Parse CLOSE# statement (file I/O)
@@ -5625,13 +5634,66 @@ mod tests {
         let stmt = parse_statement(&line).unwrap();
 
         match stmt {
-            Statement::InputFile { handle, variables } => {
+            Statement::InputFile { handle, targets } => {
                 assert!(matches!(handle, Expression::Variable(_)));
-                assert_eq!(variables.len(), 2);
-                assert_eq!(variables[0], "A%");
-                assert_eq!(variables[1], "B$");
+                assert_eq!(
+                    targets,
+                    vec![
+                        InputItem::Variable("A%".to_string()),
+                        InputItem::Variable("B$".to_string()),
+                    ]
+                );
             }
             _ => panic!("Expected InputFile statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_input_file_array_element_targets() {
+        use crate::tokenizer::tokenize;
+        let stmt = parse_statement(&tokenize("INPUT#H, V(1), M(I%, 2), X").unwrap()).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::InputFile {
+                handle: Expression::Variable("H".to_string()),
+                targets: vec![
+                    InputItem::ArrayElement {
+                        name: "V".to_string(),
+                        indices: vec![Expression::Integer(1)],
+                    },
+                    InputItem::ArrayElement {
+                        name: "M".to_string(),
+                        indices: vec![
+                            Expression::Variable("I%".to_string()),
+                            Expression::Integer(2),
+                        ],
+                    },
+                    InputItem::Variable("X".to_string()),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_input_file_rejects_tokens_that_are_not_a_target() {
+        use crate::tokenizer::tokenize;
+        for source in [
+            "INPUT#H, V(1) X",
+            "INPUT#H, A B",
+            "INPUT#H, A; B",
+            "INPUT#H, A,",
+            "INPUT#H, \"A\"",
+        ] {
+            let result = parse_statement(&tokenize(source).unwrap());
+            assert!(
+                matches!(
+                    &result,
+                    Err(BBCBasicError::SyntaxError { message, .. })
+                        if message == "Expected a variable or an array element in INPUT#"
+                ),
+                "{source}: {result:?}"
+            );
         }
     }
 
