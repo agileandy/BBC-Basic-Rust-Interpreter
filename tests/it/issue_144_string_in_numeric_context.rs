@@ -104,14 +104,10 @@ fn test_string_variable_gets_number_gives_type_mismatch() {
     assert_eq!(result, type_mismatch_at_line_10());
 }
 
-/// D3: the string evaluator does not know the numeric built-in names. This
-/// error is unchanged by issue #144.
+/// Issue #144 did not change this error. Issue #146 made it Type mismatch.
 #[test]
-fn test_string_variable_gets_numeric_function_keeps_its_error() {
+fn test_string_variable_gets_numeric_function_gives_type_mismatch() {
     let (result, _) = run(&["10 A$ = SIN(1)", "20 END"]);
 
-    assert_eq!(
-        result,
-        Err("Syntax error at line 10: Unknown string function: SIN".to_string())
-    );
+    assert_eq!(result, type_mismatch_at_line_10());
 }
