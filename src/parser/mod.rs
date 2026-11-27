@@ -3222,6 +3222,18 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
     Ok(expr)
 }
 
+/// The built-in functions of one value. With no bracket, each one takes the
+/// next factor as its value: `SIN X + 1` is `(SIN X) + 1` (issue 143).
+const ONE_VALUE_FUNCTIONS: &[&str] = &[
+    "ABS", "ACS", "ADVAL", "ASC", "ASN", "ATN", "CHR$", "COS", "DEG", "EXP", "INKEY", "INKEY$",
+    "INT", "LEN", "LN", "LOG", "OPENIN", "OPENOUT", "OPENUP", "RAD", "SGN", "SIN", "SQR", "STR$",
+    "STR$~", "TAN", "VAL",
+];
+
+/// The built-in functions of 2 or more values. Each one needs a bracket.
+const TWO_OR_MORE_VALUE_FUNCTIONS: &[&str] =
+    &["INSTR", "LEFT$", "MID$", "POINT", "RIGHT$", "STRING$"];
+
 /// Parse an operand (literal, variable, function call, or parenthesized expression)
 fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
     if *pos >= tokens.len() {
@@ -3375,17 +3387,6 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                 });
             }
 
-            // OPENIN, OPENOUT and OPENUP with no bracket take the next factor.
-            if matches!(keyword.as_str(), "OPENIN" | "OPENOUT" | "OPENUP")
-                && !matches!(tokens.get(*pos), Some(Token::Separator('(')))
-            {
-                let filename = parse_primary(tokens, pos)?;
-                return Ok(Expression::FunctionCall {
-                    name: keyword,
-                    args: vec![filename],
-                });
-            }
-
             // FN name: a call to a user-defined function. The name follows the
             // keyword, and the call keeps the FN prefix.
             let mut is_user_function = false;
@@ -3454,6 +3455,18 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                 Ok(Expression::FunctionCall {
                     name: keyword,
                     args: Vec::new(),
+                })
+            } else if ONE_VALUE_FUNCTIONS.contains(&keyword.as_str()) {
+                // A function of one value with no bracket takes the next factor
+                let argument = parse_primary(tokens, pos)?;
+                Ok(Expression::FunctionCall {
+                    name: keyword,
+                    args: vec![argument],
+                })
+            } else if TWO_OR_MORE_VALUE_FUNCTIONS.contains(&keyword.as_str()) {
+                Err(BBCBasicError::SyntaxError {
+                    message: format!("Expected '(' after {}", keyword),
+                    line: None,
                 })
             } else {
                 // It's a constant or keyword used as value
@@ -3632,6 +3645,75 @@ mod tests {
                 other => panic!("{source} parsed as {other:?}"),
             }
         }
+    }
+
+    /// A call of a built-in function with one value.
+    fn call(name: &str, argument: Expression) -> Expression {
+        Expression::FunctionCall {
+            name: name.to_string(),
+            args: vec![argument],
+        }
+    }
+
+    #[test]
+    fn test_parse_function_with_no_bracket_takes_next_factor() {
+        use crate::tokenizer::tokenize;
+
+        // SIN X + 1 is (SIN X) + 1
+        let expr = parse_expression(&tokenize("SIN X + 1").unwrap().tokens).unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinaryOp {
+                left: Box::new(call("SIN", Expression::Variable("X".to_string()))),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::Integer(1)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_function_with_no_bracket_takes_unary_minus() {
+        use crate::tokenizer::tokenize;
+
+        let expr = parse_expression(&tokenize("ABS -X").unwrap().tokens).unwrap();
+        assert_eq!(
+            expr,
+            call(
+                "ABS",
+                Expression::UnaryOp {
+                    op: UnaryOperator::Minus,
+                    operand: Box::new(Expression::Variable("X".to_string())),
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_function_with_and_with_no_bracket_are_the_same() {
+        use crate::tokenizer::tokenize;
+
+        for (plain, bracket) in [
+            ("LEN A$", "LEN(A$)"),
+            ("CHR$ 65", "CHR$(65)"),
+            ("STR$~ 255", "STR$~(255)"),
+            ("LEN STR$ 12", "LEN(STR$(12))"),
+        ] {
+            let plain_expr = parse_expression(&tokenize(plain).unwrap().tokens).unwrap();
+            let bracket_expr = parse_expression(&tokenize(bracket).unwrap().tokens).unwrap();
+            assert_eq!(plain_expr, bracket_expr, "{plain}");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_of_two_values_with_no_bracket_is_error() {
+        use crate::tokenizer::tokenize;
+
+        let result = parse_expression(&tokenize("LEFT$ A$").unwrap().tokens);
+        assert!(
+            matches!(&result, Err(BBCBasicError::SyntaxError { message, .. })
+                if message == "Expected '(' after LEFT$"),
+            "{result:?}"
+        );
     }
 
     #[test]
