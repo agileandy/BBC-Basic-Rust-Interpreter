@@ -121,3 +121,4 @@ mod issue_134_endproc_closes_loops;
 mod issue_133_open_with_no_brackets;
 mod issue_136_string_result_in_expression;
 mod issue_132_typed_line_number_range;
+mod issue_135_return_in_function_body;
