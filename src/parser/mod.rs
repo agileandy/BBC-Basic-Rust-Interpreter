@@ -451,6 +451,14 @@ fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<St
     let mut statements = Vec::new();
     let mut rest = tokens;
     loop {
+        // A statement can follow REPEAT with no colon, as in REPEAT UNTIL X
+        if let [Token::Keyword(0xF5), next, ..] = rest {
+            if !matches!(next, Token::Separator(':')) {
+                statements.push(Statement::Repeat);
+                rest = &rest[1..];
+                continue;
+            }
+        }
         let uses_rest_of_line = matches!(
             rest.first(),
             Some(Token::Keyword(0xF4 | 0xDC | 0xE7)) // REM, DATA, IF
@@ -493,6 +501,14 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
     if tokens.is_empty() {
         return Ok(Statement::Empty);
+    }
+
+    // END, STOP, CLS and CLEAR take no argument
+    if let [Token::Keyword(0xE0 | 0xFA | 0xDB | 0xD8), unexpected, ..] = tokens.as_slice() {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("Unexpected {:?} after statement", unexpected),
+            line: line.line_number,
+        });
     }
 
     // Check first token to determine statement type
@@ -2490,7 +2506,14 @@ pub fn parse_expression(tokens: &[Token]) -> Result<Expression> {
     }
 
     let mut pos = 0;
-    parse_expr_precedence(tokens, &mut pos, 0)
+    let expression = parse_expr_precedence(tokens, &mut pos, 0)?;
+    if let Some(token) = tokens.get(pos) {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("Unexpected {:?} after expression", token),
+            line: None,
+        });
+    }
+    Ok(expression)
 }
 
 /// Get operator precedence (higher number = higher precedence)
@@ -4878,6 +4901,24 @@ mod tests {
         for source in ["?A", "A?1 5", "!A + 1 = 5"] {
             let line = crate::tokenizer::tokenize(source).unwrap();
             assert!(parse_statement(&line).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn test_parse_expression_with_leftover_tokens_gives_error() {
+        for text in ["1 2", "1 + 2 3", "(1) (2)", "A B"] {
+            let result = parse_text(text);
+            assert!(
+                matches!(result, Err(BBCBasicError::SyntaxError { .. })),
+                "{text}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_expression_with_all_tokens_used_gives_no_error() {
+        for text in ["1 + 2", "-(1)", "A(1) + B"] {
+            assert!(parse_text(text).is_ok(), "{text}");
         }
     }
 
