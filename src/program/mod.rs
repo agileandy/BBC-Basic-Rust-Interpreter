@@ -5,6 +5,21 @@
 use crate::tokenizer::TokenizedLine;
 use std::collections::BTreeMap;
 
+/// The position of a statement in a running program: a line number and an
+/// index in the statements of that line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    pub line: u16,
+    pub index: usize,
+}
+
+impl Position {
+    /// The first statement of a line
+    pub fn line_start(line: u16) -> Self {
+        Self { line, index: 0 }
+    }
+}
+
 /// Program line storage with execution support
 #[derive(Debug, Clone)]
 pub struct ProgramStore {

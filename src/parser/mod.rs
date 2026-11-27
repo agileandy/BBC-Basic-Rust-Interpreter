@@ -335,6 +335,40 @@ pub enum ExpressionType {
     Unknown,
 }
 
+/// Parse all the statements of a line, in order.
+///
+/// A colon separates the statements. A REM, DATA or IF statement uses the
+/// rest of the line, so a colon after it is not a separator. A string is
+/// one token, so a colon in a string is never a separator.
+pub fn parse_line(line: &TokenizedLine) -> Result<Vec<Statement>> {
+    parse_statements(&line.tokens, line.line_number)
+}
+
+/// Split tokens at each statement separator and parse each part.
+fn parse_statements(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
+    let mut statements = Vec::new();
+    let mut rest = tokens;
+    loop {
+        let uses_rest_of_line = matches!(
+            rest.first(),
+            Some(Token::Keyword(0xF4 | 0xDC | 0xE7)) // REM, DATA, IF
+        );
+        let end = if uses_rest_of_line {
+            rest.len()
+        } else {
+            rest.iter()
+                .position(|t| matches!(t, Token::Separator(':')))
+                .unwrap_or(rest.len())
+        };
+        let part = TokenizedLine::new(line_number, rest[..end].to_vec());
+        statements.push(parse_statement(&part)?);
+        if end == rest.len() {
+            return Ok(statements);
+        }
+        rest = &rest[end + 1..];
+    }
+}
+
 /// Parse a tokenized line into a statement
 pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
     let tokens = &line.tokens;
@@ -2111,10 +2145,20 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
     let condition_tokens = &tokens[..then_pos];
     let condition = parse_expression(condition_tokens)?;
 
-    // Find ELSE keyword (if present)
-    let else_pos = tokens[then_pos + 1..]
-        .iter()
-        .position(|t| matches!(t, Token::Keyword(0x8B)));
+    // Find ELSE keyword (if present). A REM or DATA statement uses the rest
+    // of the line, so an ELSE after it is part of it.
+    let after_then = &tokens[then_pos + 1..];
+    let mut else_pos = None;
+    for (index, token) in after_then.iter().enumerate() {
+        let statement_start = index == 0 || matches!(after_then[index - 1], Token::Separator(':'));
+        if statement_start && matches!(token, Token::Keyword(0xF4 | 0xDC)) {
+            break;
+        }
+        if matches!(token, Token::Keyword(0x8B)) {
+            else_pos = Some(index);
+            break;
+        }
+    }
 
     let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
         // ELSE found: split then_part and else_part
@@ -2128,16 +2172,14 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         (&tokens[then_pos + 1..], None)
     };
 
-    // Parse THEN part (single statement for now)
+    // Parse THEN part: all the statements up to ELSE or the end of the line
     let then_part = if then_tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected statement after THEN".to_string(),
             line: line_number,
         });
     } else {
-        // Create a temporary TokenizedLine for parsing
-        let then_line = TokenizedLine::new(line_number, then_tokens.to_vec());
-        vec![parse_statement(&then_line)?]
+        parse_statements(then_tokens, line_number)?
     };
 
     // Parse ELSE part if present
@@ -2148,8 +2190,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
                 line: line_number,
             });
         }
-        let else_line = TokenizedLine::new(line_number, else_toks.to_vec());
-        Some(vec![parse_statement(&else_line)?])
+        Some(parse_statements(else_toks, line_number)?)
     } else {
         None
     };
