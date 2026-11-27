@@ -66,7 +66,7 @@ fn test_loadjson_gives_compact_text_of_nested_values() {
     assert_eq!(result, Ok(()));
     assert_eq!(
         output,
-        "{\"list\":[1,2,[3,4]],\"name\":\"Café \\\"Q\\\"\",\"nested\":{\"none\":null,\"ok\":true}}\n"
+        "{\"name\":\"Café \\\"Q\\\"\",\"list\":[1,2,[3,4]],\"nested\":{\"ok\":true,\"none\":null}}\n"
     );
 }
 
@@ -88,6 +88,26 @@ fn test_savejson_then_loadjson_gives_the_same_text() {
         fs::read_to_string(&file).unwrap(),
         "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"x\"\n  }\n}\n"
     );
+}
+
+#[test]
+fn test_loadjson_and_savejson_keep_the_key_order_of_the_file() {
+    let dir = temp_dir("key_order");
+    let file = write_file(
+        &dir,
+        "order.json",
+        "{\"z\": 1, \"a\": {\"y\": 2, \"b\": 3}, \"m\": 4}",
+    );
+    let (result, output) = run(&[
+        &format!("10 F$ = \"{file}\""),
+        "20 A$ = LOADJSON$(F$)",
+        "30 PRINT A$",
+        "40 SAVEJSON F$, A$",
+        "50 PRINT LOADJSON$(F$)",
+    ]);
+    assert_eq!(result, Ok(()));
+    let expected = "{\"z\":1,\"a\":{\"y\":2,\"b\":3},\"m\":4}\n";
+    assert_eq!(output, format!("{expected}{expected}"));
 }
 
 #[test]

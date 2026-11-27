@@ -7,8 +7,8 @@
 //! The parse step and the print steps are separate functions, so that other
 //! JSON functions (a value at a path, a change to a text) can use them.
 //!
-//! The objects keep their keys in alphabetical order, because `serde_json`
-//! has no `preserve_order` feature in this build.
+//! The objects keep their keys in the order of the text, because `serde_json`
+//! has the `preserve_order` feature in this build.
 
 use crate::error::BBCBasicError;
 use serde_json::Value;
