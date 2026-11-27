@@ -498,18 +498,12 @@ impl Executor {
             Expression::FunctionCall { name, .. } if name == "VAL" => {
                 Ok(self.eval_real(expr)?.to_string())
             }
-            _ => {
-                // Try to evaluate as different types
-                if let Ok(val) = self.eval_integer(expr) {
-                    Ok(val.to_string())
-                } else if let Ok(val) = self.eval_real(expr) {
-                    Ok(val.to_string())
-                } else if let Ok(val) = self.eval_string(expr) {
-                    Ok(val)
-                } else {
-                    Err(BBCBasicError::TypeMismatch)
-                }
-            }
+            // Select the evaluator by the type of the expression. Check for a
+            // string first, because `is_real_expr` is true for each user
+            // function, also for a string function such as FNx$.
+            _ if self.is_string_expr(expr) => self.eval_string(expr),
+            _ if self.is_real_expr(expr) => Ok(self.eval_real(expr)?.to_string()),
+            _ => Ok(self.eval_integer(expr)?.to_string()),
         }
     }
 
@@ -968,6 +962,16 @@ impl Executor {
 
     /// Evaluate an expression to an integer value
     pub fn eval_integer(&mut self, expr: &Expression) -> Result<i32> {
+        // An operation that can give a fraction part, such as `/`, uses real
+        // arithmetic. Only the result is truncated, as in BBC BASIC.
+        if matches!(
+            expr,
+            Expression::BinaryOp { .. } | Expression::UnaryOp { .. }
+        ) && self.is_real_expr(expr)
+        {
+            return Ok(self.eval_real(expr)? as i32);
+        }
+
         match expr {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => Ok(*val as i32),
