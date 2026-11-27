@@ -347,11 +347,12 @@ pub enum Statement {
     Move { x: Expression, y: Expression },
     /// DRAW statement - draw line to coordinates
     Draw { x: Expression, y: Expression },
-    /// CIRCLE statement - draw a circle
+    /// CIRCLE statement - draw a circle. CIRCLE FILL draws a filled circle
     Circle {
         x: Expression,
         y: Expression,
         radius: Expression,
+        filled: bool,
     },
     /// GCOL statement - set graphics color
     Gcol { mode: Expression, color: Expression },
@@ -363,14 +364,16 @@ pub enum Statement {
     Colour { colour: Expression },
     /// VDU statement - send bytes to the display
     Vdu { items: Vec<VduItem> },
-    /// ELLIPSE statement - draw an ellipse
+    /// ELLIPSE statement - draw an ellipse. ELLIPSE FILL draws a filled ellipse
     Ellipse {
         x: Expression,
         y: Expression,
         major: Expression,
         minor: Expression,
+        filled: bool,
     },
-    /// RECTANGLE statement - draw a rectangle
+    /// RECTANGLE statement - draw a rectangle outline. RECTANGLE FILL draws a
+    /// filled rectangle
     Rectangle {
         x1: Expression,
         y1: Expression,
@@ -2111,8 +2114,18 @@ fn parse_draw_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
     })
 }
 
-/// Parse CIRCLE statement: CIRCLE x, y, radius
+/// Remove the word FILL after CIRCLE, ELLIPSE or RECTANGLE. Give true and the
+/// tokens after FILL, or false and all the tokens.
+fn split_fill_word(tokens: &[Token]) -> (bool, &[Token]) {
+    match tokens.first() {
+        Some(Token::ExtendedKeyword(0xC8, 0x90)) => (true, &tokens[1..]),
+        _ => (false, tokens),
+    }
+}
+
+/// Parse CIRCLE statement: CIRCLE [FILL] x, y, radius
 fn parse_circle_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let (filled, tokens) = split_fill_word(tokens);
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "CIRCLE requires x, y, radius parameters".to_string(),
@@ -2136,6 +2149,7 @@ fn parse_circle_statement(tokens: &[Token], line_number: Option<u16>) -> Result<
         x: args[0].clone(),
         y: args[1].clone(),
         radius: args[2].clone(),
+        filled,
     })
 }
 
@@ -2166,8 +2180,9 @@ fn parse_gcol_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
     })
 }
 
-/// Parse ELLIPSE statement: ELLIPSE x, y, major, minor
+/// Parse ELLIPSE statement: ELLIPSE [FILL] x, y, major, minor
 fn parse_ellipse_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let (filled, tokens) = split_fill_word(tokens);
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "ELLIPSE requires x, y, major, minor parameters".to_string(),
@@ -2192,11 +2207,16 @@ fn parse_ellipse_statement(tokens: &[Token], line_number: Option<u16>) -> Result
         y: args[1].clone(),
         major: args[2].clone(),
         minor: args[3].clone(),
+        filled,
     })
 }
 
-/// Parse RECTANGLE statement: RECTANGLE x1, y1, width, height
+/// Parse RECTANGLE statement: RECTANGLE [FILL] x1, y1, width [, height]. The
+/// BBC BASIC for Windows manual gives: "To draw a square you can omit the
+/// fourth parameter; the height is then assumed to be the same as the width"
+/// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin7.html).
 fn parse_rectangle_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let (filled, tokens) = split_fill_word(tokens);
     if tokens.is_empty() {
         return Err(BBCBasicError::SyntaxError {
             message: "RECTANGLE requires x1, y1, width, height parameters".to_string(),
@@ -2206,10 +2226,10 @@ fn parse_rectangle_statement(tokens: &[Token], line_number: Option<u16>) -> Resu
 
     let args = parse_comma_separated_expressions(tokens, line_number)?;
 
-    if args.len() != 4 {
+    if args.len() != 3 && args.len() != 4 {
         return Err(BBCBasicError::SyntaxError {
             message: format!(
-                "RECTANGLE requires 4 parameters (x1, y1, width, height), got {}",
+                "RECTANGLE requires 3 or 4 parameters (x1, y1, width [, height]), got {}",
                 args.len()
             ),
             line: line_number,
@@ -2220,8 +2240,8 @@ fn parse_rectangle_statement(tokens: &[Token], line_number: Option<u16>) -> Resu
         x1: args[0].clone(),
         y1: args[1].clone(),
         width: args[2].clone(),
-        height: args[3].clone(),
-        filled: true, // BBC BASIC RECTANGLE draws filled rectangles
+        height: args.get(3).unwrap_or(&args[2]).clone(),
+        filled,
     })
 }
 

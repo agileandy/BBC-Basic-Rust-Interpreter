@@ -550,13 +550,24 @@ impl Executor {
             Statement::Plot { mode, x, y } => self.execute_plot(mode, x, y),
             Statement::Move { x, y } => self.execute_move(x, y),
             Statement::Draw { x, y } => self.execute_draw(x, y),
-            Statement::Circle { x, y, radius } => self.execute_circle(x, y, radius),
+            Statement::Circle {
+                x,
+                y,
+                radius,
+                filled,
+            } => self.execute_circle(x, y, radius, *filled),
             Statement::Gcol { mode, color } => self.execute_gcol(mode, color),
             Statement::Clg => self.execute_clg(),
             Statement::Mode { mode } => self.execute_mode(mode),
             Statement::Colour { colour } => self.execute_colour(colour),
             Statement::Vdu { items } => self.execute_vdu(items),
-            Statement::Ellipse { x, y, major, minor } => self.execute_ellipse(x, y, major, minor),
+            Statement::Ellipse {
+                x,
+                y,
+                major,
+                minor,
+                filled,
+            } => self.execute_ellipse(x, y, major, minor, *filled),
             Statement::Rectangle {
                 x1,
                 y1,
@@ -1599,12 +1610,13 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute CIRCLE statement - draw a circle
+    /// Execute CIRCLE statement - draw a circle, or a filled circle
     fn execute_circle(
         &mut self,
         x: &Expression,
         y: &Expression,
         radius: &Expression,
+        filled: bool,
     ) -> Result<()> {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
@@ -1612,7 +1624,11 @@ impl Executor {
 
         // A text-only screen mode has no graphics
         if self.screen_mode.has_graphics {
-            self.graphics.draw_circle(x_val, y_val, radius_val);
+            if filled {
+                self.graphics.draw_filled_circle(x_val, y_val, radius_val);
+            } else {
+                self.graphics.draw_circle(x_val, y_val, radius_val);
+            }
         }
         Ok(())
     }
@@ -1632,13 +1648,14 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute ELLIPSE statement - draw an ellipse
+    /// Execute ELLIPSE statement - draw an ellipse, or a filled ellipse
     fn execute_ellipse(
         &mut self,
         x: &Expression,
         y: &Expression,
         major: &Expression,
         minor: &Expression,
+        filled: bool,
     ) -> Result<()> {
         let x_val = self.eval_integer(x)?;
         let y_val = self.eval_integer(y)?;
@@ -1647,8 +1664,13 @@ impl Executor {
 
         // A text-only screen mode has no graphics
         if self.screen_mode.has_graphics {
-            self.graphics
-                .draw_ellipse(x_val, y_val, major_val, minor_val);
+            if filled {
+                self.graphics
+                    .draw_filled_ellipse(x_val, y_val, major_val, minor_val);
+            } else {
+                self.graphics
+                    .draw_ellipse(x_val, y_val, major_val, minor_val);
+            }
         }
         Ok(())
     }

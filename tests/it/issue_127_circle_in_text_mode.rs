@@ -106,7 +106,7 @@ fn test_circle_in_mode_1_after_mode_7_draws() {
 fn test_rectangle_in_mode_7_sets_no_pixel() {
     let output = output_of(&[
         "10 MODE 7",
-        "20 RECTANGLE 100,100,50,50",
+        "20 RECTANGLE FILL 100,100,50,50",
         "30 PRINT POINT(120,120)",
     ]);
 
@@ -117,7 +117,7 @@ fn test_rectangle_in_mode_7_sets_no_pixel() {
 fn test_rectangle_in_mode_1_draws() {
     let output = output_of(&[
         "10 MODE 1",
-        "20 RECTANGLE 100,100,50,50",
+        "20 RECTANGLE FILL 100,100,50,50",
         "30 PRINT POINT(120,120)",
     ]);
 

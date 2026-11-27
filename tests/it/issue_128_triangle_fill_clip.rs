@@ -139,7 +139,7 @@ fn test_an_ellipse_of_normal_size_on_the_screen_does_not_panic() {
 #[test]
 fn test_a_large_rectangle_returns_and_fills_the_visible_part() {
     let (result, output) = run_in_10_seconds(&[
-        "10 RECTANGLE 0, 0, 2000000000, 2000000000",
+        "10 RECTANGLE FILL 0, 0, 2000000000, 2000000000",
         "20 PRINT POINT(100, 100); POINT(1279, 1023)",
     ]);
 
