@@ -339,3 +339,45 @@ fn test_proc_and_fn_names_can_join_the_keyword() {
     assert_eq!(result, Ok(()));
     assert_eq!(output, "HELLO\nFN OK\n");
 }
+
+#[test]
+fn test_if_compares_fraction_parts_of_real_values() {
+    let (result, output) = run(&[
+        "10 X = 6.283",
+        "20 IF X > 6.28 THEN PRINT \"GREATER\" ELSE PRINT \"NOT GREATER\"",
+        "30 IF X = 6.5 THEN PRINT \"EQUAL\" ELSE PRINT \"NOT EQUAL\"",
+        "40 IF 0.5 < 0.9 THEN PRINT \"LESS\" ELSE PRINT \"NOT LESS\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "GREATER\nNOT EQUAL\nLESS\n");
+}
+
+#[test]
+fn test_until_compares_real_values() {
+    let (result, output) = run(&[
+        "10 X = 0",
+        "20 REPEAT",
+        "30 X = X + 0.25",
+        "40 PRINT \"STEP\"",
+        "50 UNTIL X >= 0.75",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "STEP\nSTEP\nSTEP\n");
+}
+
+#[test]
+fn test_comparison_mixes_integer_and_real_expressions() {
+    let (result, output) = run(&[
+        "10 A% = 7",
+        "20 IF A% / 2 > 3.2 THEN PRINT \"REAL DIVIDE\"",
+        "30 IF A% MOD 4 + 0.5 > 3.2 THEN PRINT \"MOD\"",
+        "40 IF INT(2.9) + 0.5 < 2.6 THEN PRINT \"INT\"",
+        "50 IF SQR(2) > 1.4 AND SQR(2) < 1.5 THEN PRINT \"SQR\"",
+        "60 IF A% = 7 THEN PRINT \"INTEGER\"",
+    ]);
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "REAL DIVIDE\nMOD\nINT\nSQR\nINTEGER\n");
+}

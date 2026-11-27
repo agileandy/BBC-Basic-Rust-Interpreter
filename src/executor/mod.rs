@@ -944,6 +944,33 @@ impl Executor {
             }
             Expression::BinaryOp { op, left, right } => {
                 use crate::parser::BinaryOperator;
+
+                // A comparison uses the full values, so that the fraction
+                // part of a real operand has an effect on the result.
+                // An i32 converts to an f64 with no loss.
+                if matches!(
+                    op,
+                    BinaryOperator::Equal
+                        | BinaryOperator::NotEqual
+                        | BinaryOperator::LessThan
+                        | BinaryOperator::LessThanOrEqual
+                        | BinaryOperator::GreaterThan
+                        | BinaryOperator::GreaterThanOrEqual
+                ) {
+                    let left_val = self.eval_number(left)?;
+                    let right_val = self.eval_number(right)?;
+                    let is_true = match op {
+                        BinaryOperator::Equal => left_val == right_val,
+                        BinaryOperator::NotEqual => left_val != right_val,
+                        BinaryOperator::LessThan => left_val < right_val,
+                        BinaryOperator::LessThanOrEqual => left_val <= right_val,
+                        BinaryOperator::GreaterThan => left_val > right_val,
+                        _ => left_val >= right_val,
+                    };
+                    // BBC BASIC convention: -1 for true, 0 for false
+                    return Ok(if is_true { -1 } else { 0 });
+                }
+
                 let left_val = self.eval_integer(left)?;
                 let right_val = self.eval_integer(right)?;
 
@@ -967,17 +994,6 @@ impl Executor {
                     }
                     BinaryOperator::Modulo => Ok(left_val % right_val),
                     BinaryOperator::Power => Ok(left_val.pow(right_val as u32)),
-                    // Comparison operators: return -1 for true, 0 for false (BBC BASIC convention)
-                    BinaryOperator::Equal => Ok(if left_val == right_val { -1 } else { 0 }),
-                    BinaryOperator::NotEqual => Ok(if left_val != right_val { -1 } else { 0 }),
-                    BinaryOperator::LessThan => Ok(if left_val < right_val { -1 } else { 0 }),
-                    BinaryOperator::LessThanOrEqual => {
-                        Ok(if left_val <= right_val { -1 } else { 0 })
-                    }
-                    BinaryOperator::GreaterThan => Ok(if left_val > right_val { -1 } else { 0 }),
-                    BinaryOperator::GreaterThanOrEqual => {
-                        Ok(if left_val >= right_val { -1 } else { 0 })
-                    }
                     // Logical operators
                     BinaryOperator::And => Ok(left_val & right_val),
                     BinaryOperator::Or => Ok(left_val | right_val),
@@ -1068,6 +1084,19 @@ impl Executor {
             }
             Expression::BinaryOp { op, left, right } => {
                 use crate::parser::BinaryOperator;
+
+                // The other operators give an integer result
+                if !matches!(
+                    op,
+                    BinaryOperator::Add
+                        | BinaryOperator::Subtract
+                        | BinaryOperator::Multiply
+                        | BinaryOperator::Divide
+                        | BinaryOperator::Power
+                ) {
+                    return self.eval_integer(expr).map(f64::from);
+                }
+
                 let left_val = self.eval_real(left)?;
                 let right_val = self.eval_real(right)?;
 
@@ -1095,8 +1124,64 @@ impl Executor {
                     UnaryOperator::Not => Ok(if val == 0.0 { -1.0 } else { 0.0 }),
                 }
             }
-            Expression::FunctionCall { name, args } => self.eval_function_real(name, args),
+            Expression::FunctionCall { name, args } => {
+                if self.is_real_expr(expr) {
+                    self.eval_function_real(name, args)
+                } else {
+                    self.eval_function_int(name, args).map(f64::from)
+                }
+            }
             _ => Err(BBCBasicError::TypeMismatch),
+        }
+    }
+
+    /// Evaluate a numeric expression one time, as a real value when it can
+    /// have a fraction part and as an integer value when it cannot.
+    fn eval_number(&mut self, expr: &Expression) -> Result<f64> {
+        if self.is_real_expr(expr) {
+            self.eval_real(expr)
+        } else {
+            self.eval_integer(expr).map(f64::from)
+        }
+    }
+
+    /// Tell if an expression can give a value with a fraction part.
+    fn is_real_expr(&self, expr: &Expression) -> bool {
+        use crate::parser::{BinaryOperator, UnaryOperator};
+        match expr {
+            Expression::Real(_) => true,
+            Expression::Integer(_) | Expression::String(_) => false,
+            Expression::Variable(name) => {
+                name == "PI"
+                    || (!name.ends_with('%')
+                        && !name.ends_with('$')
+                        && self.variables.get_real_var(name).is_some())
+            }
+            Expression::ArrayAccess { name, .. } => !name.ends_with('%') && !name.ends_with('$'),
+            Expression::BinaryOp { op, left, right } => match op {
+                // In BBC BASIC, `/` always gives a real value
+                BinaryOperator::Divide => true,
+                BinaryOperator::Add
+                | BinaryOperator::Subtract
+                | BinaryOperator::Multiply
+                | BinaryOperator::Power => self.is_real_expr(left) || self.is_real_expr(right),
+                _ => false,
+            },
+            Expression::UnaryOp { op, operand } => match op {
+                UnaryOperator::Plus | UnaryOperator::Minus => self.is_real_expr(operand),
+                UnaryOperator::Not => false,
+            },
+            Expression::FunctionCall { name, args } => {
+                if self.functions.contains_key(name) {
+                    return true;
+                }
+                match name.as_str() {
+                    "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP"
+                    | "LN" | "LOG" | "DEG" | "RAD" | "PI" | "RND" | "VAL" => true,
+                    "ABS" => args.first().is_some_and(|arg| self.is_real_expr(arg)),
+                    _ => false,
+                }
+            }
         }
     }
 
