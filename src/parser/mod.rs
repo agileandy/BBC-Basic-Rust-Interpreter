@@ -2492,6 +2492,18 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
 
             *pos += 1;
 
+            // BGET#, EOF#, PTR# and EXT#: the channel after '#' is the one argument.
+            if matches!(keyword.as_str(), "BGET" | "EOF" | "PTR" | "EXT")
+                && matches!(tokens.get(*pos), Some(Token::Operator('#')))
+            {
+                *pos += 1; // consume '#'
+                let channel = parse_primary(tokens, pos)?;
+                return Ok(Expression::FunctionCall {
+                    name: keyword,
+                    args: vec![channel],
+                });
+            }
+
             // FN name: a call to a user-defined function. The name follows the keyword.
             let mut is_user_function = false;
             let keyword = match tokens.get(*pos) {
@@ -3392,6 +3404,82 @@ mod tests {
             }
             _ => panic!("Expected CloseFile statement, got {:?}", stmt),
         }
+    }
+
+    /// Parse `X% = <expression>` and return the expression.
+    fn parse_assigned_expression(source: &str) -> Expression {
+        use crate::tokenizer::tokenize;
+        let line = tokenize(source).unwrap();
+        match parse_statement(&line).unwrap() {
+            Statement::Assignment { expression, .. } => expression,
+            stmt => panic!("Expected Assignment statement, got {:?}", stmt),
+        }
+    }
+
+    #[test]
+    fn test_parse_bget_with_channel() {
+        assert_eq!(
+            parse_assigned_expression("X% = BGET#G%"),
+            Expression::FunctionCall {
+                name: "BGET".to_string(),
+                args: vec![Expression::Variable("G%".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_eof_with_channel() {
+        assert_eq!(
+            parse_assigned_expression("X% = EOF#G%"),
+            Expression::FunctionCall {
+                name: "EOF".to_string(),
+                args: vec![Expression::Variable("G%".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_eof_with_bracketed_channel() {
+        assert_eq!(
+            parse_assigned_expression("X% = EOF#(G% + 0)"),
+            Expression::FunctionCall {
+                name: "EOF".to_string(),
+                args: vec![Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("G%".to_string())),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Integer(0)),
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_ptr_and_ext_with_channel() {
+        for name in ["PTR", "EXT"] {
+            assert_eq!(
+                parse_assigned_expression(&format!("X% = {}#G%", name)),
+                Expression::FunctionCall {
+                    name: name.to_string(),
+                    args: vec![Expression::Variable("G%".to_string())],
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_channel_function_binds_tighter_than_operator() {
+        // BGET#G% + 1 is (BGET#G%) + 1, because the channel is a primary.
+        assert_eq!(
+            parse_assigned_expression("X% = BGET#G% + 1"),
+            Expression::BinaryOp {
+                left: Box::new(Expression::FunctionCall {
+                    name: "BGET".to_string(),
+                    args: vec![Expression::Variable("G%".to_string())],
+                }),
+                op: BinaryOperator::Add,
+                right: Box::new(Expression::Integer(1)),
+            }
+        );
     }
 
     #[test]
