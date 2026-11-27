@@ -32,59 +32,59 @@ fn input_one(var: &str, reply: &str) -> String {
 
 #[test]
 fn test_real_input_letters_give_zero() {
-    assert_eq!(input_one("A", "abc"), "?0\n");
+    assert_eq!(input_one("A", "abc"), "?\n0\n");
 }
 
 #[test]
 fn test_real_input_leading_number_is_used() {
-    assert_eq!(input_one("A", "12abc"), "?12\n");
+    assert_eq!(input_one("A", "12abc"), "?\n12\n");
 }
 
 #[test]
 fn test_real_input_empty_reply_gives_zero() {
-    assert_eq!(input_one("A", ""), "?0\n");
+    assert_eq!(input_one("A", ""), "?\n0\n");
 }
 
 #[test]
 fn test_real_input_decimal_reply() {
-    assert_eq!(input_one("A", "3.5"), "?3.5\n");
+    assert_eq!(input_one("A", "3.5"), "?\n3.5\n");
 }
 
 #[test]
 fn test_real_input_negative_reply() {
-    assert_eq!(input_one("A", "-2"), "?-2\n");
+    assert_eq!(input_one("A", "-2"), "?\n-2\n");
 }
 
 #[test]
 fn test_integer_input_letters_give_zero() {
-    assert_eq!(input_one("A%", "abc"), "?0\n");
+    assert_eq!(input_one("A%", "abc"), "?\n0\n");
 }
 
 #[test]
 fn test_integer_input_leading_number_is_used() {
-    assert_eq!(input_one("A%", "12abc"), "?12\n");
+    assert_eq!(input_one("A%", "12abc"), "?\n12\n");
 }
 
 #[test]
 fn test_integer_input_empty_reply_gives_zero() {
-    assert_eq!(input_one("A%", ""), "?0\n");
+    assert_eq!(input_one("A%", ""), "?\n0\n");
 }
 
 #[test]
 fn test_integer_input_decimal_reply_is_truncated() {
-    assert_eq!(input_one("A%", "3.5"), "?3\n");
+    assert_eq!(input_one("A%", "3.5"), "?\n3\n");
 }
 
 #[test]
 fn test_integer_input_negative_reply() {
-    assert_eq!(input_one("A%", "-2"), "?-2\n");
+    assert_eq!(input_one("A%", "-2"), "?\n-2\n");
 }
 
 #[test]
 fn test_string_input_keeps_text() {
     let (result, output) = run_with_replies(&["10 INPUT N$", "20 PRINT N$"], &["hello world"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?hello world\n");
+    assert_eq!(output, "?\nhello world\n");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn test_input_takes_replies_in_order() {
         &["4", "5"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "??4\n5\n");
+    assert_eq!(output, "?\n?\n4\n5\n");
 }
 
 /// Run `PRINT VAL("<text>")` and return the output.

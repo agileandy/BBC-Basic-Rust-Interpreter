@@ -621,6 +621,12 @@ impl Executor {
         }
     }
 
+    /// Set the print column to 0. The runner calls this at the start of a
+    /// run, because the command loop prints its messages with no count.
+    pub fn reset_column(&mut self) {
+        self.column = 0;
+    }
+
     /// Get output buffer (for testing)
     pub fn get_output(&self) -> &str {
         &self.output
@@ -849,18 +855,23 @@ impl Executor {
         Ok(())
     }
 
-    /// Show `?` if `question_mark` is true, then read the next reply line
+    /// Show `?` if `question_mark` is true, then read the next reply line.
+    /// The Enter key of the reply moves the cursor to column 0.
     fn read_input_reply(&mut self, question_mark: bool) -> String {
         if question_mark {
             self.print_output("?");
         }
-        self.next_input_reply()
+        let reply = self.next_input_reply();
+        self.column = 0;
+        reply
     }
 
     /// Take the next INPUT reply from the queue. If the queue is empty, read stdin.
-    /// A read error or the end of input gives an empty reply.
+    /// A read error or the end of input gives an empty reply. A queued reply
+    /// adds a new line to the output, as the Enter key does on a screen.
     fn next_input_reply(&mut self) -> String {
         if let Some(reply) = self.input_queue.pop_front() {
+            self.print_output("\n");
             return reply;
         }
         #[cfg(test)]

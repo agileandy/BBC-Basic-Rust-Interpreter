@@ -33,25 +33,31 @@ fn prompt_output(input_line: &str, reply: &str) -> String {
 
 #[test]
 fn test_prompt_with_semicolon_shows_question_mark() {
-    assert_eq!(prompt_output("10 INPUT \"Name\";A$", "Bob"), "Name?[Bob]\n");
+    assert_eq!(
+        prompt_output("10 INPUT \"Name\";A$", "Bob"),
+        "Name?\n[Bob]\n"
+    );
 }
 
 #[test]
 fn test_prompt_with_comma_shows_question_mark() {
-    assert_eq!(prompt_output("10 INPUT \"Name\",A$", "Bob"), "Name?[Bob]\n");
+    assert_eq!(
+        prompt_output("10 INPUT \"Name\",A$", "Bob"),
+        "Name?\n[Bob]\n"
+    );
 }
 
 #[test]
 fn test_prompt_with_no_separator_shows_no_question_mark() {
     assert_eq!(
         prompt_output("10 INPUT \"Name: \" A$", "Bob"),
-        "Name: [Bob]\n"
+        "Name: \n[Bob]\n"
     );
 }
 
 #[test]
 fn test_variable_with_no_prompt_shows_question_mark() {
-    assert_eq!(prompt_output("10 INPUT A$", "Bob"), "?[Bob]\n");
+    assert_eq!(prompt_output("10 INPUT A$", "Bob"), "?\n[Bob]\n");
 }
 
 #[test]
@@ -61,7 +67,7 @@ fn test_prompts_can_repeat() {
         &["1", "2"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X?Y1\n2\n");
+    assert_eq!(output, "X?\nY\n1\n2\n");
 }
 
 #[test]
@@ -69,7 +75,7 @@ fn test_two_variables_with_two_replies() {
     let (result, output) =
         run_with_replies(&["10 INPUT A, B", "20 PRINT A", "30 PRINT B"], &["3", "4"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "??3\n4\n");
+    assert_eq!(output, "?\n?\n3\n4\n");
 }
 
 #[test]
@@ -77,7 +83,7 @@ fn test_two_variables_with_one_reply_that_has_a_comma() {
     let (result, output) =
         run_with_replies(&["10 INPUT A, B", "20 PRINT A", "30 PRINT B"], &["3,4"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?3\n4\n");
+    assert_eq!(output, "?\n3\n4\n");
 }
 
 #[test]
@@ -87,7 +93,7 @@ fn test_extra_values_on_a_reply_line_are_ignored() {
         &["3,9", "4"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "??3\n4\n");
+    assert_eq!(output, "?\n?\n3\n4\n");
 }
 
 #[test]
@@ -101,14 +107,14 @@ fn test_string_and_numeric_variable_in_one_statement() {
         &["Bob, 7"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "Name and age?Bob\n7\n");
+    assert_eq!(output, "Name and age?\nBob\n7\n");
 }
 
 #[test]
 fn test_input_line_with_prompt() {
     assert_eq!(
         prompt_output("10 INPUT LINE \"Text\" A$", " a, b "),
-        "Text[ a, b ]\n"
+        "Text\n[ a, b ]\n"
     );
 }
 
@@ -116,7 +122,7 @@ fn test_input_line_with_prompt() {
 fn test_input_line_with_prompt_and_comma() {
     assert_eq!(
         prompt_output("10 INPUT LINE \"Text\", A$", "a, b"),
-        "Text?[a, b]\n"
+        "Text?\n[a, b]\n"
     );
 }
 
