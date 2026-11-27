@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **434 tests** covering all major components
+- **501 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -211,18 +211,17 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **434 total tests** - All passing (219 library + 29 graphics + 186 program and binary)
+- **501 total tests** - All passing (224 library + 29 graphics + 248 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **FOR**: `NEXT J%, I%` closes only the first loop. A `STEP` of 0 runs one time or loops without end.
-- **IF**: in a nested `IF`, the first `ELSE` belongs to the outer `IF`.
-- **DATA**: a `DATA` statement that the program runs adds its values again, so a value can be read 2 times.
-- **Numbers**: hex values such as `&1F` are not supported. Integer arithmetic that overflows, such as `2147483647 + 1`, stops a debug build.
-- **Immediate mode**: a loop on a typed line with no line number does not loop.
+- **FOR**: a `STEP` of 0 runs one time or loops without end.
+- **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. Hex output (`PRINT ~X`) is not supported.
+- **Operators**: the characters `~ ? ! # @ |` are ignored, so `@%` and the `?` and `!` memory operators do not work.
+- **Immediate mode**: a loop on a typed line with no line number does not loop, and a nested `IF` uses an older `ELSE` rule.
 
 ### Non-Standard Extensions
 
