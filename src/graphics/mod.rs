@@ -92,8 +92,10 @@ pub struct GraphicsSystem {
     width: usize,
     /// Canvas height in pixels
     height: usize,
-    /// Current graphics cursor position
+    /// Current graphics cursor position (the last point)
     current_pos: Point,
+    /// The point before the last point (PLOT 80 to 87 use it for a triangle)
+    previous_pos: Point,
     /// Graphics origin offset
     origin: Point,
     /// Current foreground color (0-255, though we only use on/off for now)
@@ -117,6 +119,7 @@ impl GraphicsSystem {
             width,
             height,
             current_pos: Point { x: 0, y: 0 },
+            previous_pos: Point { x: 0, y: 0 },
             origin: Point { x: 0, y: 0 },
             foreground_color: 255, // White
             color_mode: 0,         // Set mode
@@ -136,6 +139,7 @@ impl GraphicsSystem {
     pub fn reset_for_mode(&mut self, mode: &ScreenMode) {
         self.clear();
         self.current_pos = Point { x: 0, y: 0 };
+        self.previous_pos = Point { x: 0, y: 0 };
         self.origin = Point { x: 0, y: 0 };
         self.foreground_color = mode.colours - 1;
         self.color_mode = 0;
@@ -193,6 +197,12 @@ impl GraphicsSystem {
 
     /// Move graphics cursor without drawing (MOVE or PLOT 4)
     pub fn move_to(&mut self, x: i32, y: i32) {
+        self.set_last_point(x, y);
+    }
+
+    /// Make x, y the last point, and the old last point the point before it
+    fn set_last_point(&mut self, x: i32, y: i32) {
+        self.previous_pos = self.current_pos;
         self.current_pos = Point { x, y };
     }
 
@@ -205,7 +215,7 @@ impl GraphicsSystem {
     /// Draw a line from current position to target (DRAW or PLOT 5)
     pub fn draw_line_to(&mut self, x: i32, y: i32) {
         self.draw_line(self.current_pos.x, self.current_pos.y, x, y);
-        self.current_pos = Point { x, y };
+        self.set_last_point(x, y);
     }
 
     /// Draw a line relative to current position
@@ -244,45 +254,41 @@ impl GraphicsSystem {
         }
     }
 
-    /// Plot a point with specified plot mode
+    /// Plot with a BBC BASIC PLOT mode
     pub fn plot(&mut self, mode: u8, x: i32, y: i32) {
-        // BBC BASIC plot modes:
-        // 0-3: Move cursor (relative to different points)
-        // 4-7: Line drawing
-        // 64-127: Point plotting
-        // 128-191: Triangles
-        // 192-255: Circles/arcs
-
-        let relative = (mode & 0x04) != 0; // Bit 2 determines relative mode
-        let (target_x, target_y) = if relative {
-            (self.current_pos.x + x, self.current_pos.y + y)
-        } else {
+        // Each group of 8 modes has the same rule for bit 2: set is absolute
+        // and clear is relative to the last point. The low 2 bits select the
+        // action: 0 moves, 1 draws in the foreground colour, 2 and 3 draw in
+        // the inverse and background colours. Those 2 colours are not
+        // modelled, so the line and triangle groups only move for 2 and 3.
+        // The point group (64-71) sets the point for each of its 8 modes.
+        let absolute = (mode & 0x04) != 0;
+        let (target_x, target_y) = if absolute {
             (x, y)
+        } else {
+            (self.current_pos.x + x, self.current_pos.y + y)
         };
+        let draws = (mode & 0x03) == 1;
 
         match mode & 0xF8 {
-            // 0-7: Move or draw a line. 0-3 are relative to the cursor and
-            // 4-7 are absolute (bit 2). 1 and 5 draw in the foreground colour.
-            // The other colours are not modelled, so 2, 3, 6 and 7 only move.
-            0x00 => {
-                let (line_x, line_y) = if (mode & 0x04) == 0 {
-                    (self.current_pos.x + x, self.current_pos.y + y)
-                } else {
-                    (x, y)
-                };
-                if (mode & 0x03) == 1 {
-                    self.draw_line_to(line_x, line_y);
-                } else {
-                    self.move_to(line_x, line_y);
-                }
+            // 0-7: Move or draw a line
+            0x00 if draws => {
+                self.draw_line(self.current_pos.x, self.current_pos.y, target_x, target_y);
             }
             // 64-71: Plot point
-            _ if (64..=71).contains(&mode) => {
+            0x40 => {
                 self.set_pixel(target_x, target_y);
-                self.current_pos = Point {
-                    x: target_x,
-                    y: target_y,
-                };
+            }
+            // 80-87: Filled triangle with the 2 last points and the target
+            0x50 if draws => {
+                self.fill_triangle(
+                    self.previous_pos.x,
+                    self.previous_pos.y,
+                    self.current_pos.x,
+                    self.current_pos.y,
+                    target_x,
+                    target_y,
+                );
             }
             // 128-191: Filled triangle
             _ if (128..=191).contains(&mode) => {
@@ -291,15 +297,13 @@ impl GraphicsSystem {
                 // - Second PLOT draws triangle from corner -> current -> target
                 if let Some(corner) = self.triangle_corner {
                     // Second PLOT: draw the triangle
-                    let filled = true; // All triangle modes are filled
-                    self.draw_triangle(
+                    self.fill_triangle(
                         corner.x,
                         corner.y,
                         self.current_pos.x,
                         self.current_pos.y,
                         target_x,
                         target_y,
-                        filled,
                     );
                     // Reset triangle corner after drawing
                     self.triangle_corner = None;
@@ -307,20 +311,11 @@ impl GraphicsSystem {
                     // First PLOT: store current position as triangle corner
                     self.triangle_corner = Some(self.current_pos);
                 }
-                // Update current position to target
-                self.current_pos = Point {
-                    x: target_x,
-                    y: target_y,
-                };
             }
             // Default: just move cursor
-            _ => {
-                self.current_pos = Point {
-                    x: target_x,
-                    y: target_y,
-                };
-            }
+            _ => {}
         }
+        self.set_last_point(target_x, target_y);
     }
 
     /// Draw a circle using midpoint circle algorithm
