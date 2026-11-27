@@ -194,8 +194,9 @@ pub struct Executor {
     graphics: GraphicsSystem,
     // Control flow stack for GOSUB/RETURN
     return_stack: Vec<Position>,
-    // FOR loop state: (variable, end_value, step_value, FOR position)
-    for_loops: Vec<(String, i32, i32, Position)>,
+    // FOR loop state: (variable, end_value, step_value, FOR position).
+    // An integer loop (`%` variable) holds whole values, which f64 holds with no loss.
+    for_loops: Vec<(String, f64, f64, Position)>,
     // REPEAT loop stack: stores the positions of REPEAT statements
     repeat_stack: Vec<Position>,
     // WHILE loop stack: stores the positions of WHILE statements
@@ -594,18 +595,28 @@ impl Executor {
         end: &Expression,
         step: Option<&Expression>,
     ) -> Result<()> {
-        // Evaluate start, end, and step values
-        let start_val = self.eval_integer(start)?;
-        let end_val = self.eval_integer(end)?;
-        let step_val = if let Some(step_expr) = step {
-            self.eval_integer(step_expr)?
+        // A `%` loop variable is an integer loop: the values are truncated.
+        // Any other loop variable is a real loop: the values keep their fraction parts.
+        let (end_val, step_val) = if variable.ends_with('%') {
+            let start_val = self.eval_integer(start)?;
+            let end_val = self.eval_integer(end)?;
+            let step_val = match step {
+                Some(step_expr) => self.eval_integer(step_expr)?,
+                None => 1,
+            };
+            self.variables
+                .set_integer_var(variable.to_string(), start_val);
+            (f64::from(end_val), f64::from(step_val))
         } else {
-            1 // Default step is 1
+            let start_val = self.eval_number(start)?;
+            let end_val = self.eval_number(end)?;
+            let step_val = match step {
+                Some(step_expr) => self.eval_number(step_expr)?,
+                None => 1.0,
+            };
+            self.variables.set_real_var(variable.to_string(), start_val);
+            (end_val, step_val)
         };
-
-        // Set loop variable to start value
-        self.variables
-            .set_integer_var(variable.to_string(), start_val);
 
         // Store loop state: (variable, end_value, step_value, FOR position)
         // The run loop sets the FOR position (set_for_loop_line)
@@ -641,18 +652,29 @@ impl Executor {
 
         let (_, end_val, step_val, _) = self.for_loops[loop_index];
 
-        // Get current loop variable value
-        let current_val = self
-            .variables
-            .get_integer_var(&var_name)
-            .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
-
         // Increment the loop variable
-        let next_val = current_val + step_val;
-        self.variables.set_integer_var(var_name.clone(), next_val);
+        let next_val = if var_name.ends_with('%') {
+            let current_val = self
+                .variables
+                .get_integer_var(&var_name)
+                .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
+            // The step of an integer loop is a whole value
+            let next_val = current_val + step_val as i32;
+            self.variables.set_integer_var(var_name.clone(), next_val);
+            f64::from(next_val)
+        } else {
+            let current_val = self
+                .variables
+                .get_real_var(&var_name)
+                .or_else(|| self.variables.get_integer_var(&var_name).map(f64::from))
+                .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
+            let next_val = current_val + step_val;
+            self.variables.set_real_var(var_name.clone(), next_val);
+            next_val
+        };
 
-        // Check if loop is complete
-        let loop_complete = if step_val > 0 {
+        // Check if loop is complete. A step of 0 uses the test for a negative step.
+        let loop_complete = if step_val > 0.0 {
             next_val > end_val
         } else {
             next_val < end_val
@@ -3136,8 +3158,8 @@ mod tests {
         // Loop should be on the stack
         assert_eq!(executor.for_loops.len(), 1);
         assert_eq!(executor.for_loops[0].0, "I%");
-        assert_eq!(executor.for_loops[0].1, 10); // end value
-        assert_eq!(executor.for_loops[0].2, 1); // step value
+        assert_eq!(executor.for_loops[0].1, 10.0); // end value
+        assert_eq!(executor.for_loops[0].2, 1.0); // step value
     }
 
     #[test]
@@ -3158,7 +3180,7 @@ mod tests {
 
         // Loop should be on the stack with correct step
         assert_eq!(executor.for_loops.len(), 1);
-        assert_eq!(executor.for_loops[0].2, -1); // step value
+        assert_eq!(executor.for_loops[0].2, -1.0); // step value
     }
 
     #[test]
