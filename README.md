@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **642 tests** covering all major components
+- **795 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -210,16 +210,18 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **642 total tests** - All passing (256 library + 29 graphics + 357 program and binary)
+- **795 total tests** - All passing (307 library + 29 graphics + 459 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. Hex output (`PRINT ~X`) is not supported.
-- **Memory**: the `?`, `!` and `$` memory operators and the `@%` print format variable are not supported. They give an "Unknown character" error.
-- **Editing**: a line number typed alone does not delete the line.
+- **Operators**: `OR` does not work, and `EOR` acts as `OR` (issue #80).
+- **Keywords**: a keyword matches in any letter case, so a lower-case variable name such as `count`, `time` or `to` gives an error.
+- **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic.
+- **Memory**: the `?`, `!` and `$` memory operators and the `@%` print format variable are not supported.
+- **Functions**: `RND`, `COUNT`, `POS` and `VPOS` with no bracket are not supported. `GET`, `GET$`, `INKEY` and `INKEY$` are not implemented.
 - **Immediate mode**: a loop typed on more than one line with no line numbers does not work. A typed line is one unit.
 - **Errors**: an error message shows an internal name, such as `DivisionByZero`, not the BBC BASIC text.
 
