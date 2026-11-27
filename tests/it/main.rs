@@ -11,6 +11,7 @@ mod issue_102_json_load_save;
 mod issue_105_openin_and_openup;
 mod issue_106_directory_functions;
 mod issue_108_local_proc_parameters;
+mod issue_111_list_with_line_numbers;
 mod issue_112_extension_string_functions;
 mod issue_11_sinewave_example;
 mod issue_13_statements_on_a_line;

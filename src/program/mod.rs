@@ -97,6 +97,17 @@ impl ProgramStore {
         self.lines.iter().map(|(k, v)| (*k, v)).collect()
     }
 
+    /// The lines from `start` to `end`, the 2 numbers included (LIST n,m)
+    pub fn list_range(&self, start: u16, end: u16) -> Vec<(u16, &TokenizedLine)> {
+        if start > end {
+            return Vec::new();
+        }
+        self.lines
+            .range(start..=end)
+            .map(|(k, v)| (*k, v))
+            .collect()
+    }
+
     /// The size of the program in BBC Micro memory: for each line, 4 header
     /// bytes and the bytes of its tokens, then 2 bytes for the end marker.
     /// TOP is PAGE plus this size.
@@ -108,6 +119,26 @@ impl ProgramStore {
             .map(|line| LINE_HEADER + line.tokens.iter().map(token_size).sum::<usize>())
             .sum::<usize>()
             + END_MARKER
+    }
+}
+
+/// Parse the text after `LIST`: empty, `n`, `n,m`, `n,` or `,m`.
+/// Return the first and the last line to show, or a syntax error.
+pub fn parse_list_range(text: &str) -> Result<(u16, u16), String> {
+    let number = |part: &str, default: u16| {
+        let part = part.trim();
+        if part.is_empty() {
+            return Ok(default);
+        }
+        if !part.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("Syntax error".to_string());
+        }
+        part.parse().map_err(|_| "Syntax error".to_string())
+    };
+    match text.split_once(',') {
+        None if text.trim().is_empty() => Ok((0, u16::MAX)),
+        None => number(text, 0).map(|n| (n, n)),
+        Some((start, end)) => Ok((number(start, 0)?, number(end, u16::MAX)?)),
     }
 }
 
