@@ -137,6 +137,9 @@ pub struct GraphicsSystem {
     background_action: u8,
     /// The number of colours of the screen mode (2, 4, 8 or 16)
     colours: u8,
+    /// The count of pixel writes and clears. The IDE canvas (issue 173)
+    /// compares it to see if the canvas changed.
+    changes: u64,
 }
 
 impl GraphicsSystem {
@@ -160,6 +163,7 @@ impl GraphicsSystem {
             foreground_action: 0, // Set mode
             background_action: 0,
             colours: 2,
+            changes: 0,
         }
     }
 
@@ -174,6 +178,7 @@ impl GraphicsSystem {
             *pixel = self.apply_action(*pixel, ColourSource::Background);
         }
         self.canvas = canvas;
+        self.changes = self.changes.wrapping_add(1);
     }
 
     /// Reset the graphics for a new screen mode (MODE): set the default
@@ -236,6 +241,7 @@ impl GraphicsSystem {
     fn set_pixel(&mut self, x: i32, y: i32, source: ColourSource) {
         if let Some((cx, cy)) = self.to_canvas_coords(x, y) {
             self.canvas[cy][cx] = self.apply_action(self.canvas[cy][cx], source);
+            self.changes = self.changes.wrapping_add(1);
         }
     }
 
@@ -310,6 +316,19 @@ impl GraphicsSystem {
             .and_then(|row| row.get(x))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// The colour numbers of canvas row y, with the first row at the top.
+    /// The IDE canvas (issue 173) reads the rows to scale the picture. A row
+    /// off the canvas gives no colours.
+    pub fn canvas_row(&self, y: usize) -> &[u8] {
+        self.canvas.get(y).map_or(&[], Vec::as_slice)
+    }
+
+    /// The count of pixel writes and clears since the start. If the count
+    /// is the same at 2 times, the canvas did not change between them.
+    pub fn changes(&self) -> u64 {
+        self.changes
     }
 
     /// Move graphics cursor without drawing (MOVE or PLOT 4)

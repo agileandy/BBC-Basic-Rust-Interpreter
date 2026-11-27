@@ -5,7 +5,7 @@
 //! as the command prompt does. The IDE gives a console that sends the text
 //! to its run pane and takes the keys from it.
 
-use crate::graphics::ScreenMode;
+use crate::graphics::{GraphicsSystem, ScreenMode};
 use std::time::Duration;
 
 /// A request to stop the program. The run loop asks for it before each
@@ -46,6 +46,12 @@ pub trait Console {
     /// The text colours changed (COLOUR, VDU 17 or MODE): the logical
     /// foreground and background colours. The default does nothing.
     fn text_colours(&mut self, _foreground: u8, _background: u8) {}
+
+    /// See the graphics canvas and the screen mode at the stop check, before
+    /// each statement. A front end that shows the canvas reads it here
+    /// (issue #173). The call must be fast when the canvas did not change.
+    /// With no implementation, it does nothing.
+    fn see_graphics(&mut self, _graphics: &GraphicsSystem, _mode: ScreenMode) {}
 }
 
 /// The console of an executor, if a front end gave one.
