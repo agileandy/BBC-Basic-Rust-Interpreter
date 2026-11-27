@@ -2324,6 +2324,14 @@ impl Executor {
         self.function_body_runner = BodyRunnerSlot::default();
     }
 
+    /// Remove the multi-line functions. A typed line uses this before it
+    /// defines the functions of the stored program again. A function that
+    /// the user defined in immediate mode stays.
+    pub fn clear_multi_line_functions(&mut self) {
+        self.functions
+            .retain(|_, function| !matches!(function.body, FunctionBody::Lines(_)));
+    }
+
     /// Clear the GOSUB, FOR, REPEAT and WHILE stacks (used at the start of a
     /// run, so that a position from an earlier run is not used)
     pub fn clear_control_stacks(&mut self) {
