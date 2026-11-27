@@ -3182,26 +3182,52 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     Ok(params)
 }
 
-/// Parse IF statement
-/// Supports: IF condition THEN statement [ELSE statement]
-fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    // Find THEN keyword to split condition from then-part
-    let then_pos = tokens
-        .iter()
-        .position(|t| matches!(t, Token::Keyword(0x8C)))
-        .ok_or(BBCBasicError::SyntaxError {
-            message: "Expected THEN after IF condition".to_string(),
-            line: line_number,
-        })?;
+/// The position of the token after the condition of an IF: the first THEN,
+/// or the first keyword at bracket depth 0 that starts a statement. None if
+/// there is no such token.
+///
+/// The keywords 0xD4 to 0xFF (SOUND to OSCLI) and the BASIC V statements
+/// (0xC8 prefix) start a statement and cannot be in an expression. PTR, PAGE,
+/// TIME, LOMEM and HIMEM (0xCF to 0xD3) are also values, so they do not end
+/// the condition. A statement that is a name, such as an assignment with no
+/// LET or MKDIR, does not end the condition.
+fn if_condition_end(tokens: &[Token]) -> Option<usize> {
+    let mut depth = 0usize;
+    tokens.iter().position(|token| match token {
+        Token::Keyword(0x8C) => true,
+        Token::Separator('(') => {
+            depth += 1;
+            false
+        }
+        Token::Separator(')') => {
+            depth = depth.saturating_sub(1);
+            false
+        }
+        Token::Keyword(0xD4..=0xFF) | Token::ExtendedKeyword(0xC8, _) => depth == 0,
+        _ => false,
+    })
+}
 
-    // Parse condition (everything before THEN)
-    let condition_tokens = &tokens[..then_pos];
-    let condition = parse_expression(condition_tokens)?;
+/// Parse IF statement
+/// Supports: IF condition [THEN] statement [ELSE statement]
+fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    // The condition ends at THEN, or before a keyword that starts a
+    // statement (issue 160): THEN is optional before a statement.
+    let condition_end = if_condition_end(tokens).ok_or(BBCBasicError::SyntaxError {
+        message: "Expected THEN after IF condition".to_string(),
+        line: line_number,
+    })?;
+    let condition = parse_expression(&tokens[..condition_end])?;
+    let branch_start = if matches!(tokens[condition_end], Token::Keyword(0x8C)) {
+        condition_end + 1
+    } else {
+        condition_end
+    };
 
     // Find ELSE keyword (if present). A REM or DATA statement uses the rest
     // of the line, so an ELSE after it is part of it. A statement starts
     // after a colon or after the THEN of an inner IF.
-    let after_then = &tokens[then_pos + 1..];
+    let after_then = &tokens[branch_start..];
     let mut else_pos = None;
     for (index, token) in after_then.iter().enumerate() {
         let statement_start = index == 0
@@ -3220,14 +3246,14 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 
     let (then_tokens, else_tokens) = if let Some(else_idx) = else_pos {
         // ELSE found: split then_part and else_part
-        let absolute_else_pos = then_pos + 1 + else_idx;
+        let absolute_else_pos = branch_start + else_idx;
         (
-            &tokens[then_pos + 1..absolute_else_pos],
+            &tokens[branch_start..absolute_else_pos],
             Some(&tokens[absolute_else_pos + 1..]),
         )
     } else {
         // No ELSE: only then_part
-        (&tokens[then_pos + 1..], None)
+        (after_then, None)
     };
 
     // Nothing after THEN: a block IF. Its THEN block is on the next lines.
