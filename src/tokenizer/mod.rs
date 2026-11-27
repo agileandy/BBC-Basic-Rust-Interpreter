@@ -208,15 +208,39 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 }
             }
 
+            // An exponent is E, an optional sign and one digit or more.
+            // If not, the E starts the next token.
+            let mut lookahead = chars.clone();
+            let has_e = lookahead.next() == Some('E');
+            let sign = lookahead.next_if(|c| *c == '+' || *c == '-');
+            if has_e && lookahead.peek().is_some_and(|c| c.is_ascii_digit()) {
+                is_real = true;
+                num_str.push('E');
+                chars.next(); // consume the 'E'
+                if let Some(sign) = sign {
+                    num_str.push(sign);
+                    chars.next(); // consume the sign
+                }
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_digit() {
+                        num_str.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
             // Parse the number
             if is_real {
                 if let Ok(val) = num_str.parse::<f64>() {
                     tokens.push(Token::Real(val));
                 }
-            } else {
-                if let Ok(val) = num_str.parse::<i32>() {
-                    tokens.push(Token::Integer(val));
-                }
+            } else if let Ok(val) = num_str.parse::<i32>() {
+                tokens.push(Token::Integer(val));
+            } else if let Ok(val) = num_str.parse::<f64>() {
+                // An integer that does not fit in an i32 is a real
+                tokens.push(Token::Real(val));
             }
             continue;
         }
@@ -336,7 +360,13 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 result.push_str(&val.to_string());
             }
             Token::Real(val) => {
-                result.push_str(&val.to_string());
+                // A whole real lists with an exponent, so that it tokenizes as a real again
+                let plain = val.to_string();
+                if plain.contains('.') {
+                    result.push_str(&plain);
+                } else {
+                    result.push_str(&format!("{:E}", val));
+                }
             }
             Token::String(s) => {
                 result.push('"');
@@ -699,6 +729,75 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_exponent_literal_is_real() {
+        let result = tokenize("1E3").unwrap();
+        assert_eq!(result.tokens, vec![Token::Real(1000.0)]);
+    }
+
+    #[test]
+    fn test_tokenize_exponent_literal_with_sign() {
+        let result = tokenize("1.5E-2").unwrap();
+        assert_eq!(result.tokens, vec![Token::Real(0.015)]);
+        let result = tokenize("2E+2").unwrap();
+        assert_eq!(result.tokens, vec![Token::Real(200.0)]);
+    }
+
+    #[test]
+    fn test_tokenize_e_with_no_digits_is_identifier() {
+        let result = tokenize("1E").unwrap();
+        assert_eq!(
+            result.tokens,
+            vec![Token::Integer(1), Token::Identifier("E".to_string())]
+        );
+        let result = tokenize("1E+").unwrap();
+        assert_eq!(
+            result.tokens,
+            vec![
+                Token::Integer(1),
+                Token::Identifier("E".to_string()),
+                Token::Operator('+')
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_lines_with_e_after_number_are_unchanged() {
+        let result = tokenize("IF X = 1 ELSE PRINT 2").unwrap();
+        assert_eq!(result.tokens[3], Token::Integer(1));
+        assert_eq!(result.tokens[4], Token::Keyword(0x8B)); // ELSE
+
+        let result = tokenize("FOR I = 1 TO 2").unwrap();
+        assert_eq!(result.tokens[3], Token::Integer(1));
+        assert_eq!(result.tokens[4], Token::Keyword(0xB8)); // TO
+
+        let result = tokenize("A = 2 * E").unwrap();
+        assert_eq!(result.tokens[2], Token::Integer(2));
+        assert_eq!(result.tokens[4], Token::Identifier("E".to_string()));
+
+        let result = tokenize("PRINT 1;E").unwrap();
+        assert_eq!(
+            result.tokens[1..],
+            [
+                Token::Integer(1),
+                Token::Separator(';'),
+                Token::Identifier("E".to_string())
+            ]
+        );
+        // &1E: the tokenizer drops '&', then gives 1 and E as before
+        let result = tokenize("PRINT &1E").unwrap();
+        assert_eq!(
+            result.tokens[1..],
+            [Token::Integer(1), Token::Identifier("E".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_integer_too_large_for_i32_is_real() {
+        let result = tokenize("3000000000").unwrap();
+        assert_eq!(result.tokens, vec![Token::Real(3_000_000_000.0)]);
+    }
+
+    #[test]
     fn test_tokenize_print_keyword() {
         // RED: Test tokenizing PRINT keyword
         let result = tokenize("PRINT").unwrap();
@@ -779,6 +878,15 @@ mod tests {
         let line = TokenizedLine::new(None, vec![Token::Integer(42)]);
         let result = detokenize(&line).unwrap();
         assert_eq!(result, "42");
+    }
+
+    #[test]
+    fn test_detokenize_real_tokenizes_to_same_real() {
+        for source in ["1E3", "1.5E-2", "1E10", "1E300", "3.14159"] {
+            let tokens = tokenize(source).unwrap();
+            let listed = detokenize(&tokens).unwrap();
+            assert_eq!(tokenize(&listed).unwrap().tokens, tokens.tokens, "{listed}");
+        }
     }
 
     #[test]
