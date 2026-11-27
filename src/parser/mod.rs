@@ -1931,6 +1931,13 @@ fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
             Token::Identifier(name) => {
                 variables.push(name.clone());
                 pos += 1;
+                // An array is named NAME(); DIM keys arrays by the bare name
+                if pos + 1 < tokens.len()
+                    && is_paren(&tokens[pos], '(')
+                    && is_paren(&tokens[pos + 1], ')')
+                {
+                    pos += 2;
+                }
             }
             _ => {
                 return Err(BBCBasicError::SyntaxError {
@@ -2928,6 +2935,20 @@ mod tests {
                         vec![Expression::Integer(5), Expression::Integer(5)]
                     ),
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_local_array_uses_bare_name() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("LOCAL A%(), B, C$()").unwrap();
+        let stmt = parse_statement(&line).unwrap();
+
+        assert_eq!(
+            stmt,
+            Statement::Local {
+                variables: vec!["A%".to_string(), "B".to_string(), "C$".to_string()],
             }
         );
     }
