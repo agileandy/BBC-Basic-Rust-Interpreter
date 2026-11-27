@@ -117,8 +117,8 @@ fn main() {
         }
 
         // *CAT command (catalog files)
-        if input.trim() == "*CAT" || input.trim().eq_ignore_ascii_case("*cat") {
-            if let Err(e) = catalog_files() {
+        if let Some(directory) = cat_directory(input) {
+            if let Err(e) = catalog_files(directory) {
                 println!("Error: {}", e);
             }
             continue;
@@ -277,11 +277,40 @@ fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String
     Ok(())
 }
 
-/// Catalog all .bbas and .bas files in current directory
-fn catalog_files() -> Result<(), String> {
-    let paths = std::fs::read_dir(".").map_err(|e| format!("Failed to read directory: {}", e))?;
+/// Match `*CAT` or `*CAT <directory>` (any case). Return the directory, or "" for none.
+fn cat_directory(input: &str) -> Option<&str> {
+    let input = input.trim();
+    if !input.get(..4)?.eq_ignore_ascii_case("*cat") {
+        return None;
+    }
+    let rest = &input[4..];
+    if rest.is_empty() {
+        return Some("");
+    }
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim();
+    let rest = rest
+        .strip_prefix('"')
+        .and_then(|r| r.strip_suffix('"'))
+        .unwrap_or(rest);
+    Some(rest)
+}
 
-    println!("\nCatalog:");
+/// Catalog all .bbas and .bas files in the directory ("" = current directory)
+fn catalog_files(directory: &str) -> Result<(), String> {
+    let path = if directory.is_empty() { "." } else { directory };
+    if !std::path::Path::new(path).is_dir() {
+        return Err(format!("Directory not found: {}", path));
+    }
+    let paths = std::fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    if directory.is_empty() {
+        println!("\nCatalog:");
+    } else {
+        println!("\nCatalog: {}", directory);
+    }
     println!("{:<30} {:>10}  Modified", "Filename", "Size");
     println!("{}", "-".repeat(60));
 
@@ -352,6 +381,7 @@ fn print_help() {
     println!("  LOAD \"filename\"          - Load program from filename.bbas");
     println!("  CHAIN \"filename\"         - Load and run program");
     println!("  *CAT                     - List all .bbas and .bas files");
+    println!("  *CAT directory           - List the .bbas and .bas files in directory");
     println!();
     println!("Immediate Mode (no line numbers):");
     println!("  A% = 42                  - Execute immediately");
