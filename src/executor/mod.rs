@@ -2069,9 +2069,33 @@ impl Executor {
 
     /// Tell if an expression gives a string value.
     fn is_string_expr(&self, expr: &Expression) -> bool {
+        self.is_string_expr_guarded(expr, &mut Vec::new())
+    }
+
+    /// Tell if an expression gives a string value. `open` holds the names of
+    /// the user functions whose bodies are in the check now, so that a
+    /// function that calls itself gives "not a string" and does not loop.
+    fn is_string_expr_guarded<'a>(&'a self, expr: &Expression, open: &mut Vec<&'a str>) -> bool {
         use crate::parser::BinaryOperator;
         match expr {
             Expression::String(_) => true,
+            Expression::FunctionCall { name, .. } if !name.ends_with('$') => {
+                // The body of a single-line function has a type with no run.
+                // The type of a multi-line function result is known only after
+                // its body runs, so it is "not a string" here (a known limit).
+                match self.functions.get_key_value(name) {
+                    Some((key, func)) if !open.contains(&key.as_str()) => match &func.body {
+                        FunctionBody::Expression(body) => {
+                            open.push(key);
+                            let is_string = self.is_string_expr_guarded(body, open);
+                            open.pop();
+                            is_string
+                        }
+                        FunctionBody::Lines(_) => false,
+                    },
+                    _ => name == "STR$~",
+                }
+            }
             Expression::Variable(name)
             | Expression::ArrayAccess { name, .. }
             | Expression::FunctionCall { name, .. } => name.ends_with('$') || name == "STR$~",
@@ -2079,7 +2103,9 @@ impl Executor {
                 op: BinaryOperator::Add | BinaryOperator::StringConcat,
                 left,
                 right,
-            } => self.is_string_expr(left) || self.is_string_expr(right),
+            } => {
+                self.is_string_expr_guarded(left, open) || self.is_string_expr_guarded(right, open)
+            }
             _ => false,
         }
     }
