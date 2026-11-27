@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **257 tests** covering all major components
+- **260 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -211,7 +211,7 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **257 total tests** - All passing (203 library + 29 graphics + 25 program)
+- **260 total tests** - All passing (203 library + 29 graphics + 28 program)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
@@ -221,7 +221,6 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 - **Multi-line functions**: `RETURN` with a value does nothing. Only single-line `DEF FN` works.
 - **LOCAL**: an array is not restored when a procedure ends.
 - **INPUT**: a reply that is not a number leaves a numeric variable unchanged, with no error.
-- **Comparisons**: `IF` compares the integer parts of real values, so `IF X > 6.28` is false for X = 6.283.
 - **Trigonometry**: SIN, COS and TAN take degrees and ATN gives degrees. BBC BASIC uses radians.
 
 ### Non-Standard Extensions
