@@ -2179,7 +2179,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
             line: line_number,
         });
     } else {
-        parse_statements(then_tokens, line_number)?
+        parse_if_branch(then_tokens, line_number)?
     };
 
     // Parse ELSE part if present
@@ -2190,7 +2190,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
                 line: line_number,
             });
         }
-        Some(parse_statements(else_toks, line_number)?)
+        Some(parse_if_branch(else_toks, line_number)?)
     } else {
         None
     };
@@ -2200,6 +2200,18 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
         then_part,
         else_part,
     })
+}
+
+/// Parse a THEN or an ELSE branch. A line number at the start of the branch
+/// is a short form of GOTO. The statements after it can never run.
+fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
+    match tokens.first() {
+        Some(Token::Integer(n)) => Ok(vec![Statement::Goto {
+            line_number: *n as u16,
+        }]),
+        Some(Token::LineNumber(n)) => Ok(vec![Statement::Goto { line_number: *n }]),
+        _ => parse_statements(tokens, line_number),
+    }
 }
 
 /// Parse a sequence of tokens into an expression
@@ -3083,6 +3095,68 @@ mod tests {
                 else_part: None,
             }
         );
+    }
+
+    /// Parse one IF line and return its THEN part and its ELSE part.
+    fn if_branches(source: &str) -> (Vec<Statement>, Option<Vec<Statement>>) {
+        use crate::tokenizer::tokenize;
+        match parse_statement(&tokenize(source).unwrap()).unwrap() {
+            Statement::If {
+                then_part,
+                else_part,
+                ..
+            } => (then_part, else_part),
+            other => panic!("Expected IF statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_is_goto() {
+        let (then_part, else_part) = if_branches("IF X THEN 30");
+
+        assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
+        assert_eq!(else_part, None);
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_else_line_number() {
+        let (then_part, else_part) = if_branches("IF X THEN 30 ELSE 50");
+
+        assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
+        assert_eq!(else_part, Some(vec![Statement::Goto { line_number: 50 }]));
+    }
+
+    #[test]
+    fn test_parse_if_then_print_else_line_number() {
+        let (then_part, else_part) = if_branches(r#"IF X THEN PRINT "A" ELSE 50"#);
+
+        assert_eq!(
+            then_part,
+            vec![Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("A".to_string()))],
+            }]
+        );
+        assert_eq!(else_part, Some(vec![Statement::Goto { line_number: 50 }]));
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_else_print() {
+        let (then_part, else_part) = if_branches(r#"IF X THEN 30 ELSE PRINT "B""#);
+
+        assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
+        assert_eq!(
+            else_part,
+            Some(vec![Statement::Print {
+                items: vec![PrintItem::Expression(Expression::String("B".to_string()))],
+            }])
+        );
+    }
+
+    #[test]
+    fn test_parse_if_then_line_number_then_more_statements_is_goto() {
+        let (then_part, _) = if_branches(r#"IF X THEN 30 : PRINT "A""#);
+
+        assert_eq!(then_part, vec![Statement::Goto { line_number: 30 }]);
     }
 
     #[test]
