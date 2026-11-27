@@ -164,3 +164,4 @@ mod issue_182_plot_colour_actions;
 mod issue_172_ide_files_mode;
 mod issue_184_fill_moves_last_point;
 mod issue_183_outline_pixels_one_time;
+mod issue_167_keyword_short_forms;

@@ -380,6 +380,14 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 }
             }
 
+            // A short form is letters and a full stop, such as P. for PRINT
+            if chars.peek() == Some(&'.') {
+                if let Some(full) = short_form_keyword(&word) {
+                    chars.next(); // consume the '.'
+                    word = full.to_string();
+                }
+            }
+
             // A keyword matches only in upper case, as in BBC BASIC.
             // A word in another letter case is a name.
             if let Some(&token_byte) = keyword_map.get(&word) {
@@ -803,6 +811,119 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     // finds them by their place on the line, so that a variable with one of
     // these names still works (issue #107).
 ];
+
+/// The minimum short form of each keyword and the keyword. The source is the
+/// BBC Microcomputer System User Guide, chapter 47 "Minimum abbreviations",
+/// pages 483 to 484. A keyword that the guide shows with no full stop, such
+/// as ABS or END, has no short form. The extension words have no short form.
+const SHORT_FORMS: &[(&str, &str)] = &[
+    ("AD", "ADVAL"),
+    ("A", "AND"),
+    ("AU", "AUTO"),
+    ("B", "BGET"),
+    ("BP", "BPUT"),
+    ("CA", "CALL"),
+    ("CH", "CHAIN"),
+    ("CHR", "CHR$"),
+    ("CL", "CLEAR"),
+    ("CLO", "CLOSE"),
+    ("C", "COLOUR"),
+    ("COU", "COUNT"),
+    ("D", "DATA"),
+    ("DEL", "DELETE"),
+    ("DR", "DRAW"),
+    ("EL", "ELSE"),
+    ("E", "ENDPROC"),
+    ("ENV", "ENVELOPE"),
+    ("ERR", "ERROR"),
+    ("EV", "EVAL"),
+    ("FA", "FALSE"),
+    ("F", "FOR"),
+    ("GC", "GCOL"),
+    ("GE", "GET$"),
+    ("GOS", "GOSUB"),
+    ("G", "GOTO"),
+    ("H", "HIMEM"),
+    ("INK", "INKEY$"),
+    ("I", "INPUT"),
+    ("INS", "INSTR"),
+    ("LE", "LEFT$"),
+    ("LIN", "LINE"),
+    ("L", "LIST"),
+    ("LO", "LOAD"),
+    ("LOC", "LOCAL"),
+    ("LOM", "LOMEM"),
+    ("M", "MID$"),
+    ("MO", "MODE"),
+    ("MOV", "MOVE"),
+    ("N", "NEXT"),
+    ("O", "OLD"),
+    ("OP", "OPENIN"),
+    ("OPENO", "OPENOUT"),
+    ("OS", "OSCLI"),
+    ("PA", "PAGE"),
+    ("PL", "PLOT"),
+    ("PO", "POINT"),
+    ("P", "PRINT"),
+    ("PRO", "PROC"),
+    ("PT", "PTR"),
+    ("REA", "READ"),
+    ("REN", "RENUMBER"),
+    ("REP", "REPEAT"),
+    ("REPO", "REPORT"),
+    ("RES", "RESTORE"),
+    ("R", "RETURN"),
+    ("RI", "RIGHT$"),
+    ("SA", "SAVE"),
+    ("SO", "SOUND"),
+    ("S", "STEP"),
+    ("STO", "STOP"),
+    ("STR", "STR$"),
+    ("STRI", "STRING$"),
+    ("T", "TAN"),
+    ("TH", "THEN"),
+    ("TI", "TIME"),
+    ("TR", "TRACE"),
+    ("U", "UNTIL"),
+    ("V", "VDU"),
+    ("VP", "VPOS"),
+    ("W", "WIDTH"),
+];
+
+/// Give the keyword of a short form, from the upper-case letters before the
+/// full stop. The letters start with the minimum short form, and they are the
+/// start of the keyword. A full keyword is not a short form, so `PRINT.5` is
+/// PRINT .5, as in BBC BASIC. If 2 keywords match, the shorter minimum wins,
+/// as in the keyword order of the BBC BASIC ROM: END. is ENDPROC (issue 167).
+fn short_form_keyword(letters: &str) -> Option<&'static str> {
+    if letters.is_empty() || !letters.bytes().all(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    SHORT_FORMS
+        .iter()
+        .filter(|(minimum, keyword)| {
+            letters.starts_with(minimum)
+                && keyword.starts_with(letters)
+                && keyword.len() > letters.len()
+        })
+        .min_by_key(|(minimum, _)| minimum.len())
+        .map(|&(_, keyword)| keyword)
+}
+
+/// If a typed line starts with a short form, give the line with the full
+/// keyword, so that a command at the prompt, such as `L.`, is the full word.
+/// Give other lines unchanged.
+pub fn expand_short_form(line: &str) -> String {
+    let end = line
+        .find(|c: char| !c.is_ascii_uppercase())
+        .unwrap_or(line.len());
+    match short_form_keyword(&line[..end]) {
+        Some(keyword) if line[end..].starts_with('.') => {
+            format!("{}{}", keyword, &line[end + 1..])
+        }
+        _ => line.to_string(),
+    }
+}
 
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
 /// The keyword must be in upper case, as in BBC BASIC.
@@ -1464,8 +1585,9 @@ mod tests {
 
     #[test]
     fn test_decimal_point_before_a_letter_is_not_a_number() {
+        // No keyword starts with X, so `X.` is not a short form (issue 167)
         assert!(matches!(
-            tokenize("10 PRINT A.B"),
+            tokenize("10 PRINT X.B"),
             Err(BBCBasicError::SyntaxError { message, .. }) if message == "Unknown character '.'"
         ));
     }
@@ -1761,5 +1883,191 @@ mod tests {
     fn test_detokenize_puts_space_on_both_sides_of_minus_after_bracket() {
         assert_round_trip("10 PRINT LEN(\"ABC\")-1", "10 PRINT LEN(\"ABC\") - 1");
         assert_round_trip("10 Y = A(1)-B", "10 Y = A(1) - B");
+    }
+
+    /// The minimum short forms of the BBC Microcomputer System User Guide,
+    /// chapter 47 "Minimum abbreviations", pages 483 to 484 (issue 167).
+    const GUIDE_SHORT_FORMS: &[(&str, &str)] = &[
+        ("AD.", "ADVAL"),
+        ("A.", "AND"),
+        ("AU.", "AUTO"),
+        ("B.", "BGET"),
+        ("BP.", "BPUT"),
+        ("CA.", "CALL"),
+        ("CH.", "CHAIN"),
+        ("CHR.", "CHR$"),
+        ("CL.", "CLEAR"),
+        ("CLO.", "CLOSE"),
+        ("C.", "COLOUR"),
+        ("COU.", "COUNT"),
+        ("D.", "DATA"),
+        ("DEL.", "DELETE"),
+        ("DR.", "DRAW"),
+        ("EL.", "ELSE"),
+        ("E.", "ENDPROC"),
+        ("ENV.", "ENVELOPE"),
+        ("ERR.", "ERROR"),
+        ("EV.", "EVAL"),
+        ("FA.", "FALSE"),
+        ("F.", "FOR"),
+        ("GC.", "GCOL"),
+        ("GE.", "GET$"),
+        ("GOS.", "GOSUB"),
+        ("G.", "GOTO"),
+        ("H.", "HIMEM"),
+        ("INK.", "INKEY$"),
+        ("I.", "INPUT"),
+        ("INS.", "INSTR"),
+        ("LE.", "LEFT$"),
+        ("LIN.", "LINE"),
+        ("L.", "LIST"),
+        ("LO.", "LOAD"),
+        ("LOC.", "LOCAL"),
+        ("LOM.", "LOMEM"),
+        ("M.", "MID$"),
+        ("MO.", "MODE"),
+        ("MOV.", "MOVE"),
+        ("N.", "NEXT"),
+        ("O.", "OLD"),
+        ("OP.", "OPENIN"),
+        ("OPENO.", "OPENOUT"),
+        ("OS.", "OSCLI"),
+        ("PA.", "PAGE"),
+        ("PL.", "PLOT"),
+        ("PO.", "POINT"),
+        ("P.", "PRINT"),
+        ("PRO.", "PROC"),
+        ("PT.", "PTR"),
+        ("REA.", "READ"),
+        ("REN.", "RENUMBER"),
+        ("REP.", "REPEAT"),
+        ("REPO.", "REPORT"),
+        ("RES.", "RESTORE"),
+        ("R.", "RETURN"),
+        ("RI.", "RIGHT$"),
+        ("SA.", "SAVE"),
+        ("SO.", "SOUND"),
+        ("S.", "STEP"),
+        ("STO.", "STOP"),
+        ("STR.", "STR$"),
+        ("STRI.", "STRING$"),
+        ("T.", "TAN"),
+        ("TH.", "THEN"),
+        ("TI.", "TIME"),
+        ("TR.", "TRACE"),
+        ("U.", "UNTIL"),
+        ("V.", "VDU"),
+        ("VP.", "VPOS"),
+        ("W.", "WIDTH"),
+    ];
+
+    #[test]
+    fn test_each_short_form_of_the_guide_gives_its_keyword() {
+        for &(short, full) in GUIDE_SHORT_FORMS {
+            assert_eq!(
+                tokens_of(short),
+                tokens_of(full),
+                "{short} is the short form of {full}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_short_form_longer_than_the_minimum_gives_the_keyword() {
+        for (short, full) in [
+            ("PR.", "PRINT"),
+            ("PRI.", "PRINT"),
+            ("PRIN.", "PRINT"),
+            ("GO.", "GOTO"),
+            ("REPE.", "REPEAT"),
+            ("OPEN.", "OPENIN"),
+        ] {
+            assert_eq!(tokens_of(short), tokens_of(full), "{short} gives {full}");
+        }
+    }
+
+    #[test]
+    fn test_short_form_of_the_shorter_minimum_wins() {
+        // ENDPROC has the minimum E., and END has no short form
+        assert_eq!(tokens_of("END."), tokens_of("ENDPROC"));
+        // ERR has no short form, so ERR. is ERROR
+        assert_eq!(tokens_of("ERR."), tokens_of("ERROR"));
+        // INKEY and GET have no short form, so INKEY. and GET. are the $ forms
+        assert_eq!(tokens_of("INKEY."), tokens_of("INKEY$"));
+        assert_eq!(tokens_of("GET."), tokens_of("GET$"));
+    }
+
+    #[test]
+    fn test_full_keyword_and_full_stop_is_not_a_short_form() {
+        // The full stop after a full keyword starts a number, as before
+        assert_eq!(tokens_of("PRINT.5"), tokens_of("PRINT .5"));
+        assert_eq!(expand_short_form("PRINT.5"), "PRINT.5");
+    }
+
+    #[test]
+    fn test_short_form_in_a_statement_gives_the_keyword() {
+        assert_eq!(
+            tokens_of("P.\"A\";1.5"),
+            vec![
+                Token::Keyword(0xF1),
+                Token::String("A".to_string()),
+                Token::Separator(';'),
+                Token::Real(1.5),
+            ]
+        );
+        assert_eq!(tokens_of("P. .5"), tokens_of("PRINT .5"));
+        assert_eq!(
+            tokens_of("F.I=1 TO 3:P.I:N."),
+            tokens_of("FOR I=1 TO 3:PRINT I:NEXT")
+        );
+        assert_round_trip("10 P.\"HI\"", "10 PRINT \"HI\"");
+    }
+
+    #[test]
+    fn test_letters_that_are_not_a_short_form_give_the_error_of_today() {
+        for text in ["X.", "PRINT X.", "p.", "PRINTX.", "ER.", "CLG."] {
+            assert!(
+                matches!(
+                    tokenize(text),
+                    Err(BBCBasicError::SyntaxError { ref message, .. })
+                        if message == "Unknown character '.'"
+                ),
+                "{text} is not a short form"
+            );
+        }
+    }
+
+    #[test]
+    fn test_full_stop_in_string_rem_and_data_is_not_a_short_form() {
+        assert_eq!(
+            tokens_of("PRINT \"P.\""),
+            vec![Token::Keyword(0xF1), Token::String("P.".to_string())]
+        );
+        assert_round_trip("10 REM P. L.", "10 REM P. L.");
+        assert_round_trip("10 DATA P.,L.", "10 DATA P.,L.");
+    }
+
+    #[test]
+    fn test_name_p_is_still_a_variable() {
+        assert_eq!(
+            tokens_of("P=1.5"),
+            vec![
+                Token::Identifier("P".to_string()),
+                Token::Operator('='),
+                Token::Real(1.5),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_short_form_at_the_start_of_a_prompt_line_is_expanded() {
+        assert_eq!(expand_short_form("L."), "LIST");
+        assert_eq!(expand_short_form("L.10,20"), "LIST10,20");
+        assert_eq!(expand_short_form("SA. \"FILE\""), "SAVE \"FILE\"");
+        assert_eq!(expand_short_form("P.\"A.\""), "PRINT\"A.\"");
+        assert_eq!(expand_short_form("LIST"), "LIST");
+        assert_eq!(expand_short_form("X."), "X.");
+        assert_eq!(expand_short_form("10 P.5"), "10 P.5");
+        assert_eq!(expand_short_form("l."), "l.");
     }
 }
