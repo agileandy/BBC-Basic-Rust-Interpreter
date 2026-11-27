@@ -1612,6 +1612,21 @@ impl Executor {
                 let handle = self.eval_integer(&args[0])?;
                 self.check_eof(handle)
             }
+            "BGET" | "PTR" | "EXT" => {
+                // BGET#, PTR# and EXT#: read a byte, the file position or the file size
+                if args.len() != 1 {
+                    return Err(BBCBasicError::SyntaxError {
+                        message: format!("{} requires 1 argument (file handle)", name),
+                        line: None,
+                    });
+                }
+                let handle = self.eval_integer(&args[0])?;
+                match name {
+                    "BGET" => self.bget(handle),
+                    "PTR" => self.get_ptr(handle),
+                    _ => self.get_ext(handle),
+                }
+            }
             "TRUE" => {
                 // TRUE constant = -1 (BBC BASIC convention)
                 if !args.is_empty() {
