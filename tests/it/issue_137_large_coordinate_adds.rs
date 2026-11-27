@@ -45,7 +45,7 @@ fn test_a_relative_plot_past_the_i32_limit_saturates_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_a_relative_plot_below_the_i32_limit_saturates_the_last_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_a_point_plot_with_a_large_origin_returns() {
 }
 
 #[test]
-fn test_point_with_a_large_origin_returns_false() {
+fn test_point_with_a_large_origin_gives_off_the_screen() {
     let (result, output) = run_in_10_seconds(&[
         "10 MODE 1 : ORIGIN 2000000000,0",
         "20 PRINT POINT(2000000000,0)",
@@ -94,7 +94,7 @@ fn test_point_with_a_large_origin_returns_false() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n0\n");
+    assert_eq!(output, "-1\n-1\n");
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn test_a_fill_at_the_i32_limit_returns() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn test_a_relative_plot_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-10\n-10\n");
+    assert_eq!(output, "1110\n10\n");
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn test_a_rectangle_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-100\n");
+    assert_eq!(output, "111100\n");
 }
 
 #[test]
@@ -179,5 +179,5 @@ fn test_a_circle_with_normal_values_draws_the_same_pixels() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-100\n");
+    assert_eq!(output, "11100\n");
 }

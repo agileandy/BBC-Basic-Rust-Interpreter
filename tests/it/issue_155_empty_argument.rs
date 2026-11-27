@@ -61,7 +61,7 @@ fn test_move_with_2_values_is_unchanged() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(without_clear(&output), "-1\n");
+    assert_eq!(without_clear(&output), "1\n");
 }
 
 #[test]

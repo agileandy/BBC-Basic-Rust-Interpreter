@@ -36,7 +36,7 @@ fn test_a_line_after_ellipse_starts_at_the_point_of_the_rule() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-10\n");
+    assert_eq!(output, "10\n");
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_a_triangle_after_ellipse_uses_the_2_points_of_the_rule() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_plot_193_draws_an_ellipse_outline() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n00\n");
+    assert_eq!(output, "1111\n00\n");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_ellipse_with_negative_radii_draws_the_same_ellipse() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n-1\n");
+    assert_eq!(output, "1111\n1\n");
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn test_plot_197_uses_an_absolute_point_on_a_horizontal_tangent() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-10\n");
+    assert_eq!(output, "1110\n");
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn test_plot_192_and_196_only_move() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "00\n00\n-1\n");
+    assert_eq!(output, "00\n00\n1\n");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn test_plot_201_draws_a_filled_ellipse() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-10\n");
+    assert_eq!(output, "1110\n");
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn test_plot_205_draws_a_filled_ellipse_through_absolute_points() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1\n");
+    assert_eq!(output, "111\n");
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn test_a_large_filled_ellipse_is_clipped_to_the_canvas() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1\n");
+    assert_eq!(output, "11\n");
 }
 
 #[test]

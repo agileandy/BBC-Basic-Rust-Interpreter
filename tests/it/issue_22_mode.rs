@@ -52,7 +52,7 @@ fn test_mode_clears_the_graphics_buffer() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n0\n");
+    assert_eq!(output, "1\n0\n");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_mode_sets_the_origin_to_0_0() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_mode_sets_the_default_colours() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "1\n");
 }
 
 #[test]
@@ -136,6 +136,6 @@ fn test_graphics_draw_in_a_graphics_mode() {
         ]);
 
         assert_eq!(result, Ok(()), "MODE {}", mode);
-        assert_eq!(output, "-1-1\n", "MODE {}", mode);
+        assert_eq!(output, "11\n", "MODE {}", mode);
     }
 }

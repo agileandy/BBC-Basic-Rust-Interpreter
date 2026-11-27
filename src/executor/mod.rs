@@ -2703,8 +2703,9 @@ impl Executor {
                 }
             }
             "POINT" => {
-                // POINT(x, y) - Read pixel state at coordinates
-                // Returns -1 (TRUE) if pixel is set, 0 (FALSE) if not set
+                // POINT(x, y) gives the colour number of the pixel, and -1
+                // for a point off the screen (issue 161). The canvas keeps
+                // only set or clear, thus a set pixel gives 1.
                 if args.len() != 2 {
                     return Err(BBCBasicError::SyntaxError {
                         message: "POINT requires 2 arguments (x, y)".to_string(),
@@ -2713,11 +2714,10 @@ impl Executor {
                 }
                 let x = self.eval_integer(&args[0])?;
                 let y = self.eval_integer(&args[1])?;
-                // Returns -1 if pixel is set, 0 if not (BBC BASIC boolean convention)
-                Ok(if self.graphics.get_pixel(x, y) == Some(true) {
-                    -1
-                } else {
-                    0
+                Ok(match self.graphics.get_pixel(x, y) {
+                    Some(true) => 1,
+                    Some(false) => 0,
+                    None => -1,
                 })
             }
             // RND with no bracket: a random integer over the full 32-bit range
