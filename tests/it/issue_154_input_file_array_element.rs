@@ -43,7 +43,7 @@ fn test_input_file_reads_into_array_elements_and_a_variable() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7 AB 3.5\n");
+    assert_eq!(output, "         7 AB 3.5\n");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_input_file_reads_into_a_two_dimension_element() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "42 0\n");
+    assert_eq!(output, "        42 0\n");
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn test_input_file_reads_into_an_integer_array_element() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "        12\n");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_input_file_evaluates_the_indices_when_the_target_gets_its_value() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0 9\n");
+    assert_eq!(output, "         0 9\n");
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_input_file_variables_are_unchanged() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5 HELLO\n");
+    assert_eq!(output, "         5 HELLO\n");
 }
 
 #[test]
@@ -165,5 +165,5 @@ fn test_bget_into_an_array_element() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "65\n");
+    assert_eq!(output, "        65\n");
 }

@@ -23,12 +23,12 @@ fn counter_after_error(print_line: &str) -> String {
 
 #[test]
 fn test_tab_runs_its_function_one_time_on_error() {
-    assert_eq!(counter_after_error("20 PRINT TAB(FNa)"), "1\n");
+    assert_eq!(counter_after_error("20 PRINT TAB(FNa)"), "         1\n");
 }
 
 #[test]
 fn test_spc_runs_its_function_one_time_on_error() {
-    assert_eq!(counter_after_error("20 PRINT SPC(FNa)"), "1\n");
+    assert_eq!(counter_after_error("20 PRINT SPC(FNa)"), "         1\n");
 }
 
 #[test]

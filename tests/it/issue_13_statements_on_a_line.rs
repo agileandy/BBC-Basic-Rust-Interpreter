@@ -51,7 +51,7 @@ fn test_two_assignments_on_one_line() {
     let (result, output) = run(&["10 A% = 1 : B% = 2", "20 PRINT A%; B%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "         12\n");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_three_statements_on_one_line() {
     let (result, output) = run(&["10 A% = 1 : B% = A% + 1 : PRINT A% + B%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_for_loop_on_one_line() {
     let (result, output) = run(&["10 FOR I% = 1 TO 3 : PRINT I% : NEXT", "20 PRINT \"DONE\""]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_repeat_loop_on_one_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_while_loop_on_one_line_with_true_condition() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn test_if_false_runs_no_then_statement() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "00\n");
+    assert_eq!(output, "         00\n");
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_if_true_runs_all_then_statements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "         12\n");
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn test_if_else_runs_the_correct_pair() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "34\n12\n");
+    assert_eq!(output, "         34\n         12\n");
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn test_multiline_function_with_if_return_and_two_statement_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "24\n");
+    assert_eq!(output, "        24\n");
 }
 
 #[test]

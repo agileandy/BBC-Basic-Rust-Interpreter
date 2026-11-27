@@ -75,7 +75,7 @@ fn test_on_error_catches_too_big_and_err_is_20() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "20\n");
+    assert_eq!(output, "        20\n");
 }
 
 #[test]

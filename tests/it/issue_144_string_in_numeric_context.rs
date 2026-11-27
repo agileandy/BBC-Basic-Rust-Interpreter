@@ -59,7 +59,7 @@ fn test_error_handler_gets_err_6_for_string_function() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6\n");
+    assert_eq!(output, "         6\n");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_error_handler_gets_err_6_for_each_issue_case() {
         ]);
 
         assert_eq!(result, Ok(()), "{case}");
-        assert_eq!(output, "6\n", "{case}");
+        assert_eq!(output, "         6\n", "{case}");
     }
 }
 
@@ -94,7 +94,7 @@ fn test_numeric_function_in_numeric_context_still_works() {
     let (result, output) = run(&["10 A = LEN(\"abc\") + ASC(\"A\") : PRINT A", "20 END"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "68\n");
+    assert_eq!(output, "        68\n");
 }
 
 #[test]

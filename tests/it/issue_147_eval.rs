@@ -7,14 +7,14 @@ use crate::common::{run_binary_read_first, run_with_limit as run};
 fn test_eval_of_a_sum_is_a_number() {
     assert_eq!(
         run(&["10 PRINT EVAL(\"1+2\")"]),
-        (Ok(()), "3\n".to_string())
+        (Ok(()), "         3\n".to_string())
     );
 }
 
 #[test]
 fn test_eval_uses_a_variable_of_the_program() {
     let (result, output) = run(&["10 X = 7", "20 PRINT EVAL(\"X*2\")"]);
-    assert_eq!((result, output), (Ok(()), "14\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        14\n".to_string()));
 }
 
 #[test]
@@ -26,14 +26,14 @@ fn test_eval_of_a_string_function_gives_a_string() {
 #[test]
 fn test_eval_with_no_brackets() {
     let (result, output) = run(&["10 A$ = \"6*7\"", "20 PRINT EVAL A$"]);
-    assert_eq!((result, output), (Ok(()), "42\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        42\n".to_string()));
 }
 
 #[test]
 fn test_leading_digits_above_65535_are_a_number_not_a_line_number() {
     assert_eq!(
         run(&["10 PRINT EVAL(\"70000+1\")"]),
-        (Ok(()), "70001\n".to_string())
+        (Ok(()), "     70001\n".to_string())
     );
 }
 
@@ -42,7 +42,7 @@ fn test_leading_digits_then_a_space_and_a_word_are_a_number() {
     // `1 AND 3` starts like a program line with the line number 1
     assert_eq!(
         run(&["10 PRINT EVAL(\"1 AND 3\")"]),
-        (Ok(()), "1\n".to_string())
+        (Ok(()), "         1\n".to_string())
     );
 }
 
@@ -63,7 +63,7 @@ fn test_on_error_catches_the_error_of_the_text() {
         "10 ON ERROR PRINT ERR; \" \"; ERL : END",
         "20 PRINT EVAL(\"1+\")",
     ]);
-    assert_eq!((result, output), (Ok(()), "16 20\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        16 20\n".to_string()));
 }
 
 #[test]
@@ -73,13 +73,13 @@ fn test_eval_calls_a_user_function() {
         "20 END",
         "30 DEF FNf(N) = N*10",
     ]);
-    assert_eq!((result, output), (Ok(()), "20\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        20\n".to_string()));
 }
 
 #[test]
 fn test_a_nested_eval() {
     let (result, output) = run(&["10 PRINT EVAL(\"EVAL(\"\"2+3\"\")*2\")"]);
-    assert_eq!((result, output), (Ok(()), "10\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "        10\n".to_string()));
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn test_eval_in_a_larger_expression() {
         "20 PRINT EVAL(\"1.5\") + 1",
         "30 PRINT EVAL(\"A$\") + \"Y\"",
     ]);
-    assert_eq!((result, output), (Ok(()), "2.5\nXY\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "       2.5\nXY\n".to_string()));
 }
 
 /// A known limit: the type of an EVAL call is not known before the run, so
@@ -132,7 +132,10 @@ fn test_the_text_is_evaluated_each_time() {
         "20 PRINT EVAL(\"I%*I%\");\" \";",
         "30 NEXT",
     ]);
-    assert_eq!((result, output), (Ok(()), "1 4 9 ".to_string()));
+    assert_eq!(
+        (result, output),
+        (Ok(()), "         1          4          9 ".to_string())
+    );
 }
 
 #[test]
@@ -143,7 +146,7 @@ fn test_a_variable_and_an_array_with_the_name_evaluate_still_work() {
         "30 EVALS(1) = 3",
         "40 PRINT EVALUATE + EVALS(1)",
     ]);
-    assert_eq!((result, output), (Ok(()), "8\n".to_string()));
+    assert_eq!((result, output), (Ok(()), "         8\n".to_string()));
 }
 
 #[test]

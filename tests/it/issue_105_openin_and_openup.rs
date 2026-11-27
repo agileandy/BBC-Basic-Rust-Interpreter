@@ -20,7 +20,7 @@ fn test_openin_of_missing_file_gives_zero_and_program_continues() {
     let (result, output) = run(&[&open_in, "20 PRINT F%", "30 PRINT \"MORE\""]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\nMORE\n");
+    assert_eq!(output, "         0\nMORE\n");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn test_openin_of_existing_file_gives_handle_that_is_not_zero() {
     let (result, output) = run(&[&open_in, "20 PRINT F% <> 0", "30 CLOSE#F%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_openup_changes_one_byte_and_keeps_the_length() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n3\n659067\n");
+    assert_eq!(output, "         0\n         3\n        659067\n");
     assert_eq!(std::fs::read(&file).expect("file is read"), b"AZC");
 }
 
@@ -72,7 +72,7 @@ fn test_openup_reads_bytes_and_gives_size() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n65\n2 0\n");
+    assert_eq!(output, "         3\n        65\n         2 0\n");
     assert_eq!(std::fs::read(&file).expect("file is read"), b"AYC");
 }
 
@@ -83,7 +83,7 @@ fn test_openup_of_missing_file_gives_zero() {
     let (result, output) = run(&[&open_up, "20 PRINT F%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
     assert!(!std::path::Path::new(&file).exists());
 }
 
@@ -125,5 +125,5 @@ fn test_lower_case_names_still_work_as_variable_and_array() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5678\n");
+    assert_eq!(output, "         5678\n");
 }

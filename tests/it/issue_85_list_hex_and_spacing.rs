@@ -19,7 +19,7 @@ const PROGRAM: [&str; 7] = [
 ];
 
 /// The output of RUN before the correction
-const RUN_OUTPUT: &str = "312X60\n3    30FF\n";
+const RUN_OUTPUT: &str = "        312X60\n         3\n     30FF\n";
 
 #[test]
 fn test_list_shows_hex_numbers_and_function_brackets_as_typed() {

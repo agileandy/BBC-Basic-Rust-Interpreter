@@ -17,7 +17,7 @@ fn test_new_local_real_is_zero_after_endproc() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn test_new_local_integer_is_zero_after_endproc() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_new_local_in_fn_is_zero_after_fn() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6 0\n");
+    assert_eq!(output, "         6 0\n");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_new_parameter_is_zero_after_endproc() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0[]\n");
+    assert_eq!(output, "         0[]\n");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_new_local_array_does_not_exist_after_endproc() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "9\n");
+    assert_eq!(output, "         9\n");
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_new_local_is_zero_after_trapped_error() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0[]\n");
+    assert_eq!(output, "         0[]\n");
 }
 
 #[test]
@@ -141,5 +141,5 @@ fn test_old_variable_value_still_restored() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 }

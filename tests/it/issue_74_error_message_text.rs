@@ -180,14 +180,14 @@ fn test_out_of_data_text_and_err() {
         "20 READ A",
         "30 PRINT ERR; \" \"; ERL",
     ]);
-    assert_eq!(output, "42 20\n");
+    assert_eq!(output, "        42 20\n");
 }
 
 #[test]
 fn test_no_for_text_and_err() {
     assert_eq!(error_of(&["10 NEXT"]), "No FOR at line 10");
     let (_, output) = run(&["10 ON ERROR GOTO 30", "20 NEXT", "30 PRINT ERR"]);
-    assert_eq!(output, "32\n");
+    assert_eq!(output, "        32\n");
 }
 
 #[test]
@@ -202,20 +202,20 @@ fn test_cant_match_for_text_and_err() {
         "30 NEXT J",
         "40 PRINT ERR",
     ]);
-    assert_eq!(output, "33\n");
+    assert_eq!(output, "        33\n");
 }
 
 #[test]
 fn test_not_local_text_and_err() {
     assert_eq!(error_of(&["10 LOCAL A"]), "Not LOCAL at line 10");
     let (_, output) = run(&["10 ON ERROR GOTO 30", "20 LOCAL A", "30 PRINT ERR"]);
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "        12\n");
 }
 
 #[test]
 fn test_err_values_of_other_errors_do_not_change() {
     let (_, output) = run(&["10 ON ERROR GOTO 30", "20 PRINT 1 / 0", "30 PRINT ERR"]);
-    assert_eq!(output, "18\n");
+    assert_eq!(output, "        18\n");
 }
 
 // Errors that stop the program

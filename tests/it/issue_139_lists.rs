@@ -20,7 +20,10 @@ fn test_listadd_adds_numbers_and_strings_and_listlen_counts_them() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n3\n5\nCAT\n2.5\n");
+    assert_eq!(
+        output,
+        "         0\n         3\n         5\nCAT\n       2.5\n"
+    );
 }
 
 #[test]
@@ -35,7 +38,7 @@ fn test_listisstr_is_true_only_for_a_string_element() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n-1\nAB\n");
+    assert_eq!(output, "         0\n        -1\nAB\n");
 }
 
 #[test]
@@ -52,7 +55,7 @@ fn test_listset_changes_an_element_and_its_type() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "ONE\n20\n2\n");
+    assert_eq!(output, "ONE\n        20\n         2\n");
 }
 
 #[test]
@@ -68,7 +71,7 @@ fn test_listinsert_puts_an_element_before_the_index_or_at_the_end() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -87,7 +90,7 @@ fn test_listremove_removes_one_element_and_listclear_removes_all() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "132\n0\n9\n");
+    assert_eq!(output, "         132\n         0\n         9\n");
 }
 
 #[test]
@@ -101,7 +104,7 @@ fn test_newlist_with_empty_brackets_gives_a_different_handle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1\n10\n");
+    assert_eq!(output, "        -1-1-1\n         10\n");
 }
 
 #[test]
@@ -117,7 +120,7 @@ fn test_a_list_holds_the_handle_of_a_list() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "DEEP\n1\n");
+    assert_eq!(output, "DEEP\n         1\n");
 }
 
 #[test]
@@ -249,7 +252,7 @@ fn test_each_statement_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 }
 
@@ -264,7 +267,7 @@ fn test_each_function_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 
     let (result, output) = run(&[

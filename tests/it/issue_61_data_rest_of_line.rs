@@ -13,7 +13,7 @@ fn test_numbers_quoted_and_unquoted_items_read_into_variables() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2[A,B][C D]\n");
+    assert_eq!(output, "         1 2[A,B][C D]\n");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_text_item_read_into_number_gives_leading_number() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3.5 0 255\n");
+    assert_eq!(output, "       3.5 0 255\n");
 }
 
 #[test]

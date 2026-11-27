@@ -15,7 +15,7 @@ fn test_real_parameter_restores_caller_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 }
 
 #[test]
@@ -31,7 +31,10 @@ fn test_recursive_procedure_keeps_value_of_each_level() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n2\n1\n1\n2\n3\n");
+    assert_eq!(
+        output,
+        "         3\n         2\n         1\n         1\n         2\n         3\n"
+    );
 }
 
 #[test]
@@ -61,7 +64,7 @@ fn test_integer_parameter_restores_caller_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n7\n");
+    assert_eq!(output, "         1\n         7\n");
 }
 
 #[test]
@@ -76,7 +79,7 @@ fn test_resident_integer_parameter_restores_caller_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n7\n");
+    assert_eq!(output, "         1\n         7\n");
 }
 
 #[test]
@@ -91,7 +94,7 @@ fn test_second_argument_uses_caller_value_of_first_name() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 5\n5\n");
+    assert_eq!(output, "         1 5\n         5\n");
 }
 
 #[test]
@@ -107,7 +110,7 @@ fn test_error_in_second_argument_leaves_first_variable_unchanged() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 
     let (result, _) = run(&[
         "10 X = 7",
@@ -132,5 +135,5 @@ fn test_local_of_parameter_name_restores_caller_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 }

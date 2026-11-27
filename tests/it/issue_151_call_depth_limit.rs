@@ -187,7 +187,7 @@ fn test_while_started_again_with_a_false_condition_closes_its_entry() {
         "40 PRINT C%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "100\n");
+    assert_eq!(output, "       100\n");
     assert_eq!(depths, (0, 0, 0));
 }
 
@@ -202,7 +202,7 @@ fn test_long_program_that_leaves_a_loop_with_goto_completes() {
         "70 PRINT C%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "20000\n");
+    assert_eq!(output, "     20000\n");
     assert_eq!(depths, (1, 0, 0));
 }
 
@@ -250,7 +250,7 @@ fn test_for_at_the_stack_limit_changes_nothing() {
     lines.push("30000 PRINT ERR; \" \"; ERL; \" \"; Z".to_string());
     let (result, output, _) = run_with_depths(&lines);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, format!("{NO_ROOM_ERR} 20000 3\n"));
+    assert_eq!(output, format!("        {NO_ROOM_ERR} 20000 3\n"));
 }
 
 #[test]
@@ -327,7 +327,10 @@ fn test_nests_below_the_parser_limit_work() {
         "20 PRINT EVAL(STRING$(499, \"-\") + \"1\")",
         "30 PRINT EVAL(STRING$(240, \"ABS(\") + \"-2\" + STRING$(240, \")\"))",
     ]);
-    assert!(output.contains("1\n-1\n2\n"), "output: {output}");
+    assert!(
+        output.contains("         1\n        -1\n         2\n"),
+        "output: {output}"
+    );
     assert!(output.contains("back\n"), "output: {output}");
 }
 
@@ -367,7 +370,10 @@ fn test_recursive_function_of_depth_200_works() {
         "80 IF N <= 1 THEN = 1",
         "90 = N * FNfact(N - 1)",
     ]);
-    assert!(output.contains("20100\n3628800\n"), "output: {output}");
+    assert!(
+        output.contains("     20100\n   3628800\n"),
+        "output: {output}"
+    );
     assert!(output.contains("back\n"), "output: {output}");
 }
 
@@ -404,7 +410,9 @@ fn test_handler_traps_no_room_and_a_later_call_works() {
         "120 PRINT EVAL(\"2 + 3\")",
     ]);
     assert!(
-        output.contains(&format!("ERR {NO_ROOM_ERR} ERL 40\n49\n5\n")),
+        output.contains(&format!(
+            "ERR {NO_ROOM_ERR} ERL 40\n        49\n         5\n"
+        )),
         "output: {output}"
     );
     assert!(output.contains("back\n"), "output: {output}");

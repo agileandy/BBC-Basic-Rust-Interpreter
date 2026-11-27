@@ -34,7 +34,7 @@ fn test_bget_reads_bytes_until_eof() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "4 208\n");
+    assert_eq!(output, "         4 208\n");
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_ptr_and_ext_with_channel() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 4\n");
+    assert_eq!(output, "         1 4\n");
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn test_eof_with_brackets_still_works() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]

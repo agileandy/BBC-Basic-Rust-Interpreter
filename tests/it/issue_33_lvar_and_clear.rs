@@ -8,7 +8,7 @@ fn test_clear_in_program_removes_variable() {
     // AB% is not a resident variable (A% to Z% stay after CLEAR, issue #89)
     let (result, output) = run(&["10 AB% = 5", "20 PRINT AB%", "30 CLEAR", "40 PRINT AB%"]);
 
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
     let error = result.expect_err("a read after CLEAR fails");
     assert!(is_no_such_variable(&error, "AB%"), "error: {error}");
     assert!(error.contains("line 40"), "error: {error}");
@@ -83,7 +83,7 @@ fn test_clear_resets_data_pointer() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n");
+    assert_eq!(output, "         7\n");
 }
 
 #[test]

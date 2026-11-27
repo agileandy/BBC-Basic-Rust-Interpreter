@@ -17,7 +17,7 @@ fn test_step_zero_start_below_end_loops_until_body_passes_end() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn test_step_zero_integer_loop_start_below_end_loops_until_body_passes_end() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_step_zero_start_above_end_runs_one_pass() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\nDONE\n");
+    assert_eq!(output, "         5\nDONE\n");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_step_zero_start_equal_to_end_ends_when_body_passes_end() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\nDONE\n");
+    assert_eq!(output, "         3\nDONE\n");
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_positive_step_is_unchanged() {
     let (result, output) = run(&["10 FOR I = 1 TO 3 STEP 1", "20 PRINT I", "30 NEXT I"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -74,5 +74,5 @@ fn test_negative_step_is_unchanged() {
     let (result, output) = run(&["10 FOR I = 3 TO 1 STEP -1", "20 PRINT I", "30 NEXT I"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n2\n1\n");
+    assert_eq!(output, "         3\n         2\n         1\n");
 }

@@ -304,6 +304,6 @@ fn no_argument_gives_the_prompt_mode() {
         stdout.starts_with("BBC BASIC Interpreter v0.1.0"),
         "{stdout:?}"
     );
-    assert!(stdout.contains("> 42\n"), "{stdout:?}");
+    assert!(stdout.contains(">         42\n"), "{stdout:?}");
     assert!(stdout.contains("Goodbye!"), "{stdout:?}");
 }

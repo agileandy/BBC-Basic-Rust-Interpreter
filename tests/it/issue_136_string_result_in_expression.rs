@@ -65,7 +65,7 @@ fn test_len_of_join_of_two_string_functions() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_join_of_two_number_functions_does_not_change() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3.5 0\n");
+    assert_eq!(output, "       3.5 0\n");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_number_parameter_gives_number_body() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn test_each_function_body_runs_one_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "ac\n1 1\n");
+    assert_eq!(output, "ac\n         1 1\n");
 }
 
 #[test]

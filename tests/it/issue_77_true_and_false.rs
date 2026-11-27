@@ -77,5 +77,5 @@ fn test_names_that_start_with_true_or_false_are_variables() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5 7\n");
+    assert_eq!(output, "         5 7\n");
 }

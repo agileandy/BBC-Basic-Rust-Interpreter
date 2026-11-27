@@ -97,7 +97,7 @@ fn test_if_then_line_number_jumps_out_of_for_body_each_time() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -113,5 +113,5 @@ fn test_if_then_line_number_jumps_out_of_inner_for_loop_3_times() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n22\n32\nDONE\n");
+    assert_eq!(output, "        12\n        22\n        32\nDONE\n");
 }

@@ -49,7 +49,7 @@ fn test_typed_for_loop_runs_each_value() {
     let (results, output) = typed(&[], &["FOR I%=1 TO 3 : PRINT I% : NEXT"]);
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_typed_repeat_loop_runs_until_condition() {
     let (results, output) = typed(&[], &["I%=0 : REPEAT : I%=I%+1 : PRINT I% : UNTIL I%=3"]);
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "1\n2\n3\n");
+    assert_eq!(output, "         1\n         2\n         3\n");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_typed_while_loop_runs_while_condition() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "1\n2\n3\nend\n");
+    assert_eq!(output, "         1\n         2\n         3\nend\n");
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn test_typed_proc_call_runs_stored_procedure_and_returns() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "8\nB\n");
+    assert_eq!(output, "         8\nB\n");
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_typed_line_calls_stored_single_line_function() {
     let (results, output) = typed(&["10 END", "100 DEF FNsq(X)=X*X"], &["PRINT FNsq(3)"]);
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "9\n");
+    assert_eq!(output, "         9\n");
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_typed_line_calls_stored_multi_line_function() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended)]);
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn test_typed_function_definition_stays_with_stored_program() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended); 2]);
-    assert_eq!(output, "8\n");
+    assert_eq!(output, "         8\n");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn test_typed_variables_stay_between_lines() {
     let (results, output) = typed(&["10 PRINT \"PROGRAM\""], &["A%=5", "PRINT A%"]);
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended); 2]);
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_deleted_stored_definitions_are_not_callable() {
         run_typed_line(&mut executor, &program, &call),
         Ok(RunOutcome::Ended)
     );
-    assert_eq!(executor.get_output(), "PROC\n7\n");
+    assert_eq!(executor.get_output(), "PROC\n         7\n");
 
     for line in [100, 110, 120, 200, 210] {
         program.delete_line(line);
@@ -297,7 +297,7 @@ fn test_error_in_typed_proc_call_restores_local_variable() {
     let (results, output) = typed(&PROC_WITH_LOCAL_ERROR, &["X=1", "PROCp", "PRINT X"]);
 
     assert_eq!(results[1], Err("Division by zero at line 120".to_string()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn test_end_in_typed_proc_call_restores_local_variable() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended); 3]);
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn test_error_in_run_restores_local_variable() {
         executor.get_output().to_string()
     });
 
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -354,7 +354,7 @@ fn test_typed_goto_reads_data_of_stored_program() {
     );
 
     assert_eq!(results, vec![Ok(RunOutcome::Ended); 2]);
-    assert_eq!(output, "42\n43\n");
+    assert_eq!(output, "        42\n        43\n");
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn test_typed_read_continues_after_run() {
         executor.get_output().to_string()
     });
 
-    assert_eq!(output, "42\n43\n");
+    assert_eq!(output, "        42\n        43\n");
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn test_changed_data_starts_again() {
         executor.get_output().to_string()
     });
 
-    assert_eq!(output, "42\n7\n");
+    assert_eq!(output, "        42\n         7\n");
 }
 
 #[test]
@@ -499,7 +499,10 @@ fn test_binary_typed_for_loop_prints_each_value() {
     let (status, output) = run_binary(b"FOR I%=1 TO 3 : PRINT I% : NEXT\nEXIT\n");
 
     assert!(status.success(), "exit status was {status}");
-    assert!(output.contains("> 1\n2\n3\n"), "output was {output:?}");
+    assert!(
+        output.contains(">          1\n         2\n         3\n"),
+        "output was {output:?}"
+    );
     assert!(!output.contains("Error"), "output was {output:?}");
 }
 

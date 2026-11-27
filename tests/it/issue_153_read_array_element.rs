@@ -12,7 +12,7 @@ fn test_read_in_a_loop_fills_an_array() {
         "40 DATA 10, 20.5, 30",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10 20.5 30\n");
+    assert_eq!(output, "        10 20.5 30\n");
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn test_read_into_a_2_dimension_element() {
         "40 DATA 5, abc",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5 abc\n");
+    assert_eq!(output, "         5 abc\n");
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_index_uses_the_value_read_before_it() {
         "40 DATA 3, 99",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3 99\n");
+    assert_eq!(output, "         3 99\n");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_index_expression_with_a_function_call() {
         "40 DATA 8",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "8\n");
+    assert_eq!(output, "         8\n");
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn test_read_variables_is_unchanged() {
         "30 DATA 1.5, hello, 4",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.5 hello 4\n");
+    assert_eq!(output, "       1.5 hello 4\n");
 }
 
 #[test]

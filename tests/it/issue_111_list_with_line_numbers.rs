@@ -160,6 +160,6 @@ fn test_variable_and_array_named_list_still_work() {
         run_binary("list = 5\nPRINT list\nDIM list(3)\nlist(2) = 7\nPRINT list(2)\nEXIT\n");
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 5\n"), "output: {output}");
-    assert!(output.contains("> 7\n"), "output: {output}");
+    assert!(output.contains(">          5\n"), "output: {output}");
+    assert!(output.contains(">          7\n"), "output: {output}");
 }

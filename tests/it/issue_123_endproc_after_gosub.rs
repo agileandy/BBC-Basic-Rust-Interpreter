@@ -55,7 +55,7 @@ fn test_endproc_in_subroutine_restores_the_proc_parameter() {
         "110 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n1\n");
+    assert_eq!(output, "         2\n         1\n");
 }
 
 // D3: RETURN with a PROC entry on top gives No GOSUB
@@ -104,7 +104,7 @@ fn test_return_in_proc_with_no_gosub_is_err_38() {
         "110 END",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "38 50\n");
+    assert_eq!(output, "        38 50\n");
 }
 
 // A GOSUB before the PROC call still returns after the procedure
@@ -166,7 +166,10 @@ fn test_recursive_proc_with_gosub_at_each_level() {
         "130 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n2\n1\nup 1\nup 2\nup 3\ndone\n");
+    assert_eq!(
+        output,
+        "         3\n         2\n         1\nup 1\nup 2\nup 3\ndone\n"
+    );
 }
 
 #[test]
@@ -184,7 +187,10 @@ fn test_recursive_proc_with_gosub_that_returns_at_each_level() {
         "110 RETURN",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n2\n1\nup 1\nup 2\nup 3\ndone\n");
+    assert_eq!(
+        output,
+        "         3\n         2\n         1\nup 1\nup 2\nup 3\ndone\n"
+    );
 }
 
 // D5: a GOSUB that is open at the `=` line of a function does not stay open
@@ -201,7 +207,7 @@ fn test_gosub_open_at_fn_result_does_not_stay_on_the_stack() {
         "200 = 2",
     ]);
     assert_eq!(result, Err("No GOSUB at line 30".to_string()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]
@@ -219,7 +225,7 @@ fn test_gosub_before_fn_call_returns_after_gosub_open_at_fn_result() {
         "300 = 2",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\nback\n");
+    assert_eq!(output, "         2\nback\n");
 }
 
 #[test]
@@ -238,5 +244,5 @@ fn test_gosub_open_at_fn_result_in_proc_then_endproc() {
         "200 = 2",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\nafter proc\n");
+    assert_eq!(output, "         2\nafter proc\n");
 }

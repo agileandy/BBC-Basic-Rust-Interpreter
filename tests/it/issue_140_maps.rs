@@ -18,7 +18,7 @@ fn test_mapput_puts_numbers_and_strings_and_mapget_reads_them() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n2\n42\nANN\n");
+    assert_eq!(output, "         0\n         2\n        42\nANN\n");
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_maphas_and_mapisstr_tell_about_a_key() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-100\n0-1\n");
+    assert_eq!(output, "        -100\n         0-1\n");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_upper_and_lower_case_keys_are_different_and_an_empty_key_is_valid() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1233\n");
+    assert_eq!(output, "         1233\n");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn test_mapremove_keeps_the_order_of_the_other_keys_and_mapclear_removes_all() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "B2\nC3\nA4\n00\nZ\n");
+    assert_eq!(output, "B2\nC3\nA4\n         00\nZ\n");
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_newmap_with_empty_brackets_gives_a_different_handle() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n10\n");
+    assert_eq!(output, "        -1-1-1-1\n         10\n");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_a_map_in_a_list_and_a_list_in_a_map() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "ANN\n7\n");
+    assert_eq!(output, "ANN\n         7\n");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn test_a_comma_in_brackets_does_not_divide_the_statement_arguments() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "KEY1\n0\n");
+    assert_eq!(output, "KEY1\n         0\n");
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn test_each_statement_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 }
 
@@ -253,7 +253,7 @@ fn test_each_function_name_is_still_a_variable_and_an_array() {
         ]);
 
         assert_eq!(result, Ok(()), "name: {}", name);
-        assert_eq!(output, "7\n", "name: {}", name);
+        assert_eq!(output, "         7\n", "name: {}", name);
     }
 
     for name in ["MAPGET$", "MAPKEY$"] {

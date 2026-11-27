@@ -30,7 +30,7 @@ fn test_bput_writes_bytes_that_bget_reads() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "72 105 65 -1\n");
+    assert_eq!(output, "        72 105 65 -1\n");
     assert_eq!(std::fs::read(&file).expect("file exists"), b"HiA");
 }
 
@@ -50,7 +50,7 @@ fn test_ptr_assignment_moves_to_second_byte() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 66\n");
+    assert_eq!(output, "         1 66\n");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn test_bput_and_ptr_in_if_branch() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "89\n");
+    assert_eq!(output, "        89\n");
 }
 
 #[test]

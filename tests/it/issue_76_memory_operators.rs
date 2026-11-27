@@ -13,7 +13,7 @@ fn test_write_and_read_a_byte() {
     let (result, output) = run(&["10 A% = &3000", "20 ?A% = 42", "30 PRINT ?A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "42\n");
+    assert_eq!(output, "        42\n");
 }
 
 #[test]
@@ -27,7 +27,7 @@ fn test_byte_keeps_the_low_8_bits() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "44\n255\n");
+    assert_eq!(output, "        44\n       255\n");
 }
 
 #[test]
@@ -44,7 +44,10 @@ fn test_word_is_stored_low_byte_first() {
 
     assert_eq!(result, Ok(()));
     // &78, &56, &34, &12, then TRUE
-    assert_eq!(output, "120\n86\n52\n18\n-1\n");
+    assert_eq!(
+        output,
+        "       120\n        86\n        52\n        18\n        -1\n"
+    );
 }
 
 #[test]
@@ -52,7 +55,7 @@ fn test_negative_word_reads_back_the_same() {
     let (result, output) = run(&["10 A% = &3000", "20 !A% = -5", "30 PRINT !A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-5\n");
+    assert_eq!(output, "        -5\n");
 }
 
 #[test]
@@ -67,7 +70,7 @@ fn test_binary_forms_write_and_read_at_base_plus_offset() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n100000\n100007\n");
+    assert_eq!(output, "         7\n    100000\n    100007\n");
 }
 
 #[test]
@@ -75,7 +78,7 @@ fn test_unary_write_with_bracketed_address() {
     let (result, output) = run(&["10 A% = &3000", "20 ?(A% + 1) = 9", "30 PRINT A%?1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "9\n");
+    assert_eq!(output, "         9\n");
 }
 
 #[test]
@@ -83,7 +86,7 @@ fn test_memory_write_after_colon() {
     let (result, output) = run(&["10 A% = &3000 : !A% = 3 : PRINT !A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -98,7 +101,7 @@ fn test_memory_operators_in_a_loop() {
 
     assert_eq!(result, Ok(()));
     // bytes 0, 2, 4, 6: &06040200
-    assert_eq!(output, "100925952\n");
+    assert_eq!(output, " 100925952\n");
 }
 
 /// Assert that the run stopped at the line with an address error, such as
@@ -139,7 +142,7 @@ fn test_word_write_across_the_end_of_memory_changes_nothing() {
         "100 PRINT ?A%",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -155,5 +158,5 @@ fn test_typed_line_continues_after_address_error() {
     assert!(bad.is_err());
     assert!(write.is_ok(), "{write:?}");
     assert!(read.is_ok(), "{read:?}");
-    assert_eq!(executor.get_output(), "7\n");
+    assert_eq!(executor.get_output(), "         7\n");
 }

@@ -29,32 +29,32 @@ fn test_add_overflow_gives_too_big() {
 
 #[test]
 fn test_add_overflow_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 2147483647 + 1"), "20\n");
+    assert_eq!(err_of("A% = 2147483647 + 1"), "        20\n");
 }
 
 #[test]
 fn test_subtract_overflow_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = -2147483647 - 1 - 1"), "20\n");
+    assert_eq!(err_of("A% = -2147483647 - 1 - 1"), "        20\n");
 }
 
 #[test]
 fn test_subtract_from_smallest_literal_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = -2147483648 - 1"), "20\n");
+    assert_eq!(err_of("A% = -2147483648 - 1"), "        20\n");
 }
 
 #[test]
 fn test_multiply_overflow_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 65536 * 65536"), "20\n");
+    assert_eq!(err_of("A% = 65536 * 65536"), "        20\n");
 }
 
 #[test]
 fn test_multiply_variable_overflow_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 2147483647 : B% = A% * 2"), "20\n");
+    assert_eq!(err_of("A% = 2147483647 : B% = A% * 2"), "        20\n");
 }
 
 #[test]
 fn test_power_overflow_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 2 ^ 40"), "20\n");
+    assert_eq!(err_of("A% = 2 ^ 40"), "        20\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_power_with_negative_exponent_gives_truncated_value() {
     let (result, output) = run(&["10 A% = 2 ^ -1", "20 B% = 4 ^ -1 * 8", "30 PRINT A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -76,22 +76,25 @@ fn test_power_in_range_is_exact() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1.07374182E9\n1\n1073741824\n");
+    assert_eq!(output, "1.07374182E9\n         1\n1073741824\n");
 }
 
 #[test]
 fn test_mod_by_zero_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 5 MOD 0"), "18\n");
+    assert_eq!(err_of("A% = 5 MOD 0"), "        18\n");
 }
 
 #[test]
 fn test_div_by_zero_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = 5 DIV 0"), "18\n");
+    assert_eq!(err_of("A% = 5 DIV 0"), "        18\n");
 }
 
 #[test]
 fn test_smallest_div_minus_one_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = -2147483647 - 1 : B% = A% DIV -1"), "20\n");
+    assert_eq!(
+        err_of("A% = -2147483647 - 1 : B% = A% DIV -1"),
+        "        20\n"
+    );
 }
 
 #[test]
@@ -99,12 +102,12 @@ fn test_smallest_mod_minus_one_gives_zero() {
     let (result, output) = run(&["10 A% = -2147483647 - 1", "20 PRINT A% MOD -1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
 fn test_minus_smallest_integer_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = -2147483647 - 1 : B% = -A%"), "20\n");
+    assert_eq!(err_of("A% = -2147483647 - 1 : B% = -A%"), "        20\n");
 }
 
 /// Evaluate `left op right` as an integer. The parser gives no shift operator,
@@ -150,13 +153,16 @@ fn test_largest_and_smallest_integers_work_with_no_overflow() {
     assert_eq!(result, Ok(()));
     assert_eq!(
         output,
-        "2147483647\n-2147483648\n2147483647\n-1\n-2147483648\n"
+        "2147483647\n-2147483648\n2147483647\n        -1\n-2147483648\n"
     );
 }
 
 #[test]
 fn test_abs_of_smallest_integer_is_caught_by_on_error() {
-    assert_eq!(err_of("A% = -2147483647 - 1 : B% = ABS(A%)"), "20\n");
+    assert_eq!(
+        err_of("A% = -2147483647 - 1 : B% = ABS(A%)"),
+        "        20\n"
+    );
 }
 
 #[test]

@@ -4,14 +4,17 @@ use crate::common::run_lines as run;
 
 #[test]
 fn test_print_tan_of_45_degrees_shows_one() {
-    assert_eq!(run(&["10 PRINT TAN(RAD(45))"]), (Ok(()), "1\n".to_string()));
+    assert_eq!(
+        run(&["10 PRINT TAN(RAD(45))"]),
+        (Ok(()), "         1\n".to_string())
+    );
 }
 
 #[test]
 fn test_print_sin_of_30_degrees_times_ten_shows_five() {
     assert_eq!(
         run(&["10 PRINT SIN(RAD(30)) * 10"]),
-        (Ok(()), "5\n".to_string())
+        (Ok(()), "         5\n".to_string())
     );
 }
 
@@ -25,7 +28,10 @@ fn test_print_one_third_shows_nine_digits() {
 
 #[test]
 fn test_print_seven_halves_shows_three_point_five() {
-    assert_eq!(run(&["10 PRINT 7 / 2"]), (Ok(()), "3.5\n".to_string()));
+    assert_eq!(
+        run(&["10 PRINT 7 / 2"]),
+        (Ok(()), "       3.5\n".to_string())
+    );
 }
 
 #[test]
@@ -38,7 +44,10 @@ fn test_print_str_of_one_third_shows_nine_digits() {
 
 #[test]
 fn test_print_integer_sum_shows_integer() {
-    assert_eq!(run(&["10 PRINT 2 + 3"]), (Ok(()), "5\n".to_string()));
+    assert_eq!(
+        run(&["10 PRINT 2 + 3"]),
+        (Ok(()), "         5\n".to_string())
+    );
 }
 
 #[test]
@@ -53,7 +62,7 @@ fn test_print_real_variable_shows_nine_digits() {
 fn test_print_large_real_uses_exponent_form() {
     assert_eq!(
         run(&["10 PRINT 2.5 * 1000000000"]),
-        (Ok(()), "2.5E9\n".to_string())
+        (Ok(()), "     2.5E9\n".to_string())
     );
 }
 

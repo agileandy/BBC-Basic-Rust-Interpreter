@@ -6,30 +6,30 @@ use crate::common::{run_binary_read_first, run_with_limit as run};
 /// Each built-in function of one value: the name, a literal argument, and
 /// the text that PRINT gives for the result.
 const FUNCTIONS: &[(&str, &str, &str)] = &[
-    ("ABS", "-3", "3"),
-    ("ACS", "1", "0"),
-    ("ADVAL", "0", "0"),
-    ("ASC", "\"A\"", "65"),
-    ("ASN", "0", "0"),
-    ("ATN", "0", "0"),
+    ("ABS", "-3", "         3"),
+    ("ACS", "1", "         0"),
+    ("ADVAL", "0", "         0"),
+    ("ASC", "\"A\"", "        65"),
+    ("ASN", "0", "         0"),
+    ("ATN", "0", "         0"),
     ("CHR$", "65", "A"),
-    ("COS", "0", "1"),
-    ("DEG", "0", "0"),
-    ("EXP", "0", "1"),
-    ("INKEY", "-1", "0"),
+    ("COS", "0", "         1"),
+    ("DEG", "0", "         0"),
+    ("EXP", "0", "         1"),
+    ("INKEY", "-1", "         0"),
     ("INKEY$", "-1", ""),
-    ("INT", "2.5", "2"),
-    ("LEN", "\"ABC\"", "3"),
-    ("LN", "1", "0"),
-    ("LOG", "100", "2"),
-    ("RAD", "0", "0"),
-    ("SGN", "-4", "-1"),
-    ("SIN", "0", "0"),
-    ("SQR", "16", "4"),
+    ("INT", "2.5", "         2"),
+    ("LEN", "\"ABC\"", "         3"),
+    ("LN", "1", "         0"),
+    ("LOG", "100", "         2"),
+    ("RAD", "0", "         0"),
+    ("SGN", "-4", "        -1"),
+    ("SIN", "0", "         0"),
+    ("SQR", "16", "         4"),
     ("STR$", "12", "12"),
     ("STR$~", "255", "FF"),
-    ("TAN", "0", "0"),
-    ("VAL", "\"12\"", "12"),
+    ("TAN", "0", "         0"),
+    ("VAL", "\"12\"", "        12"),
 ];
 
 #[test]
@@ -56,7 +56,7 @@ fn test_function_takes_only_the_next_factor() {
     let (result, output) = run(&["10 X = 0", "20 PRINT SIN X + 1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_unary_minus_is_part_of_the_factor() {
     let (result, output) = run(&["10 PRINT ABS -3", "20 PRINT ABS -3 + 1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n4\n");
+    assert_eq!(output, "         3\n         4\n");
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_len_of_variable_plus_one() {
     let (result, output) = run(&["10 A$ = \"AB\"", "20 PRINT LEN A$ + 1"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn test_nested_functions_with_no_brackets() {
     let (result, output) = run(&["10 PRINT LEN STR$ 12"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n");
+    assert_eq!(output, "         2\n");
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_function_with_no_brackets_in_assignment() {
     let (result, output) = run(&["10 A$ = \"HELLO\"", "20 N% = LEN A$", "30 PRINT N%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn test_function_of_no_value_is_unchanged() {
     let (result, output) = run(&["10 PRINT INT PI"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "3\n");
+    assert_eq!(output, "         3\n");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn test_not_stays_an_operator() {
     let (result, output) = run(&["10 A = 0", "20 PRINT NOT A"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn test_variables_with_function_names_plus_letters() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "456\n6\n");
+    assert_eq!(output, "         456\n         6\n");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn test_arrays_with_function_names_plus_letters() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "789\n");
+    assert_eq!(output, "         789\n");
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn test_lower_case_function_name_is_a_variable() {
     let (result, output) = run(&["10 len = 5", "20 PRINT len"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]

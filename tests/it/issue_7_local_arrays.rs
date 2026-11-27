@@ -23,7 +23,7 @@ fn test_local_array_is_restored_after_endproc() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "         12\n");
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn test_nested_local_arrays_are_each_restored() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "56\n12\n");
+    assert_eq!(output, "         56\n         12\n");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_procedure_with_local_array_runs_two_times() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "4\n4\nDONE\n");
+    assert_eq!(output, "         4\n         4\nDONE\n");
 }
 
 #[test]
@@ -127,5 +127,5 @@ fn test_local_scalar_name_does_not_destroy_array() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "12\n");
+    assert_eq!(output, "         12\n");
 }

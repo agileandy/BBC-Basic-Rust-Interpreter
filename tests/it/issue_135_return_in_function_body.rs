@@ -42,7 +42,7 @@ fn test_return_in_function_body_is_err_38_and_later_gosub_works() {
         "410 RETURN",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "38 210\nsub\nafter sub\n");
+    assert_eq!(output, "        38 210\nsub\nafter sub\n");
 }
 
 // D2: a GOSUB and its RETURN in the function body still work

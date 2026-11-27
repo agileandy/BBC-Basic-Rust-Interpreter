@@ -8,7 +8,7 @@ fn test_resident_integer_that_was_never_set_is_zero() {
     let (result, output) = run(&["10 PRINT I%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -16,7 +16,7 @@ fn test_resident_integer_can_be_incremented_before_it_is_set() {
     let (result, output) = run(&["10 I% = I% + 1", "20 PRINT I%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn test_clear_keeps_resident_integer() {
     let (result, output) = run(&["10 A% = 5", "20 CLEAR", "30 PRINT A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn test_local_resident_integer_is_zero_and_restored() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n7\n");
+    assert_eq!(output, "         0\n         7\n");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_local_resident_integer_that_was_never_set_is_restored_to_zero() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]

@@ -50,7 +50,7 @@ fn test_prompts_can_repeat() {
         &["1", "2"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "X?\nY\n1\n2\n");
+    assert_eq!(output, "X?\nY\n         1\n         2\n");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_two_variables_with_two_replies() {
     let (result, output) =
         run_with_replies(&["10 INPUT A, B", "20 PRINT A", "30 PRINT B"], &["3", "4"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n?\n3\n4\n");
+    assert_eq!(output, "?\n?\n         3\n         4\n");
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_two_variables_with_one_reply_that_has_a_comma() {
     let (result, output) =
         run_with_replies(&["10 INPUT A, B", "20 PRINT A", "30 PRINT B"], &["3,4"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n3\n4\n");
+    assert_eq!(output, "?\n         3\n         4\n");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_extra_values_on_a_reply_line_are_ignored() {
         &["3,9", "4"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n?\n3\n4\n");
+    assert_eq!(output, "?\n?\n         3\n         4\n");
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_string_and_numeric_variable_in_one_statement() {
         &["Bob, 7"],
     );
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "Name and age?\nBob\n7\n");
+    assert_eq!(output, "Name and age?\nBob\n         7\n");
 }
 
 #[test]

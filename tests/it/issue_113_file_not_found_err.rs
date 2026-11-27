@@ -11,7 +11,7 @@ fn test_on_error_gives_err_214_for_loadjson_of_missing_file() {
     let (result, output) =
         run_with_limit(&["10 ON ERROR GOTO 100", &load, "30 END", "100 PRINT ERR"]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "214\n");
+    assert_eq!(output, "       214\n");
 }
 
 #[test]

@@ -188,6 +188,16 @@ fn parse_leading_number(text: &str) -> f64 {
     text[..end].parse::<f64>().unwrap_or(0.0)
 }
 
+/// The width of a PRINT field: the low byte of `@%` on a BBC Micro, default 10.
+/// Issue #166 gives this value from `@%`.
+const PRINT_FIELD_WIDTH: usize = 10;
+
+/// Put the text of a number at the right of a field of `width` characters, as
+/// PRINT does. A text that is longer than the field does not change.
+fn pad_to_field(text: &str, width: usize) -> String {
+    format!("{:>width$}", text, width = width)
+}
+
 /// Make the hex text of an integer, as `PRINT ~` does: upper case, with no `&`
 /// and no leading zeros. A negative value shows its 32-bit form.
 fn format_hex(value: i32) -> String {
@@ -909,29 +919,48 @@ impl Executor {
         Ok(())
     }
 
-    /// Execute a PRINT statement
+    /// Execute a PRINT statement.
+    ///
+    /// The field rules are the rules of BBC BASIC 2 (the PRINT routine at
+    /// &8D83 to &8E1F of the ROM, and the PRINT page of the BBC Micro User
+    /// Guide). At the start of the statement, a number prints at the right of a
+    /// field of `PRINT_FIELD_WIDTH` characters. A `;` turns the field off, so
+    /// that the numbers after it have no padding. A `,` first prints spaces up
+    /// to the next field boundary (none if the column is on a boundary), then
+    /// turns the field on again. A string is never padded. `TAB`, `SPC` and `'`
+    /// do not change the field.
     fn execute_print(&mut self, items: &[crate::parser::PrintItem]) -> Result<()> {
         use crate::parser::PrintItem;
 
         // After ~, numeric items print in hex until the next comma or semicolon
         let mut hex = false;
+        // The width of the field of the next number: 0 after a semicolon
+        let mut field = PRINT_FIELD_WIDTH;
         for item in items {
             match item {
                 PrintItem::Expression(expr) => {
                     // Evaluate expression and print it
-                    let output = self.format_print_item(expr, hex)?;
-                    self.print_output(&output);
+                    let (output, number) = self.format_print_item(expr, hex)?;
+                    if number {
+                        self.print_output(&pad_to_field(&output, field));
+                    } else {
+                        self.print_output(&output);
+                    }
                 }
                 PrintItem::Hex => hex = true,
                 PrintItem::Semicolon => {
-                    // Semicolon suppresses newline (do nothing)
+                    // Semicolon suppresses newline and turns the field off
                     hex = false;
+                    field = 0;
                 }
                 PrintItem::Comma => {
                     hex = false;
-                    // Comma moves to the next print zone of 10 columns
-                    let next_zone = (self.column / 10 + 1) * 10;
-                    self.print_output(&" ".repeat(next_zone - self.column));
+                    field = PRINT_FIELD_WIDTH;
+                    // Comma moves to the next field boundary
+                    let past_boundary = self.column % PRINT_FIELD_WIDTH;
+                    if past_boundary != 0 {
+                        self.print_output(&" ".repeat(PRINT_FIELD_WIDTH - past_boundary));
+                    }
                 }
                 PrintItem::NewLine => self.print_new_line(),
                 PrintItem::Tab(expr) => {
@@ -966,34 +995,32 @@ impl Executor {
     }
 
     /// Format a PRINT item. If `hex` is true, a numeric item shows in hex.
-    /// A string item does not change.
-    fn format_print_item(&mut self, expr: &Expression, hex: bool) -> Result<String> {
+    /// A string item does not change. The flag is true for a number.
+    fn format_print_item(&mut self, expr: &Expression, hex: bool) -> Result<(String, bool)> {
         if hex && !self.is_string_expr(expr) {
-            Ok(format_hex(real_to_integer(self.eval_number(expr)?)?))
+            Ok((format_hex(real_to_integer(self.eval_number(expr)?)?), true))
         } else {
             self.format_expression(expr)
         }
     }
 
-    /// Format an expression for printing
-    fn format_expression(&mut self, expr: &Expression) -> Result<String> {
+    /// Format an expression for printing. The flag is true for a number.
+    fn format_expression(&mut self, expr: &Expression) -> Result<(String, bool)> {
         match expr {
-            Expression::Integer(_) => Ok(self.eval_integer(expr)?.to_string()),
-            Expression::Real(_) => Ok(format_real(self.eval_real(expr)?, self.exact_reals)),
-            Expression::String(_) => self.eval_string(expr),
+            Expression::Integer(_) => Ok((self.eval_integer(expr)?.to_string(), true)),
+            Expression::Real(_) => self.format_real_item(expr),
+            Expression::String(_) => Ok((self.eval_string(expr)?, false)),
             Expression::Variable(name) => {
                 if name.ends_with('%') {
-                    Ok(self.eval_integer(expr)?.to_string())
+                    Ok((self.eval_integer(expr)?.to_string(), true))
                 } else if name.ends_with('$') {
-                    self.eval_string(expr)
+                    Ok((self.eval_string(expr)?, false))
                 } else {
-                    Ok(format_real(self.eval_real(expr)?, self.exact_reals))
+                    self.format_real_item(expr)
                 }
             }
             // VAL gives a real value, so do not try it as an integer first
-            Expression::FunctionCall { name, .. } if name == "VAL" => {
-                Ok(format_real(self.eval_real(expr)?, self.exact_reals))
-            }
+            Expression::FunctionCall { name, .. } if name == "VAL" => self.format_real_item(expr),
             // A user function with no $ in its name can give a string or a
             // number. Run its body one time and format the result by its type.
             Expression::FunctionCall { name, args }
@@ -1012,26 +1039,29 @@ impl Executor {
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
             // function, also for a string function such as FNx$.
-            _ if self.is_string_expr(expr) => self.eval_string(expr),
-            _ if self.is_real_expr(expr) => {
-                Ok(format_real(self.eval_real(expr)?, self.exact_reals))
-            }
-            _ => Ok(self.eval_integer(expr)?.to_string()),
+            _ if self.is_string_expr(expr) => Ok((self.eval_string(expr)?, false)),
+            _ if self.is_real_expr(expr) => self.format_real_item(expr),
+            _ => Ok((self.eval_integer(expr)?.to_string(), true)),
         }
     }
 
+    /// Format a real expression for printing, with the number flag
+    fn format_real_item(&mut self, expr: &Expression) -> Result<(String, bool)> {
+        Ok((format_real(self.eval_real(expr)?, self.exact_reals), true))
+    }
+
     /// Format the `=` result of a user function for PRINT. A string prints as
-    /// text, and a number prints as a real value.
-    fn format_function_result(&mut self, expr: &Expression) -> Result<String> {
+    /// text, and a number prints as a real value. The flag is true for a number.
+    fn format_function_result(&mut self, expr: &Expression) -> Result<(String, bool)> {
         match expr {
-            _ if self.is_string_expr(expr) => self.eval_string(expr),
+            _ if self.is_string_expr(expr) => Ok((self.eval_string(expr)?, false)),
             // The result is the result of a second function: format it by its type
             Expression::FunctionCall { name, .. }
                 if !name.ends_with('$') && self.functions.contains_key(name) =>
             {
                 self.format_expression(expr)
             }
-            _ => Ok(format_real(self.eval_real(expr)?, self.exact_reals)),
+            _ => self.format_real_item(expr),
         }
     }
 
@@ -4639,7 +4669,7 @@ impl Executor {
         let mut hex = false;
         for item in items {
             match item {
-                PrintItem::Expression(expr) => records.push(self.format_print_item(expr, hex)?),
+                PrintItem::Expression(expr) => records.push(self.format_print_item(expr, hex)?.0),
                 // The parser does not permit TAB, SPC and ' in PRINT#
                 PrintItem::Tab(_)
                 | PrintItem::TabXY(..)
@@ -5103,7 +5133,7 @@ mod tests {
         };
 
         executor.execute_statement(&stmt).unwrap();
-        assert_eq!(executor.get_output(), "42\n");
+        assert_eq!(executor.get_output(), "        42\n");
     }
 
     #[test]
@@ -5144,7 +5174,7 @@ mod tests {
         };
         executor.execute_statement(&print).unwrap();
 
-        assert_eq!(executor.get_output(), "100\n");
+        assert_eq!(executor.get_output(), "       100\n");
     }
 
     #[test]

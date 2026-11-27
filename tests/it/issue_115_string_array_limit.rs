@@ -23,7 +23,7 @@ fn test_element_of_65535_characters_works() {
         "30 PRINT LEN(A$(1))",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "65535\n");
+    assert_eq!(output, "     65535\n");
 }
 
 #[test]
@@ -48,5 +48,5 @@ fn test_element_keeps_its_old_value_after_the_error() {
         "110 PRINT LEN(A$(1))",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "String too long\n60000\n");
+    assert_eq!(output, "String too long\n     60000\n");
 }

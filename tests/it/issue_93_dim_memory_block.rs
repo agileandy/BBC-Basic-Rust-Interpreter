@@ -12,7 +12,7 @@ fn test_block_can_be_written_and_read() {
     let (result, output) = run(&["10 DIM B% 10", "20 ?B% = 65", "30 PRINT ?B%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "65\n");
+    assert_eq!(output, "        65\n");
 }
 
 #[test]
@@ -20,7 +20,7 @@ fn test_two_blocks_do_not_overlap() {
     let (result, output) = run(&["10 DIM A% 10, B% 20", "20 PRINT B% - A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "11\n");
+    assert_eq!(output, "        11\n");
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn test_block_is_not_below_top_and_is_below_himem() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n-1\n");
+    assert_eq!(output, "        -1\n        -1\n");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_block_mixed_with_array() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_block_that_is_too_large_gives_dim_space_error() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "11\n");
+    assert_eq!(output, "        11\n");
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn test_block_of_minus_one_reserves_no_space() {
     let (result, output) = run(&["10 DIM A% -1", "20 DIM B% 5", "30 PRINT B% - A%"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn test_block_size_below_minus_one_gives_bad_dim_error() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "        10\n");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_clear_frees_the_blocks() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -125,5 +125,5 @@ fn test_memory_write_with_array_element_as_base() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n7\n");
+    assert_eq!(output, "         5\n         7\n");
 }

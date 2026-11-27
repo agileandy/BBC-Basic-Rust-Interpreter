@@ -193,7 +193,7 @@ fn test_block_in_procedure_and_multi_line_function() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "minus\nplus\n0 1\n");
+    assert_eq!(output, "minus\nplus\n         0 1\n");
 }
 
 /// Store the program lines, then run one typed line. Return its result and
@@ -330,7 +330,7 @@ fn test_lower_case_endif_is_a_variable() {
     let (result, output) = run(&["10 endif=5", "20 PRINT endif"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5\n");
+    assert_eq!(output, "         5\n");
 }
 
 #[test]

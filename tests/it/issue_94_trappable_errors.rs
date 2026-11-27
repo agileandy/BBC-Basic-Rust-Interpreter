@@ -27,19 +27,22 @@ fn trapped_output(body: &[&str]) -> String {
 
 #[test]
 fn test_goto_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 GOTO 500"]), "41 20\n");
+    assert_eq!(trapped_output(&["20 GOTO 500"]), "        41 20\n");
     assert_eq!(error_of(&["20 GOTO 500"]), "No such line: 500 at line 20");
 }
 
 #[test]
 fn test_gosub_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 GOSUB 500"]), "41 20\n");
+    assert_eq!(trapped_output(&["20 GOSUB 500"]), "        41 20\n");
     assert_eq!(error_of(&["20 GOSUB 500"]), "No such line: 500 at line 20");
 }
 
 #[test]
 fn test_calculated_goto_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 X% = 500", "30 GOTO X%"]), "41 30\n");
+    assert_eq!(
+        trapped_output(&["20 X% = 500", "30 GOTO X%"]),
+        "        41 30\n"
+    );
     assert_eq!(
         error_of(&["20 X% = 500", "30 GOTO X%"]),
         "No such line: 500 at line 30"
@@ -48,7 +51,10 @@ fn test_calculated_goto_missing_line_is_trapped() {
 
 #[test]
 fn test_calculated_gosub_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 X% = 500", "30 GOSUB X%"]), "41 30\n");
+    assert_eq!(
+        trapped_output(&["20 X% = 500", "30 GOSUB X%"]),
+        "        41 30\n"
+    );
     assert_eq!(
         error_of(&["20 X% = 500", "30 GOSUB X%"]),
         "No such line: 500 at line 30"
@@ -57,7 +63,7 @@ fn test_calculated_gosub_missing_line_is_trapped() {
 
 #[test]
 fn test_on_goto_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 ON 1 GOTO 500"]), "41 20\n");
+    assert_eq!(trapped_output(&["20 ON 1 GOTO 500"]), "        41 20\n");
     assert_eq!(
         error_of(&["20 ON 1 GOTO 500"]),
         "No such line: 500 at line 20"
@@ -66,7 +72,7 @@ fn test_on_goto_missing_line_is_trapped() {
 
 #[test]
 fn test_on_gosub_missing_line_is_trapped() {
-    assert_eq!(trapped_output(&["20 ON 1 GOSUB 500"]), "41 20\n");
+    assert_eq!(trapped_output(&["20 ON 1 GOSUB 500"]), "        41 20\n");
     assert_eq!(
         error_of(&["20 ON 1 GOSUB 500"]),
         "No such line: 500 at line 20"
@@ -77,13 +83,13 @@ fn test_on_gosub_missing_line_is_trapped() {
 
 #[test]
 fn test_return_with_no_gosub_is_trapped() {
-    assert_eq!(trapped_output(&["20 RETURN"]), "38 20\n");
+    assert_eq!(trapped_output(&["20 RETURN"]), "        38 20\n");
     assert_eq!(error_of(&["20 RETURN"]), "No GOSUB at line 20");
 }
 
 #[test]
 fn test_endproc_with_no_proc_is_trapped() {
-    assert_eq!(trapped_output(&["20 ENDPROC"]), "13 20\n");
+    assert_eq!(trapped_output(&["20 ENDPROC"]), "        13 20\n");
     assert_eq!(error_of(&["20 ENDPROC"]), "No PROC at line 20");
 }
 
@@ -91,13 +97,13 @@ fn test_endproc_with_no_proc_is_trapped() {
 
 #[test]
 fn test_unknown_proc_is_trapped() {
-    assert_eq!(trapped_output(&["20 PROCz"]), "29 20\n");
+    assert_eq!(trapped_output(&["20 PROCz"]), "        29 20\n");
     assert_eq!(error_of(&["20 PROCz"]), "No such FN/PROC: PROCz at line 20");
 }
 
 #[test]
 fn test_unknown_fn_is_trapped() {
-    assert_eq!(trapped_output(&["20 PRINT FNq"]), "29 20\n");
+    assert_eq!(trapped_output(&["20 PRINT FNq"]), "        29 20\n");
     assert_eq!(
         error_of(&["20 PRINT FNq"]),
         "No such FN/PROC: FNq at line 20"
@@ -128,7 +134,7 @@ fn test_defined_fn_still_runs() {
         "30 DEF FNdouble(X) = X * 2",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "8\n");
+    assert_eq!(output, "         8\n");
 }
 
 #[test]
@@ -141,7 +147,7 @@ fn test_unknown_built_in_name_keeps_syntax_error() {
 
 #[test]
 fn test_undefined_fn_with_built_in_name_does_not_call_the_built_in() {
-    assert_eq!(trapped_output(&["20 PRINT FNSIN(0)"]), "29 20\n");
+    assert_eq!(trapped_output(&["20 PRINT FNSIN(0)"]), "        29 20\n");
     assert_eq!(
         error_of(&["20 PRINT FNSIN(0)"]),
         "No such FN/PROC: FNSIN at line 20"
@@ -176,7 +182,7 @@ fn test_error_in_fn_body_called_by_until_gives_body_line() {
         "50 DEF FNa",
         "60 = 1 / 0",
     ];
-    assert_eq!(trapped_output(&body), "18 60\n");
+    assert_eq!(trapped_output(&body), "        18 60\n");
     assert_eq!(error_of(&body), "Division by zero at line 60");
 }
 
@@ -184,7 +190,7 @@ fn test_error_in_fn_body_called_by_until_gives_body_line() {
 fn test_error_in_while_condition_is_trapped() {
     assert_eq!(
         trapped_output(&["20 WHILE 1 / 0", "30 ENDWHILE"]),
-        "18 20\n"
+        "        18 20\n"
     );
     assert_eq!(
         error_of(&["20 WHILE 1 / 0", "30 ENDWHILE"]),
@@ -195,7 +201,7 @@ fn test_error_in_while_condition_is_trapped() {
 #[test]
 fn test_error_in_endwhile_condition_is_trapped() {
     let body = ["20 A = 1", "30 WHILE 1 / A", "40 A = 0", "50 ENDWHILE"];
-    assert_eq!(trapped_output(&body), "18 50\n");
+    assert_eq!(trapped_output(&body), "        18 50\n");
     assert_eq!(error_of(&body), "Division by zero at line 50");
 }
 
@@ -203,7 +209,7 @@ fn test_error_in_endwhile_condition_is_trapped() {
 fn test_error_in_on_goto_expression_is_trapped() {
     assert_eq!(
         trapped_output(&["20 ON 1 / 0 GOTO 30", "30 END"]),
-        "18 20\n"
+        "        18 20\n"
     );
     assert_eq!(
         error_of(&["20 ON 1 / 0 GOTO 30", "30 END"]),
@@ -215,7 +221,7 @@ fn test_error_in_on_goto_expression_is_trapped() {
 fn test_error_in_on_gosub_expression_is_trapped() {
     assert_eq!(
         trapped_output(&["20 ON 1 / 0 GOSUB 30", "30 END"]),
-        "18 20\n"
+        "        18 20\n"
     );
     assert_eq!(
         error_of(&["20 ON 1 / 0 GOSUB 30", "30 END"]),
@@ -226,7 +232,7 @@ fn test_error_in_on_gosub_expression_is_trapped() {
 #[test]
 fn test_error_in_proc_argument_is_trapped() {
     let body = ["20 PROCa(1 / 0)", "30 END", "40 DEF PROCa(X)", "50 ENDPROC"];
-    assert_eq!(trapped_output(&body), "18 20\n");
+    assert_eq!(trapped_output(&body), "        18 20\n");
     assert_eq!(error_of(&body), "Division by zero at line 20");
 }
 
@@ -234,19 +240,22 @@ fn test_error_in_proc_argument_is_trapped() {
 
 #[test]
 fn test_channel_err_is_222() {
-    assert_eq!(trapped_output(&["20 PRINT EOF#99"]), "222 20\n");
+    assert_eq!(trapped_output(&["20 PRINT EOF#99"]), "       222 20\n");
 }
 
 #[test]
 fn test_bad_call_err_is_30() {
     let path = format!("{}/issue_94_bad_call.txt", env!("CARGO_TARGET_TMPDIR"));
     let open = format!("20 X = OPENOUT(\"{}\")", path);
-    assert_eq!(trapped_output(&[&open, "30 PRINT EOF#X"]), "30 30\n");
+    assert_eq!(
+        trapped_output(&[&open, "30 PRINT EOF#X"]),
+        "        30 30\n"
+    );
 }
 
 #[test]
 fn test_syntax_error_err_is_16() {
-    assert_eq!(trapped_output(&["20 X = TIME(1)"]), "16 20\n");
+    assert_eq!(trapped_output(&["20 X = TIME(1)"]), "        16 20\n");
 }
 
 // D7: the handler of an error in a PROC sees the outer values
@@ -266,7 +275,7 @@ fn test_handler_after_error_in_proc_sees_outer_values() {
         "100 PRINT ERR; \" \"; ERL; \" \"; Y",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "18 80 5\n");
+    assert_eq!(output, "        18 80 5\n");
 }
 
 #[test]
@@ -283,7 +292,7 @@ fn test_handler_after_error_in_fn_sees_outer_values() {
         "100 PRINT ERR; \" \"; ERL; \" \"; Y",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "18 80 5\n");
+    assert_eq!(output, "        18 80 5\n");
 }
 
 #[test]
@@ -409,7 +418,7 @@ fn test_handler_goto_after_the_loop_continues() {
         "110 GOTO 50",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "h\nafter\n1\n2\n");
+    assert_eq!(output, "h\nafter\n         1\n         2\n");
 }
 
 // K2: Arguments, ERR 31, for a wrong argument count
@@ -417,13 +426,13 @@ fn test_handler_goto_after_the_loop_continues() {
 #[test]
 fn test_proc_with_wrong_argument_count_is_trapped() {
     let body = ["20 PROCa(1, 2)", "30 END", "40 DEF PROCa(X)", "50 ENDPROC"];
-    assert_eq!(trapped_output(&body), "31 20\n");
+    assert_eq!(trapped_output(&body), "        31 20\n");
     assert_eq!(error_of(&body), "Arguments at line 20");
 }
 
 #[test]
 fn test_fn_with_wrong_argument_count_is_trapped() {
     let body = ["20 PRINT FNa(1, 2)", "30 END", "40 DEF FNa(X) = X"];
-    assert_eq!(trapped_output(&body), "31 20\n");
+    assert_eq!(trapped_output(&body), "        31 20\n");
     assert_eq!(error_of(&body), "Arguments at line 20");
 }

@@ -22,7 +22,7 @@ fn test_function_with_local_gives_result_and_keeps_caller_variable() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7\n5\n");
+    assert_eq!(output, "         7\n         5\n");
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn test_recursive_factorial_gives_120_for_5() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "120\n");
+    assert_eq!(output, "       120\n");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_function_with_for_loop_in_body() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\nDONE\n");
+    assert_eq!(output, "        10\nDONE\n");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_function_calls_procedure_and_procedure_calls_function() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "IN PROC\n20\n6\n");
+    assert_eq!(output, "IN PROC\n        20\n         6\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_result_inside_for_loop_does_not_leave_loop_for_caller_next() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2\n3\n4\nDONE\n");
+    assert_eq!(output, "         2\n         3\n         4\nDONE\n");
 }
 
 #[test]
@@ -225,7 +225,10 @@ fn test_result_inside_repeat_loop_does_not_leave_loop_for_caller_until() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n10\n20\n20\n30\n30\nDONE\n");
+    assert_eq!(
+        output,
+        "        10\n        10\n        20\n        20\n        30\n        30\nDONE\n"
+    );
 }
 
 #[test]
@@ -247,7 +250,7 @@ fn test_result_inside_while_loop_does_not_leave_loop_for_caller_endwhile() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -264,7 +267,7 @@ fn test_removed_function_is_unknown_on_next_run() {
         program.store_line(tokenize(line).expect("line tokenizes"));
     }
     assert_eq!(run_program(&mut executor, &mut program), Ok(()));
-    assert_eq!(executor.get_output(), "5\n");
+    assert_eq!(executor.get_output(), "         5\n");
 
     // Remove the DEF line, then run again with the same executor
     program.delete_line(100);
@@ -284,7 +287,7 @@ fn test_single_line_function_in_immediate_mode_without_run() {
             .expect("statement runs");
     }
 
-    assert_eq!(executor.get_output(), "9\n");
+    assert_eq!(executor.get_output(), "         9\n");
 }
 
 #[test]
@@ -292,5 +295,5 @@ fn test_single_line_function_defined_after_end() {
     let (result, output) = run(&["10 PRINT FNsq(4)", "20 END", "100 DEF FNsq(X) = X * X"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "16\n");
+    assert_eq!(output, "        16\n");
 }

@@ -19,8 +19,8 @@ fn test_variable_and_array_named_delete_still_work() {
     );
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 5\n"), "output: {output}");
-    assert!(output.contains("> 7\n"), "output: {output}");
+    assert!(output.contains(">          5\n"), "output: {output}");
+    assert!(output.contains(">          7\n"), "output: {output}");
 }
 
 #[test]
@@ -30,8 +30,8 @@ fn test_variable_and_array_named_renumber_still_work() {
     );
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 6\n"), "output: {output}");
-    assert!(output.contains("> 8\n"), "output: {output}");
+    assert!(output.contains(">          6\n"), "output: {output}");
+    assert!(output.contains(">          8\n"), "output: {output}");
 }
 
 #[test]
@@ -40,8 +40,8 @@ fn test_variable_and_array_named_auto_still_work() {
         run_binary("auto = 7\nPRINT auto\nDIM auto(3)\nauto(2) = 9\nPRINT auto(2)\nEXIT\n");
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 7\n"), "output: {output}");
-    assert!(output.contains("> 9\n"), "output: {output}");
+    assert!(output.contains(">          7\n"), "output: {output}");
+    assert!(output.contains(">          9\n"), "output: {output}");
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_mixed_case_word_with_bad_argument_is_a_statement() {
         run_binary("Delete = 1\nReNumber = 2\nAuto = 3\nPRINT Delete + ReNumber + Auto\nEXIT\n");
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 6\n"), "output: {output}");
+    assert!(output.contains(">          6\n"), "output: {output}");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_variables_named_save_load_and_chain_still_work() {
     );
 
     assert!(!output.contains("Error"), "output: {output}");
-    assert!(output.contains("> 18\n"), "output: {output}");
+    assert!(output.contains(">         18\n"), "output: {output}");
     assert!(!dir.join("= 5.bbas").exists(), "SAVE wrote a file");
     let _ = std::fs::remove_dir_all(&dir);
 }

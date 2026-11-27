@@ -35,18 +35,18 @@ fn test_negative_base_with_fraction_exponent_gives_log_range() {
 fn test_log_range_from_power_is_caught_by_on_error() {
     assert_eq!(
         error_with_handler("(-8) ^ 0.5"),
-        (Ok(()), "22 20\n".to_string())
+        (Ok(()), "        22 20\n".to_string())
     );
 }
 
 #[test]
 fn test_negative_base_with_whole_exponent_is_valid() {
     for (expression, expected) in [
-        ("(-2) ^ 3", "-8\n"),
-        ("(-2) ^ -2", "0.25\n"),
-        ("(-2) ^ 2.0", "4\n"),
-        ("(-2.5) ^ 2", "6.25\n"),
-        ("2 ^ -1", "0.5\n"),
+        ("(-2) ^ 3", "        -8\n"),
+        ("(-2) ^ -2", "      0.25\n"),
+        ("(-2) ^ 2.0", "         4\n"),
+        ("(-2.5) ^ 2", "      6.25\n"),
+        ("2 ^ -1", "       0.5\n"),
     ] {
         assert_eq!(
             print_of(expression),
@@ -63,8 +63,8 @@ fn test_positive_base_powers_do_not_change() {
         ("2 ^ 0.5", "1.41421356\n"),
         // A real value with 9 significant digits, as in BBC BASIC (issue #175)
         ("2 ^ 30", "1.07374182E9\n"),
-        ("0 ^ 0", "1\n"),
-        ("0 ^ 0.5", "0\n"),
+        ("0 ^ 0", "         1\n"),
+        ("0 ^ 0.5", "         0\n"),
     ] {
         assert_eq!(
             print_of(expression),
@@ -116,7 +116,7 @@ fn test_result_that_is_not_finite_gives_too_big() {
 fn test_too_big_from_real_arithmetic_is_caught_by_on_error() {
     assert_eq!(
         error_with_handler("1E308 * 10"),
-        (Ok(()), "20 20\n".to_string())
+        (Ok(()), "        20 20\n".to_string())
     );
 }
 

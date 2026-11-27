@@ -42,7 +42,7 @@ fn test_on_error_catches_no_repeat() {
         "100 PRINT ERR; \" \"; ERL",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "43 20\n");
+    assert_eq!(output, "        43 20\n");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_repeat_loop_is_unchanged() {
         "60 PRINT \"DONE\"",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_nested_repeat_loops_are_unchanged() {
         "90 UNTIL I% = 2",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 2\n2 2\n");
+    assert_eq!(output, "         1 2\n         2 2\n");
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_typed_repeat_loop_is_unchanged() {
     let line = tokenize("I% = 0 : REPEAT : I% = I% + 1 : UNTIL I% = 3 : PRINT I%")
         .expect("typed line tokenizes");
     run_typed_line(&mut executor, &program, &line).expect("the typed line runs");
-    assert_eq!(executor.get_output(), "3\n");
+    assert_eq!(executor.get_output(), "         3\n");
 }
 
 // D3: ENDWHILE with no open WHILE loop
@@ -133,7 +133,7 @@ fn test_on_error_catches_no_while() {
         "100 PRINT ERR; \" \"; ERL",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "46 20\n");
+    assert_eq!(output, "        46 20\n");
 }
 
 #[test]
@@ -152,5 +152,5 @@ fn test_while_loop_is_unchanged() {
         "60 PRINT \"DONE\"",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n2\n3\nDONE\n");
+    assert_eq!(output, "         1\n         2\n         3\nDONE\n");
 }

@@ -54,7 +54,7 @@ fn test_vdu_25_moves_then_draws_a_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "         10\n");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_plot_4_moves_and_plot_5_draws_a_line() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "         10\n");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_plot_0_and_plot_1_are_relative() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "10\n");
+    assert_eq!(output, "         10\n");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn test_vdu_25_with_negative_coordinates() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_vdu_29_sets_the_origin() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn test_vdu_16_clears_the_graphics() {
     let (result, output) = run(&["10 PLOT 69, 10, 10", "20 VDU 16", "30 PRINT POINT(10, 10)"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_vdu_18_sets_the_graphics_colour() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n");
+    assert_eq!(output, "         0\n");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_vdu_command_split_over_2_statements() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1\n");
+    assert_eq!(output, "         1\n");
 }
 
 #[test]

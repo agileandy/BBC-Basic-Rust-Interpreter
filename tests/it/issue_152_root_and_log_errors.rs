@@ -36,7 +36,7 @@ fn test_negative_root_with_handler() {
     for expression in ["SQR(-1)", "ASN(2)", "ACS(2)"] {
         assert_eq!(
             error_with_handler(expression),
-            (Ok(()), "21 20\n".to_string()),
+            (Ok(()), "        21 20\n".to_string()),
             "{}",
             expression
         );
@@ -60,7 +60,7 @@ fn test_log_range_with_handler() {
     for expression in ["LOG(-1)", "LOG(0)", "LN(0)", "LN(-1)"] {
         assert_eq!(
             error_with_handler(expression),
-            (Ok(()), "22 20\n".to_string()),
+            (Ok(()), "        22 20\n".to_string()),
             "{}",
             expression
         );
@@ -79,7 +79,7 @@ fn test_exp_range_with_no_handler() {
 fn test_exp_range_with_handler() {
     assert_eq!(
         error_with_handler("EXP(1000)"),
-        (Ok(()), "24 20\n".to_string())
+        (Ok(()), "        24 20\n".to_string())
     );
 }
 
@@ -98,7 +98,8 @@ fn test_correct_values_are_unchanged() {
         (result, output),
         (
             Ok(()),
-            "0\n0\n2\n2.71828183\n-1\n-1        -1\n".to_string()
+            "         0\n         0\n         2\n2.71828183\n        -1\n        -1        -1\n"
+                .to_string()
         )
     );
 }

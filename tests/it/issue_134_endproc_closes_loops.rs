@@ -91,7 +91,10 @@ fn test_recursive_proc_closes_the_loop_at_each_level() {
         "100 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "123J=1\n123J=2\n");
+    assert_eq!(
+        output,
+        "         1         2         3J=1\n         1         2         3J=2\n"
+    );
 }
 
 // D2: a loop that the caller opened stays open after ENDPROC
@@ -109,7 +112,7 @@ fn test_loop_of_the_caller_stays_open_after_endproc() {
         "80 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "123end\n");
+    assert_eq!(output, "         1         2         3end\n");
 }
 
 #[test]
@@ -127,5 +130,5 @@ fn test_closed_loop_of_the_proc_keeps_the_loop_of_the_caller() {
         "100 ENDPROC",
     ]);
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "11122122end\n");
+    assert_eq!(output, "         11         12         21         22end\n");
 }

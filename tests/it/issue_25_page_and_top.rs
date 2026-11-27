@@ -46,7 +46,7 @@ fn test_lomem_is_equal_to_top() {
     let (result, output) = run(&["10 PRINT LOMEM = TOP", "20 REM X"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_himem_is_more_than_top() {
     let (result, output) = run(&["10 PRINT HIMEM > TOP"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_print_page_shows_an_integer() {
     let (result, output) = run(&["10 PRINT PAGE"]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "6400\n");
+    assert_eq!(output, "      6400\n");
 }
 
 #[test]
@@ -75,5 +75,5 @@ fn test_typed_line_sees_the_stored_program() {
     let result = run_typed_line(&mut executor, &program, &typed);
 
     assert!(result.is_ok(), "result: {result:?}");
-    assert_eq!(executor.get_output(), "-1\n");
+    assert_eq!(executor.get_output(), "        -1\n");
 }

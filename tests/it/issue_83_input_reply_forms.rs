@@ -11,7 +11,7 @@ fn test_input_stores_into_numeric_array_element() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n42\n");
+    assert_eq!(output, "?\n        42\n");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn test_input_stores_into_two_dimension_integer_element() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n7\n");
+    assert_eq!(output, "?\n         7\n");
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn test_numeric_value_with_spaces_is_not_affected() {
         run_with_replies(&["10 INPUT A, B%", "20 PRINT A + B%"], &["  1.5  ,  2  "]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "?\n3.5\n");
+    assert_eq!(output, "?\n       3.5\n");
 }
 
 #[test]

@@ -38,7 +38,7 @@ fn test_error_handler_gets_err_6_for_numeric_value_in_string_context() {
         let (result, output) = run(&["10 ON ERROR PRINT ERR : END", line.as_str(), "30 END"]);
 
         assert_eq!(result, Ok(()), "{case}");
-        assert_eq!(output, "6\n", "{case}");
+        assert_eq!(output, "         6\n", "{case}");
     }
 }
 

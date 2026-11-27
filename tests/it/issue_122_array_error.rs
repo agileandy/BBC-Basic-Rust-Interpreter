@@ -42,7 +42,7 @@ fn test_array_error_has_err_14_in_a_handler() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "14\n");
+    assert_eq!(output, "        14\n");
 }
 
 #[test]

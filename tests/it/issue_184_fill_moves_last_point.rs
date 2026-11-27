@@ -11,7 +11,7 @@ fn test_a_relative_point_after_fill_starts_from_the_fill_point() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "23\n");
+    assert_eq!(output, "         23\n");
 }
 
 /// A square outline, a move outside it, a fill inside it, then a filled
@@ -33,7 +33,7 @@ fn test_fill_and_plot_133_give_the_same_pixels_and_the_same_last_2_points() {
     let plot = fill_then_triangle("PLOT 133, 300, 300");
 
     assert_eq!(fill.0, Ok(()));
-    assert_eq!(fill.1, "2322\n00\n");
+    assert_eq!(fill.1, "         2322\n         00\n");
     assert_eq!(fill, plot);
 }
 

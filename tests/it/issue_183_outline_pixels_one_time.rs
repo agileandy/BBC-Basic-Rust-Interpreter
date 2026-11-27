@@ -99,7 +99,7 @@ fn test_the_issue_program_prints_22() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "22\n");
+    assert_eq!(output, "         22\n");
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_an_ellipse_in_the_inverse_colour_sets_its_axis_points() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "2222\n");
+    assert_eq!(output, "         2222\n");
 }
 
 #[test]

@@ -45,7 +45,7 @@ fn test_three_values_come_back_with_one_input_file() {
 
     assert_eq!(result, Ok(()));
     assert_eq!(file, "7\nAB\n3.5\n");
-    assert_eq!(output, "7 AB 3.5\n");
+    assert_eq!(output, "         7 AB 3.5\n");
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_numbers_come_back_with_all_digits() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1-1-1-1\n");
+    assert_eq!(output, "        -1-1-1-1\n");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn test_three_print_file_statements_and_one_input_file() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1 two 3\n");
+    assert_eq!(output, "         1 two 3\n");
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_on_error_catches_the_eof_error() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "223 50\n");
+    assert_eq!(output, "       223 50\n");
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn test_eof_is_true_after_the_last_value() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "0\n-1\n");
+    assert_eq!(output, "         0\n        -1\n");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn test_array_elements_are_targets() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "7 AB 3.5\n");
+    assert_eq!(output, "         7 AB 3.5\n");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn test_string_with_a_carriage_return_gives_an_error() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "155\n");
+    assert_eq!(output, "       155\n");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn test_last_line_with_no_line_feed_is_one_record() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "5 last -1\n");
+    assert_eq!(output, "         5 last -1\n");
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn test_old_file_with_tabs_reads_the_full_line_into_a_string() {
     ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "-1\n");
+    assert_eq!(output, "        -1\n");
 }
 
 #[test]
