@@ -1614,8 +1614,10 @@ impl Executor {
         let width_val = self.eval_integer(width)?;
         let height_val = self.eval_integer(height)?;
 
-        let x2_val = x1_val + width_val;
-        let y2_val = y1_val + height_val;
+        // The far corner becomes the last point, so it saturates at the i32
+        // limits (the rule of issue 137 in src/graphics/mod.rs)
+        let x2_val = x1_val.saturating_add(width_val);
+        let y2_val = y1_val.saturating_add(height_val);
 
         // A text-only screen mode has no graphics
         if self.screen_mode.has_graphics {
