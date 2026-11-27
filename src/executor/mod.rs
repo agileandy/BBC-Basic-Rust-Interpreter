@@ -2,6 +2,10 @@
 //!
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
+// Unit tests never read stdin, so the stdin reader is not used in them.
+#[cfg_attr(test, allow(dead_code))]
+mod key_input;
+
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::memory::MemoryManager;
@@ -306,6 +310,8 @@ pub struct Executor {
     dim_space_used: usize,
     // Replies for INPUT, used before stdin (for testing)
     input_queue: VecDeque<String>,
+    // Keys for GET and GET$, used before stdin (for testing)
+    key_queue: VecDeque<char>,
     // Output buffer (for testing)
     output: String,
     // Column of the print position: 0 after a newline, updated by print_output
@@ -345,6 +351,7 @@ impl Executor {
             program_size: 0,
             dim_space_used: 0,
             input_queue: VecDeque::new(),
+            key_queue: VecDeque::new(),
             output: String::new(),
             column: 0,
             screen_mode: ScreenMode::from_number(0).expect("mode 0 is in the mode table"),
@@ -740,6 +747,28 @@ impl Executor {
     /// Add a reply for a later INPUT. Queued replies are used before stdin.
     pub fn queue_input(&mut self, line: &str) {
         self.input_queue.push_back(line.to_string());
+    }
+
+    /// Add keys for later GET or GET$, one key for each character.
+    /// Queued keys are used before stdin.
+    pub fn queue_keys(&mut self, keys: &str) {
+        self.key_queue.extend(keys.chars());
+    }
+
+    /// Take the next key from the queue. If the queue is empty, read one key
+    /// from stdin. Give None at the end of input.
+    fn next_key(&mut self) -> Option<char> {
+        if let Some(key) = self.key_queue.pop_front() {
+            return Some(key);
+        }
+        #[cfg(test)]
+        {
+            None
+        }
+        #[cfg(not(test))]
+        {
+            key_input::read_key().map(char::from)
+        }
     }
 
     /// Clear output buffer (for testing)
@@ -2112,6 +2141,8 @@ impl Executor {
                 self.eval_integer(&args[0])?;
                 Ok(0)
             }
+            // GET waits for one key and gives its code. At the end of input it gives -1.
+            "GET" if args.is_empty() => Ok(self.next_key().map_or(-1, |key| key as i32)),
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
@@ -2356,6 +2387,8 @@ impl Executor {
 
         // Otherwise, it's a built-in function
         match name {
+            // GET$ waits for one key and gives it. At the end of input it gives "".
+            "GET$" if args.is_empty() => Ok(self.next_key().map(String::from).unwrap_or_default()),
             "CHR$" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
