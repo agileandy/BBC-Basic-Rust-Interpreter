@@ -152,7 +152,7 @@ fn token_size(token: &Token) -> usize {
         Token::HexInteger(value) => format!("&{:X}", *value as u32).len(),
         Token::Real(value) => value.to_string().len(),
         Token::String(text) => text.len() + 2,
-        Token::DataText(text) | Token::Identifier(text) => text.len(),
+        Token::DataText(text) | Token::RemText(text) | Token::Identifier(text) => text.len(),
         Token::EndOfLine => 0,
     }
 }
