@@ -645,18 +645,31 @@ impl Executor {
     }
 
     /// Execute NEXT statement
+    ///
+    /// `NEXT a, b` handles each name in order. It stops at the first loop
+    /// that continues. If each loop ends, the program continues after the NEXT.
     fn execute_next(&mut self, variables: &[String]) -> Result<()> {
         // If no variables specified, use the most recent FOR loop
-        let var_name = if variables.is_empty() {
-            if let Some((name, _, _, _)) = self.for_loops.last() {
-                name.clone()
-            } else {
+        if variables.is_empty() {
+            let Some((name, _, _, _)) = self.for_loops.last() else {
                 return Err(BBCBasicError::BadCall);
-            }
-        } else {
-            variables[0].clone()
-        };
+            };
+            return self.next_loop(name.clone());
+        }
 
+        for var_name in variables {
+            self.next_loop(var_name.clone())?;
+            if self.next_loop_line.is_some() {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Step the FOR loop of one variable. Set the position to jump back to
+    /// if the loop continues, or clear it if the loop ends.
+    fn next_loop(&mut self, var_name: String) -> Result<()> {
         // Find the matching FOR loop
         let loop_index = self
             .for_loops
