@@ -969,13 +969,13 @@ fn step(
             if executor.local_depth() <= program.proc_floor {
                 return Err(BBCBasicError::NoProc.into());
             }
-            executor
-                .exit_local_scope()
-                .map_err(|_| BBCBasicError::NoProc)?;
-
-            // The GOSUBs that the PROC left open go too
+            // Pop first, so that a failed pop changes nothing. The GOSUBs
+            // that the PROC left open go too.
             let return_position = executor
                 .pop_proc_return()
+                .map_err(|_| BBCBasicError::NoProc)?;
+            executor
+                .exit_local_scope()
                 .map_err(|_| BBCBasicError::NoProc)?;
             // Go back to the PROC call, then continue with the statement after it
             program.goto(return_position);
