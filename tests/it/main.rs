@@ -109,3 +109,4 @@ mod issue_125_lower_case_command_words;
 mod issue_104_json_change;
 mod issue_127_circle_in_text_mode;
 mod issue_129_line_number_range;
+mod issue_124_print_function_string_result;

@@ -775,12 +775,34 @@ impl Executor {
             Expression::FunctionCall { name, .. } if name == "VAL" => {
                 Ok(format_number(self.eval_real(expr)?))
             }
+            // A user function with no $ in its name can give a string or a
+            // number. Run its body one time and format the result by its type.
+            Expression::FunctionCall { name, args }
+                if !name.ends_with('$') && self.functions.contains_key(name) =>
+            {
+                self.call_function(name, args, Self::format_function_result)
+            }
             // Select the evaluator by the type of the expression. Check for a
             // string first, because `is_real_expr` is true for each user
             // function, also for a string function such as FNx$.
             _ if self.is_string_expr(expr) => self.eval_string(expr),
             _ if self.is_real_expr(expr) => Ok(format_number(self.eval_real(expr)?)),
             _ => Ok(self.eval_integer(expr)?.to_string()),
+        }
+    }
+
+    /// Format the `=` result of a user function for PRINT. A string prints as
+    /// text, and a number prints as a real value.
+    fn format_function_result(&mut self, expr: &Expression) -> Result<String> {
+        match expr {
+            _ if self.is_string_expr(expr) => self.eval_string(expr),
+            // The result is the result of a second function: format it by its type
+            Expression::FunctionCall { name, .. }
+                if !name.ends_with('$') && self.functions.contains_key(name) =>
+            {
+                self.format_expression(expr)
+            }
+            _ => Ok(format_number(self.eval_real(expr)?)),
         }
     }
 
