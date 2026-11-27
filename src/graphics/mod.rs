@@ -81,7 +81,15 @@ impl ScreenMode {
     }
 }
 
-/// Graphics system coordinate and state
+/// Graphics system coordinate and state.
+///
+/// The 2 rules for the add of 2 coordinates (issue 137):
+/// - A stored point (the last point, the point before it, the origin) is an
+///   i32. A sum that does not fit saturates at the i32 limits.
+/// - A calculation on the way to a pixel is i64, and the pixel is clipped to
+///   the canvas.
+///
+/// Thus a debug build and a release build give the same result, with no wrap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Point {
     x: i32,
@@ -162,13 +170,14 @@ impl GraphicsSystem {
     fn to_canvas_coords(&self, x: i32, y: i32) -> Option<(usize, usize)> {
         // BBC BASIC uses bottom-left origin, canvas uses top-left
         // Add origin offset
-        let canvas_x = x + self.origin.x;
-        let canvas_y = (self.height as i32) - 1 - (y + self.origin.y);
+        // The sums are i64, so a large origin does not overflow
+        let canvas_x = i64::from(x) + i64::from(self.origin.x);
+        let canvas_y = (self.height as i64) - 1 - (i64::from(y) + i64::from(self.origin.y));
 
         if canvas_x >= 0
-            && canvas_x < self.width as i32
+            && canvas_x < self.width as i64
             && canvas_y >= 0
-            && canvas_y < self.height as i32
+            && canvas_y < self.height as i64
         {
             Some((canvas_x as usize, canvas_y as usize))
         } else {
@@ -233,8 +242,8 @@ impl GraphicsSystem {
 
     /// Move graphics cursor relative to current position
     pub fn move_by(&mut self, dx: i32, dy: i32) {
-        self.current_pos.x += dx;
-        self.current_pos.y += dy;
+        self.current_pos.x = self.current_pos.x.saturating_add(dx);
+        self.current_pos.y = self.current_pos.y.saturating_add(dy);
     }
 
     /// Draw a line from current position to target (DRAW or PLOT 5)
@@ -245,8 +254,8 @@ impl GraphicsSystem {
 
     /// Draw a line relative to current position
     pub fn draw_line_by(&mut self, dx: i32, dy: i32) {
-        let target_x = self.current_pos.x + dx;
-        let target_y = self.current_pos.y + dy;
+        let target_x = self.current_pos.x.saturating_add(dx);
+        let target_y = self.current_pos.y.saturating_add(dy);
         self.draw_line_to(target_x, target_y);
     }
 
@@ -306,7 +315,11 @@ impl GraphicsSystem {
         let (target_x, target_y) = if absolute {
             (x, y)
         } else {
-            (self.current_pos.x + x, self.current_pos.y + y)
+            // The target is the new last point, so it saturates
+            (
+                self.current_pos.x.saturating_add(x),
+                self.current_pos.y.saturating_add(y),
+            )
         };
         let draws = (mode & 0x03) == 1;
 
@@ -721,11 +734,15 @@ impl GraphicsSystem {
                 if color == target_color {
                     self.set_pixel(x, y);
 
-                    // Add adjacent pixels to stack
-                    stack.push((x + 1, y));
-                    stack.push((x - 1, y));
-                    stack.push((x, y + 1));
-                    stack.push((x, y - 1));
+                    // Add adjacent pixels to stack. A pixel past the i32
+                    // limits is not a pixel, so it is not added.
+                    let neighbours = [
+                        x.checked_add(1).map(|x| (x, y)),
+                        x.checked_sub(1).map(|x| (x, y)),
+                        y.checked_add(1).map(|y| (x, y)),
+                        y.checked_sub(1).map(|y| (x, y)),
+                    ];
+                    stack.extend(neighbours.into_iter().flatten());
                 }
             }
         }
