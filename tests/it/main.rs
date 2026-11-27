@@ -14,6 +14,7 @@ mod issue_106_directory_functions;
 mod issue_108_local_proc_parameters;
 mod issue_111_list_with_line_numbers;
 mod issue_112_extension_string_functions;
+mod issue_114_on_error_statements;
 mod issue_116_new_local_variable;
 mod issue_117_plot_codes;
 mod issue_11_sinewave_example;
