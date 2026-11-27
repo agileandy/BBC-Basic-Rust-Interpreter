@@ -118,3 +118,4 @@ mod issue_123_endproc_after_gosub;
 mod issue_128_triangle_fill_clip;
 mod issue_107_case_of_when;
 mod issue_134_endproc_closes_loops;
+mod issue_133_open_with_no_brackets;
