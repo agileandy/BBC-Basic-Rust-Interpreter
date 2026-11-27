@@ -141,7 +141,7 @@ REM This is a comment    ' Comment
   - Example: `A%`, `COUNT%`, `INDEX%`
 - **Real (no suffix)**: 64-bit floating point
   - Example: `X`, `PI`, `RESULT`
-- **String ($)**: Variable-length strings (max 255 chars)
+- **String ($)**: Variable-length strings (max 65535 chars)
   - Example: `NAME$`, `MESSAGE$`, `LINE$`
 
 ## Binary Operators (by precedence)
@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **1128 tests** covering all major components
+- **1319 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -210,7 +210,7 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **1128 total tests** - All passing (385 library + 29 graphics + 714 program and binary)
+- **1319 total tests** - All passing (417 library + 29 graphics + 873 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
@@ -218,8 +218,8 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
 - **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. `PRINT` does not put a number in a field of 10 characters (issue #91).
-- **Errors**: `ON ERROR` does not catch some errors, such as a jump to a line that does not exist, and some `ERR` numbers are different from a BBC Micro (issue #94).
-- **Screen**: `MODE` changes the graphics state, but the terminal shows no colours. The interpreter starts in mode 0, not mode 7. `VDU`, `INKEY` and `INKEY$` are not implemented.
+- **Errors**: `ON ERROR` accepts only `GOTO` and `OFF` (issue #114). File not found has `ERR` 255, not 214 (issue #113).
+- **Screen**: `MODE` changes the graphics state, but the terminal shows no colours. The interpreter starts in mode 0, not mode 7.
 - **Keyboard**: `GET` and `GET$` use the raw terminal mode. That mode is tested through a pseudo-terminal only.
 - **Files**: `PRINT#` writes text, not the binary records of a BBC Micro.
 - **Immediate mode**: a loop typed on more than one line with no line numbers does not work. A typed line is one unit.
@@ -228,10 +228,17 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 The following functions are **NOT** part of the original BBC BASIC specification but are provided as modern extensions:
 
-- `UPPER$` - Convert string to uppercase
-- `LOWER$` - Convert string to lowercase
-- `STRING$` - Repeat character N times
-- `REPORT$` - Get last error message as string
+- `STRING$` - Repeat a string N times
+- `LOADJSON$(file$)` - Read a JSON file as compact JSON text. The keys keep the order of the file
+- `SAVEJSON file$, json$` - Write JSON text to a file with indentation
+- `JSONVALID(json$)` - TRUE when the text is correct JSON
+- `LISTDIR$(path$)` - The names in a directory, in name order, with `CHR$(10)` between them. A sub-directory name ends with `/`
+- `MKDIR path$` - Make one directory
+- `RMDIR path$` - Remove one empty directory
+
+Errors of the extensions: "Bad JSON" is `ERR` 150 and "Bad directory" is `ERR` 151. `ON ERROR` catches the two.
+
+`UPPER$`, `LOWER$` and `REPORT$` are in the code, but a program cannot call them yet (issue #112).
 
 These are documented in `src/extensions/mod.rs`.
 
