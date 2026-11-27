@@ -549,12 +549,22 @@ fn run_lines(
         lines,
         current: start,
     };
+    let mut previous_line = None;
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
         let item = lines
             .item(position)
             .ok_or_else(|| format!("Line {} not found", line_number))?;
+
+        // TRACE: a new stored line starts at its first statement, or when
+        // the run comes from a different line
+        if position.index == 0 || previous_line != Some(line_number) {
+            if let Some(stored_line) = position.stored_line() {
+                executor.trace_line(stored_line);
+            }
+        }
+        previous_line = Some(line_number);
 
         let error = match step(executor, &mut cursor, item, position) {
             Ok(Flow::Next) => {

@@ -100,6 +100,17 @@ pub enum InputItem {
     Variable(String),
 }
 
+/// The form of a TRACE statement
+#[derive(Debug, Clone, PartialEq)]
+pub enum TraceMode {
+    /// TRACE ON: trace each line
+    On,
+    /// TRACE OFF: stop the trace
+    Off,
+    /// TRACE n: trace only the lines with a number below n
+    Below(Expression),
+}
+
 /// BBC BASIC statements
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -197,6 +208,8 @@ pub enum Statement {
     Cls,
     /// CLEAR statement - remove all variables and close the loops and calls
     Clear,
+    /// TRACE statement - show the number of each line that runs
+    Trace { mode: TraceMode },
     /// ON GOTO statement - computed GOTO based on expression value. The
     /// ELSE part (the rest of the line) runs if the index is out of range.
     OnGoto {
@@ -562,6 +575,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // CLEAR statement
         Token::Keyword(0xD8) => Ok(Statement::Clear),
+
+        // TRACE statement
+        Token::Keyword(0xFC) => parse_trace_statement(&tokens[1..], line.line_number),
 
         // DEF statement (DEF PROC or DEF FN)
         Token::Keyword(0xDD) => parse_def_statement(&tokens[1..], line.line_number),
@@ -1923,6 +1939,23 @@ fn parse_until_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
     // Parse the condition expression
     let condition = parse_expression(tokens)?;
     Ok(Statement::Until { condition })
+}
+
+/// Parse TRACE statement
+/// Supports: TRACE ON, TRACE OFF, TRACE n
+fn parse_trace_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let mode = match tokens {
+        [Token::Keyword(0xEE)] => TraceMode::On,
+        [Token::Keyword(0x87)] => TraceMode::Off,
+        [] => {
+            return Err(BBCBasicError::SyntaxError {
+                message: "TRACE requires ON, OFF or a line number".to_string(),
+                line: line_number,
+            })
+        }
+        _ => TraceMode::Below(parse_expression(tokens)?),
+    };
+    Ok(Statement::Trace { mode })
 }
 
 /// Parse WHILE statement
@@ -4296,6 +4329,45 @@ mod tests {
         let line = crate::tokenizer::tokenize("QUIT").unwrap();
         let stmt = parse_statement(&line).unwrap();
         assert_eq!(stmt, Statement::Quit);
+    }
+
+    fn parse_trace(text: &str) -> Result<Statement> {
+        parse_statement(&crate::tokenizer::tokenize(text).unwrap())
+    }
+
+    #[test]
+    fn test_parse_trace_on() {
+        assert_eq!(
+            parse_trace("TRACE ON").unwrap(),
+            Statement::Trace {
+                mode: TraceMode::On
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_trace_off() {
+        assert_eq!(
+            parse_trace("TRACE OFF").unwrap(),
+            Statement::Trace {
+                mode: TraceMode::Off
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_trace_line_limit() {
+        assert_eq!(
+            parse_trace("TRACE 100").unwrap(),
+            Statement::Trace {
+                mode: TraceMode::Below(Expression::Integer(100))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_trace_with_no_operand_gives_error() {
+        assert!(parse_trace("TRACE").is_err());
     }
 
     /// Tokenize the text and parse it as one expression.
