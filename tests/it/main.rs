@@ -117,3 +117,4 @@ mod issue_126_ellipse_last_point;
 mod issue_123_endproc_after_gosub;
 mod issue_128_triangle_fill_clip;
 mod issue_107_case_of_when;
+mod issue_134_endproc_closes_loops;
