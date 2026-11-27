@@ -262,6 +262,84 @@ pub fn assign(
     Ok(result)
 }
 
+// The array functions (issue #188). The reference is the manual of BBC BASIC
+// for Windows: bbcwin7.html (SUM and SUMLEN), bbcwin6.html (MOD) and
+// bbcwin4.html ("DIM as a function"). The errors are from the functions
+// `item` and `dimfunc` of BBC BASIC for SDL (src/bbeval.c).
+
+/// `SUM(array())`: the sum of the elements of a numeric array, or the join
+/// of the elements of a string array. An integer sum out of the integer
+/// range gives Too big, as an integer addition does in this interpreter.
+pub fn sum(array: &Variable) -> Result<Value> {
+    match array {
+        Variable::IntegerArray { values, .. } => {
+            let total: i64 = values.iter().map(|&value| i64::from(value)).sum();
+            let total = i32::try_from(total).map_err(|_| BBCBasicError::TooBig)?;
+            Ok(Value::Number(f64::from(total)))
+        }
+        Variable::RealArray { values, .. } => finite(values.iter().sum()).map(Value::Number),
+        Variable::StringArray { values, .. } => {
+            if values.iter().map(String::len).sum::<usize>() > MAX_STRING_LENGTH {
+                return Err(BBCBasicError::StringTooLong);
+            }
+            Ok(Value::Text(values.concat()))
+        }
+        _ => Err(BBCBasicError::TypeMismatch),
+    }
+}
+
+/// `SUMLEN(array$())`: the total length of the elements of a string array.
+/// The total can be more than the string limit. A numeric array gives Type
+/// mismatch.
+pub fn sum_len(array: &Variable) -> Result<i32> {
+    match array {
+        Variable::StringArray { values, .. } => {
+            let total: usize = values.iter().map(String::len).sum();
+            i32::try_from(total).map_err(|_| BBCBasicError::TooBig)
+        }
+        _ => Err(BBCBasicError::TypeMismatch),
+    }
+}
+
+/// `MOD(array())`: the square root of the sum of the squares of the
+/// elements of a numeric array. A string array gives Type mismatch.
+pub fn modulus(array: &Variable) -> Result<f64> {
+    let squares: f64 = match array {
+        Variable::IntegerArray { values, .. } => {
+            values.iter().map(|&value| f64::from(value).powi(2)).sum()
+        }
+        Variable::RealArray { values, .. } => values.iter().map(|value| value.powi(2)).sum(),
+        _ => return Err(BBCBasicError::TypeMismatch),
+    };
+    Ok(finite(squares)?.sqrt())
+}
+
+/// `DIM(array())` with no `n`: the number of dimensions. `DIM(array(), n)`:
+/// the highest index of dimension `n`. An `n` out of the range 1 to the
+/// number of dimensions gives Subscript ("Bad subscript" in BBC BASIC).
+pub fn dimension(array: &Variable, n: Option<i32>) -> Result<i32> {
+    let dimensions = array.dimensions().ok_or(BBCBasicError::TypeMismatch)?;
+    let count = |value: usize| i32::try_from(value).map_err(|_| BBCBasicError::TooBig);
+    let Some(n) = n else {
+        return count(dimensions.len());
+    };
+    let size = n
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| dimensions.get(index))
+        .ok_or(BBCBasicError::SubscriptOutOfRange)?;
+    count(size - 1)
+}
+
+/// The value, or Too big for an infinite value
+fn finite(value: f64) -> Result<f64> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(BBCBasicError::TooBig)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

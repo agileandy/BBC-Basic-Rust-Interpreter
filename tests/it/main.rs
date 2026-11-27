@@ -170,3 +170,4 @@ mod issue_174_ide_look_and_help;
 mod issue_187_whole_array_arithmetic;
 mod issue_91_print_number_fields;
 mod issue_173_ide_canvas;
+mod issue_188_array_functions;

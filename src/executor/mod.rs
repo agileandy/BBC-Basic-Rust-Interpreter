@@ -2,6 +2,7 @@
 //!
 //! Executes parsed BBC BASIC statements with proper control flow handling.
 
+mod array_functions;
 mod console;
 // Unit tests never read stdin, so the stdin reader is not used in them.
 #[cfg_attr(test, allow(dead_code))]
@@ -2656,6 +2657,7 @@ impl Executor {
                     // RND with no bracket gives an integer
                     "RND" => !args.is_empty(),
                     "ABS" => args.first().is_some_and(|arg| self.is_real_expr(arg)),
+                    "SUM" | "MOD" => array_functions::gives_real(name, args),
                     _ => false,
                 }
             }
@@ -2679,6 +2681,9 @@ impl Executor {
         use crate::parser::BinaryOperator;
         match expr {
             Expression::String(_) => true,
+            Expression::FunctionCall { name, args } if array_functions::is_array_function(name) => {
+                array_functions::gives_string(name, args)
+            }
             Expression::FunctionCall { name, .. } if !name.ends_with('$') => {
                 // The body of a single-line function has a type with no run.
                 // The type of a multi-line function result is known only after
@@ -3200,6 +3205,9 @@ impl Executor {
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
+            "SUM" | "SUMLEN" | "MOD" | "DIM" => {
+                real_to_integer(self.array_function_number(name, args)?)
+            }
             _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
@@ -3438,6 +3446,7 @@ impl Executor {
                 }
                 Ok(val.asin())
             }
+            "SUM" | "SUMLEN" | "MOD" | "DIM" => self.array_function_number(name, args),
             _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
@@ -3474,6 +3483,7 @@ impl Executor {
                 };
                 Ok(key.map(String::from).unwrap_or_default())
             }
+            "SUM" | "SUMLEN" | "MOD" | "DIM" => self.array_function_text(name, args),
             "CHR$" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
