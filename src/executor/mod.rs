@@ -2118,18 +2118,15 @@ impl Executor {
                 let count = self.eval_integer(&args[0])?;
                 let s = self.eval_string(&args[1])?;
 
-                // STRING$(n, string) repeats first character n times
-                if let Some(first_char) = s.chars().next() {
-                    // A count below 0 gives an empty string. A result longer
-                    // than the 255 characters of BBC BASIC gives an error before
-                    // the string is made.
-                    if count > 255 {
-                        return Err(BBCBasicError::StringTooLong);
-                    }
-                    Ok(first_char.to_string().repeat(count.max(0) as usize))
-                } else {
-                    Ok(String::new())
+                // STRING$(n, string) repeats the full string n times. A count
+                // below 0 or an empty string gives an empty string. A result
+                // longer than the 255 characters of BBC BASIC gives an error
+                // before the string is made.
+                let count = i64::from(count.max(0));
+                if count * s.chars().count() as i64 > 255 {
+                    return Err(BBCBasicError::StringTooLong);
                 }
+                Ok(s.repeat(count as usize))
             }
             "REPORT$" => {
                 if !args.is_empty() {
@@ -4055,7 +4052,7 @@ mod tests {
         };
         assert_eq!(executor.eval_string(&string_expr).unwrap(), "*****");
 
-        // Test STRING$(3, "ABC") - should repeat first char only
+        // Test STRING$(3, "ABC") - repeats the full string
         let string_expr2 = Expression::FunctionCall {
             name: "STRING$".to_string(),
             args: vec![
@@ -4063,7 +4060,7 @@ mod tests {
                 Expression::String("ABC".to_string()),
             ],
         };
-        assert_eq!(executor.eval_string(&string_expr2).unwrap(), "AAA");
+        assert_eq!(executor.eval_string(&string_expr2).unwrap(), "ABCABCABC");
     }
 
     #[test]
