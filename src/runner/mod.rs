@@ -256,6 +256,7 @@ pub fn run_program_with_outcome(
     executor.clear_procedures();
     executor.clear_functions();
     executor.clear_control_stacks();
+    executor.set_program_size(program.size_in_bytes());
 
     // First pass: parse each line, collect DATA statements and procedure definitions
     let mut all_items: HashMap<u32, Vec<Item>> = HashMap::new();
@@ -326,6 +327,7 @@ pub fn run_typed_line(
     // that a changed or deleted DEF does not keep an old position
     executor.clear_procedures();
     executor.clear_multi_line_functions();
+    executor.set_program_size(program.size_in_bytes());
 
     let mut all_items: HashMap<u32, Vec<Item>> = HashMap::new();
     let mut data_values = Vec::new();
