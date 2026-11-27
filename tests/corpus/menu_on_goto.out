@@ -1,0 +1,19 @@
+Balance: 100
+1 Deposit  2 Withdraw  3 Quit
+Choice?
+Amount?
+Balance: 150
+1 Deposit  2 Withdraw  3 Quit
+Choice?
+Bad choice
+Choice?
+Amount?
+Not enough money
+Balance: 150
+1 Deposit  2 Withdraw  3 Quit
+Choice?
+Amount?
+Balance: 120
+1 Deposit  2 Withdraw  3 Quit
+Choice?
+Final balance: 120

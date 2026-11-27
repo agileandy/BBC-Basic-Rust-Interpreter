@@ -1,0 +1,29 @@
+10 REM Bubble sort of ten numbers
+20 N% = 10
+30 DIM A%(N%)
+40 FOR I% = 1 TO N%
+50   READ V%
+60   A%(I%) = V%
+70 NEXT I%
+80 PRINT "Before:";
+90 PROCshow
+100 PASSES% = 0
+110 REPEAT
+120   SWAPPED% = FALSE
+130   FOR I% = 1 TO N% - 1
+140     IF A%(I%) > A%(I% + 1) THEN T% = A%(I%) : A%(I%) = A%(I% + 1) : A%(I% + 1) = T% : SWAPPED% = TRUE
+150   NEXT I%
+160   PASSES% = PASSES% + 1
+170 UNTIL NOT SWAPPED%
+180 PRINT "After:";
+190 PROCshow
+200 PRINT "Passes: ";PASSES%
+210 END
+220 DEF PROCshow
+230 LOCAL I%
+240 FOR I% = 1 TO N%
+250   PRINT " ";A%(I%);
+260 NEXT I%
+270 PRINT
+280 ENDPROC
+290 DATA 42,7,19,88,3,56,23,7,61,15

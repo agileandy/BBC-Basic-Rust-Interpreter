@@ -1,0 +1,24 @@
+10 REM Monthly rainfall table read from DATA
+20 DIM R(12), M$(12)
+30 TOTAL = 0
+40 FOR I% = 1 TO 12
+50   READ N$, V
+60   M$(I%) = N$ : R(I%) = V
+70   TOTAL = TOTAL + V
+80 NEXT I%
+90 BEST% = 1
+100 FOR I% = 2 TO 12
+110   IF R(I%) > R(BEST%) THEN BEST% = I%
+120 NEXT I%
+130 PRINT "Total rain: ";TOTAL
+140 PRINT "Average: ";TOTAL / 12
+150 PRINT "Wettest: ";M$(BEST%);" with ";R(BEST%)
+160 PRINT "Dry months:";
+170 FOR I% = 1 TO 12
+180   IF R(I%) < 40 THEN PRINT " ";M$(I%);
+190 NEXT I%
+200 PRINT
+210 END
+220 DATA JAN,78,FEB,52,MAR,61,APR,45
+230 DATA MAY,38,JUN,30,JUL,24,AUG,35
+240 DATA SEP,49,OCT,70,NOV,95,DEC,83

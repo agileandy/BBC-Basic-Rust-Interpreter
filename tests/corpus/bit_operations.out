@@ -1,0 +1,11 @@
+A AND B = &30
+A OR B = &FC
+A EOR B = &CC
+NOT 0 = -1
+NOT -1 = 0
+Bits set in 181: 5
+Flags: 9 (&9)
+X% = 25 Y% = 12
+TRUE AND FALSE = 0  TRUE OR FALSE = -1
+&FF EOR &0F = 240
+Mask low nibble of &ABCD: &D
