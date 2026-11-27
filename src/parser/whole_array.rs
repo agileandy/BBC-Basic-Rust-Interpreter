@@ -18,6 +18,9 @@ pub enum ArrayOperand {
     Array(String),
     /// A scalar expression, evaluated one time
     Scalar(Expression),
+    /// The dot product `B() . C()` of 2 arrays (issue #189). It is the only
+    /// operand of the statement.
+    Product(String, String),
 }
 
 /// The right side of a whole-array statement
@@ -48,7 +51,7 @@ const MOD: u8 = 0x83;
 const OR: u8 = 0x84;
 
 /// The array operator of a token. The manual gives + - * / ^ AND OR EOR DIV
-/// and MOD. The dot product is issue #189.
+/// and MOD. The dot product is in `parse_product`.
 fn array_operator(token: &Token) -> Option<BinaryOperator> {
     match token {
         Token::Operator('+') => Some(BinaryOperator::Add),
@@ -126,6 +129,9 @@ pub(super) fn parse_whole_array_statement(
 
     // A unary minus before the first array is 0 minus the array, as in BBC
     // BASIC for SDL. A minus before a number is part of the number.
+    if let Some(product) = parse_product(tokens, &mut pos, line_number)? {
+        return finish(tokens, pos, line_number, target, operator, product);
+    }
     let mut rest = Vec::new();
     let first = match (tokens.get(pos), parse_array_reference(tokens, pos + 1)) {
         (Some(Token::Operator('-')), Some(name)) => {
@@ -151,21 +157,77 @@ pub(super) fn parse_whole_array_statement(
         list.push(parse_expr_precedence(tokens, &mut pos, 0)?);
     }
 
-    if let Some(token) = tokens.get(pos) {
+    finish(
+        tokens,
+        pos,
+        line_number,
+        target,
+        operator,
+        ArrayExpression { first, rest, list },
+    )
+}
+
+/// The dot operator of a matrix product (issue #189)
+const DOT: Token = Token::Operator('.');
+
+/// If the tokens at `pos` are `B() . C()`, give the product as the only
+/// operand, and move `pos` after it. The reference is the manual of BBC
+/// BASIC for Windows, page bbcwin2.html, "Dot product". In `expra` of BBC
+/// BASIC for SDL, the dot ends the array expression, so an operator after
+/// the product is an error. This interpreter also gives an error for an
+/// operator or a minus before the product, which `expra` ignores.
+fn parse_product(
+    tokens: &[Token],
+    pos: &mut usize,
+    line_number: Option<u16>,
+) -> Result<Option<ArrayExpression>> {
+    let Some(left) = parse_array_reference(tokens, *pos) else {
+        return Ok(None);
+    };
+    if tokens.get(*pos + 3) != Some(&DOT) {
+        return Ok(None);
+    }
+    let Some(right) = parse_array_reference(tokens, *pos + 4) else {
         return Err(syntax_error(
+            "Expected array after '.'".to_string(),
+            line_number,
+        ));
+    };
+    *pos += 7;
+    Ok(Some(ArrayExpression {
+        first: ArrayOperand::Product(left.to_string(), right.to_string()),
+        rest: Vec::new(),
+        list: Vec::new(),
+    }))
+}
+
+/// Give the statement, or a syntax error for a token after the expression
+fn finish(
+    tokens: &[Token],
+    pos: usize,
+    line_number: Option<u16>,
+    target: String,
+    operator: Option<BinaryOperator>,
+    value: ArrayExpression,
+) -> Result<Statement> {
+    match tokens.get(pos) {
+        Some(&DOT) => Err(syntax_error(
+            "The dot operator must be the only operator".to_string(),
+            line_number,
+        )),
+        Some(token) => Err(syntax_error(
             format!(
                 "Unexpected {} after array expression",
                 tokens_text(std::slice::from_ref(token))
             ),
             line_number,
-        ));
+        )),
+        None => Ok(Statement::ArrayAssign {
+            target,
+            operator,
+            value,
+        }),
     }
-
-    Ok(Statement::ArrayAssign {
-        target,
-        operator,
-        value: ArrayExpression { first, rest, list },
-    })
 }
 
 /// The keyword code of DIM, and the extended keyword of SUM

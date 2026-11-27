@@ -331,6 +331,66 @@ pub fn dimension(array: &Variable, n: Option<i32>) -> Result<i32> {
     count(size - 1)
 }
 
+// The dot product (issue #189). The reference is the manual of BBC BASIC for
+// Windows, page bbcwin2.html, "Dot product", and the end of the function
+// `expra` of BBC BASIC for SDL (src/bbeval.c), which gives the errors.
+
+/// The rows and the columns of a source of the dot product. A matrix has 2
+/// dimensions. A vector is one row on the left (`first` is true) and one
+/// column on the right. More than 2 dimensions give Type mismatch.
+fn product_shape(dimensions: &[usize], length: usize, first: bool) -> Result<(usize, usize)> {
+    match dimensions {
+        [rows, columns] => Ok((*rows, *columns)),
+        [_] if first => Ok((1, length)),
+        [_] => Ok((length, 1)),
+        _ => Err(BBCBasicError::TypeMismatch),
+    }
+}
+
+/// `left() . right()`: the matrix product, in storage order (row by row).
+/// The 2 arrays must both be integer arrays or both be real arrays. The
+/// columns of `left` must equal the rows of `right`. If not, the result is
+/// Type mismatch.
+///
+/// The result is real. An integer product is exact in `i128` and changes to
+/// a real at the end, so that a real target gets the full value and an
+/// integer target gives Too big for a value out of its range.
+pub fn product(left: &Variable, right: &Variable) -> Result<ArrayData> {
+    let (left_data, right_data) = (
+        ArrayData::from_variable(left)?,
+        ArrayData::from_variable(right)?,
+    );
+    let (Some(left_dimensions), Some(right_dimensions)) = (left.dimensions(), right.dimensions())
+    else {
+        return Err(BBCBasicError::TypeMismatch);
+    };
+    let (rows, inner) = product_shape(left_dimensions, left_data.len(), true)?;
+    let (right_rows, columns) = product_shape(right_dimensions, right_data.len(), false)?;
+    if inner != right_rows {
+        return Err(BBCBasicError::TypeMismatch);
+    }
+
+    let cells = (0..rows).flat_map(|row| (0..columns).map(move |column| (row, column)));
+    let terms = move |(row, column): (usize, usize)| {
+        (0..inner).map(move |k| (row * inner + k, k * columns + column))
+    };
+    let values = match (&left_data, &right_data) {
+        (ArrayData::Real(a), ArrayData::Real(b)) => cells
+            .map(|cell| finite(terms(cell).map(|(i, j)| a[i] * b[j]).sum()))
+            .collect::<Result<Vec<f64>>>()?,
+        (ArrayData::Integer(a), ArrayData::Integer(b)) => cells
+            .map(|cell| {
+                let total: i128 = terms(cell)
+                    .map(|(i, j)| i128::from(a[i]) * i128::from(b[j]))
+                    .sum();
+                total as f64
+            })
+            .collect(),
+        _ => return Err(BBCBasicError::TypeMismatch),
+    };
+    Ok(ArrayData::Real(values))
+}
+
 /// The value, or Too big for an infinite value
 fn finite(value: f64) -> Result<f64> {
     if value.is_finite() {
@@ -346,6 +406,81 @@ mod tests {
 
     fn number(value: f64) -> Operand {
         Operand::Scalar(Value::Number(value))
+    }
+
+    fn real(values: &[f64], dimensions: &[usize]) -> Variable {
+        Variable::RealArray {
+            values: values.to_vec(),
+            dimensions: dimensions.to_vec(),
+        }
+    }
+
+    fn integer(values: &[i32], dimensions: &[usize]) -> Variable {
+        Variable::IntegerArray {
+            values: values.to_vec(),
+            dimensions: dimensions.to_vec(),
+        }
+    }
+
+    #[test]
+    fn test_product_of_2_matrices() {
+        let left = real(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let right = real(&[7.0, 8.0, 9.0, 10.0, 11.0, 12.0], &[3, 2]);
+        assert_eq!(
+            product(&left, &right),
+            Ok(ArrayData::Real(vec![58.0, 64.0, 139.0, 154.0]))
+        );
+    }
+
+    #[test]
+    fn test_product_of_a_matrix_and_a_vector() {
+        let matrix = real(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+        let column = real(&[1.0, 2.0, 3.0], &[3]);
+        assert_eq!(
+            product(&matrix, &column),
+            Ok(ArrayData::Real(vec![14.0, 32.0]))
+        );
+        let row = real(&[1.0, 2.0], &[2]);
+        assert_eq!(
+            product(&row, &matrix),
+            Ok(ArrayData::Real(vec![9.0, 12.0, 15.0]))
+        );
+    }
+
+    #[test]
+    fn test_product_of_2_vectors() {
+        let left = real(&[1.0, 2.0, 3.0], &[3]);
+        let right = real(&[4.0, 5.0, 6.0], &[3]);
+        assert_eq!(product(&left, &right), Ok(ArrayData::Real(vec![32.0])));
+    }
+
+    #[test]
+    fn test_product_of_integer_arrays_is_exact() {
+        let left = integer(&[i32::MAX, i32::MAX], &[2]);
+        let right = integer(&[i32::MAX, -i32::MAX], &[2]);
+        assert_eq!(product(&left, &right), Ok(ArrayData::Real(vec![0.0])));
+    }
+
+    #[test]
+    fn test_product_errors() {
+        let matrix = real(&[0.0; 6], &[2, 3]);
+        let cube = real(&[0.0; 8], &[2, 2, 2]);
+        let wrong = real(&[0.0; 4], &[2, 2]);
+        let whole = integer(&[0; 3], &[3]);
+        let text = Variable::StringArray {
+            values: vec![String::new(); 3],
+            dimensions: vec![3],
+        };
+        for (left, right) in [
+            (&matrix, &wrong),
+            (&cube, &matrix),
+            (&matrix, &whole),
+            (&text, &text),
+        ] {
+            assert_eq!(product(left, right), Err(BBCBasicError::TypeMismatch));
+        }
+        let huge = real(&[1e300, 1e300], &[2]);
+        assert_eq!(product(&huge, &huge), Err(BBCBasicError::TooBig));
     }
 
     #[test]

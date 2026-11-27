@@ -474,6 +474,14 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
+            // A full stop after a closing bracket is the dot operator of a
+            // matrix product, A() = B() . C() (issue #189). A full stop that
+            // starts a number, a short form or a member is a token before
+            // this point.
+            '.' if tokens.last() == Some(&Token::Separator(')')) => {
+                chars.next();
+                tokens.push(Token::Operator(ch));
+            }
             // { and } enclose the members of a structure (issue #191)
             ',' | ';' | ':' | '(' | ')' | '{' | '}' => {
                 chars.next();
@@ -2093,6 +2101,34 @@ mod tests {
             tokens_of("FOR I=1 TO 3:PRINT I:NEXT")
         );
         assert_round_trip("10 P.\"HI\"", "10 PRINT \"HI\"");
+    }
+
+    #[test]
+    fn test_full_stop_after_a_closing_bracket_is_the_dot_operator() {
+        let array = |name: &str| {
+            vec![
+                Token::Identifier(name.to_string()),
+                Token::Separator('('),
+                Token::Separator(')'),
+            ]
+        };
+        let mut expected = array("A");
+        expected.push(Token::Operator('='));
+        expected.extend(array("B"));
+        expected.push(Token::Operator('.'));
+        expected.extend(array("C"));
+        assert_eq!(tokens_of("A() = B() . C()"), expected);
+        assert_eq!(tokens_of("A()=B().C()"), expected);
+        // A full stop that starts a number is still a number
+        assert_eq!(
+            tokens_of("(2).5"),
+            vec![
+                Token::Separator('('),
+                Token::Integer(2),
+                Token::Separator(')'),
+                Token::Real(0.5),
+            ]
+        );
     }
 
     #[test]
