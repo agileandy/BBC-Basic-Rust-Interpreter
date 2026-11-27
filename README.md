@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **331 tests** covering all major components
+- **389 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -211,17 +211,18 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### 📊 Test Results
 
-- **331 total tests** - All passing (205 library + 29 graphics + 97 program and binary)
+- **389 total tests** - All passing (214 library + 29 graphics + 146 program and binary)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
 ### Known Limitations
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
-- **Statements on one line**: only the first statement on a line runs. Statements after a colon are ignored (issue #13).
-- **Arrays**: `DIM A(N)` makes N elements. BBC BASIC makes N + 1 (issue #14).
-- **FOR**: a real `STEP` such as 0.5 is truncated to an integer.
-- **Numbers**: `PRINT` shows up to 17 significant digits. An exponent literal such as `1E10` is not read correctly.
+- **FOR**: a real `STEP` such as 0.5 is truncated to an integer (issue #35). `NEXT J%, I%` closes only the first loop.
+- **IF**: `IF X THEN 30` (a line number with no `GOTO`) is a parse error. In a nested `IF`, the first `ELSE` belongs to the outer `IF`.
+- **DATA**: `RESTORE` with a line number does not work.
+- **Numbers**: hex values such as `&1F` are not supported. A value that is too large gives no "Too big" error.
+- **Immediate mode**: a loop on a typed line with no line number does not loop.
 
 ### Non-Standard Extensions
 
