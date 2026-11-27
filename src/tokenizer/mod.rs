@@ -302,11 +302,9 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 }
             }
 
-            // Convert to uppercase for keyword matching
-            let upper_word = word.to_uppercase();
-
-            // Check if it's a keyword
-            if let Some(&token_byte) = keyword_map.get(&upper_word) {
+            // A keyword matches only in upper case, as in BBC BASIC.
+            // A word in another letter case is a name.
+            if let Some(&token_byte) = keyword_map.get(&word) {
                 tokens.push(Token::Keyword(token_byte));
                 // DATA uses the rest of the line. Keep that text as typed.
                 if token_byte == 0xDC {
@@ -315,9 +313,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                         tokens.push(Token::DataText(text));
                     }
                 }
-            } else if let Some(&(prefix, token_byte)) = extended_map.get(&upper_word).filter(|_| {
-                word == upper_word || !UPPER_CASE_ONLY_KEYWORDS.contains(&upper_word.as_str())
-            }) {
+            } else if let Some(&(prefix, token_byte)) = extended_map.get(&word) {
                 tokens.push(Token::ExtendedKeyword(prefix, token_byte));
             } else if let Some((keyword, name)) = split_proc_or_fn(&word) {
                 // PROCname or FNname: the name joins the keyword with no space
@@ -660,10 +656,6 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("ENDIF", 0xA5),
 ];
 
-/// Keywords that match only when typed in upper case. Other case forms are
-/// names, so a program with a variable `endif` keeps its meaning.
-const UPPER_CASE_ONLY_KEYWORDS: &[&str] = &["ENDIF"];
-
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
 /// The keyword must be in upper case, as in BBC BASIC.
 fn split_proc_or_fn(word: &str) -> Option<(&'static str, &str)> {
@@ -858,6 +850,29 @@ mod tests {
         for word in ["endif", "EndIf", "ENDif"] {
             let result = tokenize(&format!("{}=5", word)).unwrap();
             assert_eq!(result.tokens[0], Token::Identifier(word.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_tokenize_keyword_in_upper_case_is_keyword() {
+        let result = tokenize("PRINT").unwrap();
+        assert_eq!(result.tokens, vec![Token::Keyword(0xF1)]);
+    }
+
+    #[test]
+    fn test_tokenize_keyword_not_in_upper_case_is_identifier() {
+        let words = [
+            "print", "Print", "count", "time", "to", "step", "pi", "val", "len", "endwhile",
+            "endif",
+        ];
+        for word in words {
+            let result = tokenize(&format!("{}=5", word)).unwrap();
+            assert_eq!(
+                result.tokens[0],
+                Token::Identifier(word.to_string()),
+                "word {}",
+                word
+            );
         }
     }
 
