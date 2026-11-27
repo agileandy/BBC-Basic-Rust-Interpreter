@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **1319 tests** covering all major components
+- **1696 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
@@ -196,21 +196,21 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 ### Implemented Features
 
-- **Control Flow**: IF...THEN...ELSE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
+- **Control Flow**: IF...THEN...ELSE, CASE...OF...WHEN...OTHERWISE...ENDCASE, FOR...NEXT, REPEAT...UNTIL, WHILE...ENDWHILE, GOTO, GOSUB...RETURN
 - **Variables**: Integer (%), Real, String ($), Arrays (multi-dimensional)
 - **Functions**: DEF FN with parameters, user-defined procedures (DEF PROC...ENDPROC)
 - **Built-in Functions**: SIN, COS, TAN, ASN, ACS, ATN, LOG, LN, EXP, SQR, ABS, SGN, INT, PI, DEG, RAD, RND
 - **String Functions**: LEFT$, RIGHT$, MID$, CHR$, ASC, STR$, VAL, LEN, INSTR
-- **Graphics**: MOVE, DRAW, PLOT (all modes 0-191), CIRCLE, ELLIPSE, RECTANGLE, FILL, CLG, GCOL, COLOUR
+- **Graphics**: MOVE, DRAW, PLOT (lines, points, triangles, circles and ellipses), CIRCLE, ELLIPSE, RECTANGLE, FILL, CLG, GCOL, COLOUR
 - **Graphics Origin**: ORIGIN x,y command for coordinate transformation
 - **Pixel Reading**: POINT(x,y) function returns pixel state
 - **File I/O**: OPENIN, OPENOUT, OPENUP, BGET#, BPUT#, PTR#, EXT#, EOF#, CLOSE#
-- **Error Handling**: ON ERROR GOTO, ERR, ERL, REPORT, ERROR statement
+- **Error Handling**: ON ERROR GOTO, ON ERROR with statements, ON ERROR OFF, ERR, ERL, REPORT, ERROR statement
 - **Other**: DATA, READ, RESTORE, DIM, LOCAL, END, STOP, QUIT, CLS, LIST, NEW, OLD, SAVE, LOAD, CHAIN
 
 ### 📊 Test Results
 
-- **1319 total tests** - All passing (417 library + 29 graphics + 873 program and binary)
+- **1696 total tests** - All passing (463 library + 3 binary + 1230 program tests in one test program, `tests/it`)
 - Zero warnings with `cargo clippy --all-targets -- -D warnings`
 - `cargo fmt --check` passes
 
@@ -218,7 +218,7 @@ This interpreter implements most of the standard BBC BASIC features from the BBC
 
 - **Sound**: SOUND, ENVELOPE, TEMPO and VOICE are tokenized, but they are not implemented.
 - **Numbers**: integer `+`, `-` and `*` give "Too big" on overflow. A BBC Micro changes to real arithmetic. `PRINT` does not put a number in a field of 10 characters (issue #91).
-- **Errors**: `ON ERROR` accepts only `GOTO` and `OFF` (issue #114). File not found has `ERR` 255, not 214 (issue #113).
+- **Functions**: a built-in function needs brackets: `LEN(A$)` works, and `LEN A$` gives an error (issue #143).
 - **Screen**: `MODE` changes the graphics state, but the terminal shows no colours. The interpreter starts in mode 0, not mode 7.
 - **Keyboard**: `GET` and `GET$` use the raw terminal mode. That mode is tested through a pseudo-terminal only.
 - **Files**: `PRINT#` writes text, not the binary records of a BBC Micro.
@@ -235,10 +235,18 @@ The following functions are **NOT** part of the original BBC BASIC specification
 - `LISTDIR$(path$)` - The names in a directory, in name order, with `CHR$(10)` between them. A sub-directory name ends with `/`
 - `MKDIR path$` - Make one directory
 - `RMDIR path$` - Remove one empty directory
+- `UPPER$(s$)`, `LOWER$(s$)` - Change the case of a string
+- `REPORT$` - The text of the last error, with no bracket
+- `JSONGET$(json$, path$)`, `JSONGET(json$, path$)` - Read a string or a number at a path of a JSON text
+- `JSONTYPE$(json$, path$)` - `object`, `array`, `string`, `number`, `boolean`, `null` or `missing`
+- `JSONLEN(json$, path$)`, `JSONKEY$(json$, path$, n)` - The count of an array, an object or a string, and key n of an object (from 0)
+- `JSONSET$(json$, path$, value)`, `JSONSETJSON$(json$, path$, fragment$)` - A copy of the text with a value or a JSON fragment at the path
+- `JSONADD$(json$, path$, value)`, `JSONDEL$(json$, path$)` - A copy of the text with a value added to an array, or with a value removed
 
-Errors of the extensions: "Bad JSON" is `ERR` 150 and "Bad directory" is `ERR` 151. `ON ERROR` catches the two.
+A JSON path has keys with dots (`user.name`), array indices from 0 in square brackets (`items[2]`), and `["my key"]` for a key with a space or a dot. An empty path is the root.
 
-`UPPER$`, `LOWER$` and `REPORT$` are in the code, but a program cannot call them yet (issue #112).
+Errors of the extensions: "Bad JSON" is `ERR` 150, "Bad directory" is `ERR` 151 and "Bad path" is `ERR` 152. `ON ERROR` catches each one.
+
 
 These are documented in `src/extensions/mod.rs`.
 
