@@ -3185,6 +3185,17 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
                 });
             }
 
+            // OPENIN, OPENOUT and OPENUP with no bracket take the next factor.
+            if matches!(keyword.as_str(), "OPENIN" | "OPENOUT" | "OPENUP")
+                && !matches!(tokens.get(*pos), Some(Token::Separator('(')))
+            {
+                let filename = parse_primary(tokens, pos)?;
+                return Ok(Expression::FunctionCall {
+                    name: keyword,
+                    args: vec![filename],
+                });
+            }
+
             // FN name: a call to a user-defined function. The name follows the
             // keyword, and the call keeps the FN prefix.
             let mut is_user_function = false;
