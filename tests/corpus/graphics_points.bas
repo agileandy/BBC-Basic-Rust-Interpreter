@@ -1,0 +1,29 @@
+10 REM Shapes from arrays of points, checked with POINT
+20 DIM X%(4), Y%(4)
+30 FOR I% = 0 TO 3
+40   READ PX%, PY%
+50   X%(I%) = PX% : Y%(I%) = PY%
+60 NEXT I%
+70 X%(4) = X%(0) : Y%(4) = Y%(0)
+80 CLG
+90 MOVE X%(0), Y%(0)
+100 FOR I% = 1 TO 4
+110   DRAW X%(I%), Y%(I%)
+120 NEXT I%
+130 PRINT "Corner: ";POINT(X%(2), Y%(2))
+140 PRINT "Edge: ";POINT(400, 200)
+150 PRINT "Inside: ";POINT(400, 400)
+160 PRINT "Off screen: ";POINT(-10, -10)
+170 LIT% = 0
+180 FOR X% = 0 TO 1278 STEP 2
+190   IF POINT(X%, 200) = 1 THEN LIT% = LIT% + 1
+200 NEXT X%
+210 PRINT "Lit on the bottom edge: ";LIT%
+220 PLOT 69, 400, 400
+230 PRINT "Plotted: ";POINT(400, 400)
+240 MOVE 800, 100 : MOVE 1200, 100 : PLOT 85, 1000, 500
+250 PRINT "In triangle: ";POINT(1000, 200)
+260 GCOL 0, 0
+270 PLOT 69, 400, 400
+280 PRINT "Cleared: ";POINT(400, 400)
+290 DATA 200,200,600,200,600,600,200,600

@@ -1,0 +1,9 @@
+1   2   3   4
+2   4   6   8
+3   6   9   12
+4   8   12  16
+Sum of products: 360
+Count down: 10 7 4 1
+Halves: 0 0.5 1 1.5 2
+Body runs once with I% = 5
+After the loop I% = 6

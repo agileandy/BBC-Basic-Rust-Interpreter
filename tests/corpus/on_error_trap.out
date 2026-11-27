@@ -1,0 +1,5 @@
+100 / 4 = 25
+100 / 0 = Error 18 at line 60: Division by zero
+100 / 8 = 12.5
+100 / 0 = Error 18 at line 60: Division by zero
+Errors: 2

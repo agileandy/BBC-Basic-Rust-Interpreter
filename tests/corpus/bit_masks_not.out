@@ -1,0 +1,10 @@
+NOT 4 = -5
+NOT 0 = -1
+NOT &FF = -256
+Flags: 13
+After clearing bit 2: 9
+After clearing bit 0: 8
+Low nibble of &5A: &A
+NOT NOT 7 = 7
+NOT X% + 1 = -6
+NOT FALSE is TRUE

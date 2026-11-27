@@ -1,0 +1,16 @@
+N    N^2    N^3     SQR
+1    1      1       1
+2    4      8       1.41
+3    9      27      1.73
+4    16     64      2
+5    25     125     2.24
+6    36     216     2.45
+
+Right aligned:
+     7
+    49
+   343
+  2401
+   Indented  text
+Hex of 255: FF
+Negative: -42 and -0.5

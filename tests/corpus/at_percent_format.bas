@@ -1,0 +1,15 @@
+10 REM Number output in fixed and general format with @%
+20 @% = &20209
+30 PRINT 3.14159
+40 PRINT 2.5
+50 PRINT -12.5
+60 PRINT 100
+70 @% = &20106
+80 PRINT 7.26
+90 PRINT -0.96
+100 PRINT 0.04
+110 @% = &905
+120 PRINT 42
+130 PRINT 12345678
+140 @% = &90A
+150 PRINT 1
