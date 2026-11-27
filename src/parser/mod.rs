@@ -1930,7 +1930,16 @@ fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<I
                 InputItem::Member(path)
             }
             Token::Separator('\'') => InputItem::NewLine,
-            _ => break,
+            // A token that INPUT cannot use is a syntax error (issue 202)
+            token => {
+                return Err(BBCBasicError::SyntaxError {
+                    message: format!(
+                        "Unexpected {} in INPUT",
+                        tokens_text(std::slice::from_ref(token))
+                    ),
+                    line: line_number,
+                })
+            }
         };
         items.push(item);
         pos += 1;
