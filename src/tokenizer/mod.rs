@@ -17,6 +17,9 @@ pub enum Token {
     LineNumber(u16),
     /// Integer literal
     Integer(i32),
+    /// Hex integer literal, such as `&1F`. It has the same value as an
+    /// integer, but LIST shows it in hex, and RENUMBER does not change it.
+    HexInteger(i32),
     /// Real number literal
     Real(f64),
     /// String literal
@@ -66,6 +69,7 @@ fn ends_with_value(tokens: &[Token]) -> bool {
         tokens.last(),
         Some(
             Token::Integer(_)
+                | Token::HexInteger(_)
                 | Token::Real(_)
                 | Token::String(_)
                 | Token::Identifier(_)
@@ -316,7 +320,7 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 return Err(BBCBasicError::TooBig);
             }
             let value = u32::from_str_radix(&hex, 16).map_err(|_| BBCBasicError::TooBig)?;
-            tokens.push(Token::Integer(value as i32));
+            tokens.push(Token::HexInteger(value as i32));
             continue;
         }
 
@@ -421,6 +425,17 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // No space after opening paren or before closing paren
                 (_, Token::Separator(')')) => false,
                 (Token::Separator('('), _) => false,
+                // A function, an array or the name after FN or PROC joins
+                // its bracket: VAL("1"), C(3), FNa(1)
+                (Token::Keyword(byte), Token::Separator('(')) if is_function_keyword(*byte) => {
+                    false
+                }
+                (Token::Identifier(_), Token::Separator('(')) => false,
+                (Token::Keyword(FN | PROC), Token::Identifier(_)) => false,
+                // A keyword after a closing bracket: IF (A) THEN
+                (Token::Separator(')'), Token::Keyword(_)) => true,
+                // A subtract after a closing bracket: LEN("ABC") - 1
+                (Token::Separator(')'), Token::Operator('-')) => true,
                 // No space before/after certain operators
                 (Token::Separator(_), _) => false,
                 (_, Token::Separator(',')) => false,
@@ -463,6 +478,9 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
             }
             Token::Integer(val) => {
                 result.push_str(&val.to_string());
+            }
+            Token::HexInteger(val) => {
+                result.push_str(&format!("&{:X}", *val as u32));
             }
             Token::Real(val) => {
                 // A whole real lists with an exponent, so that it tokenizes as a real again
@@ -635,6 +653,16 @@ const MAIN_KEYWORDS: &[(&str, u8)] = &[
     ("WIDTH", 0xFE),
     ("OSCLI", 0xFF),
 ];
+
+const FN: u8 = 0xA4;
+const PROC: u8 = 0xF2;
+
+/// True if the keyword is a function that takes its argument in brackets.
+/// These are SPC, TAB and the functions in the range 0x8E to 0xC5. NOT and
+/// TO are in that range, but they are an operator and a part of FOR.
+fn is_function_keyword(byte: u8) -> bool {
+    matches!(byte, 0x89 | 0x8A | 0x8E..=0xC5) && !matches!(byte, 0xAC | 0xB8)
+}
 
 // Extended functions (0xC6 prefix) - BBC BASIC 4 extensions
 const EXTENDED_FUNCTIONS: &[(&str, u8)] = &[("SUM", 0x8E), ("BEAT", 0x8F)];
@@ -933,7 +961,7 @@ mod tests {
         );
         // &1E is a hex number, not 1 and E
         let result = tokenize("PRINT &1E").unwrap();
-        assert_eq!(result.tokens[1..], [Token::Integer(0x1E)]);
+        assert_eq!(result.tokens[1..], [Token::HexInteger(0x1E)]);
     }
 
     #[test]
@@ -948,7 +976,7 @@ mod tests {
         ];
         for (source, value) in cases {
             let result = tokenize(source).unwrap();
-            assert_eq!(result.tokens, vec![Token::Integer(value)], "{source}");
+            assert_eq!(result.tokens, vec![Token::HexInteger(value)], "{source}");
         }
     }
 
@@ -960,7 +988,7 @@ mod tests {
             vec![
                 Token::Identifier("A".to_string()),
                 Token::Operator('='),
-                Token::Integer(16),
+                Token::HexInteger(16),
                 Token::Operator('+'),
                 Token::Integer(1),
             ]
@@ -1482,5 +1510,82 @@ mod tests {
         let line = tokenize("10 PRINT 5-3").unwrap();
         let listed = detokenize(&line).unwrap();
         assert_eq!(tokenize(&listed).unwrap(), line);
+    }
+
+    /// Tokenize the source, list it, and check that the listed line is the
+    /// expected text and tokenizes to the same tokens
+    fn assert_round_trip(source: &str, listed: &str) {
+        let line = tokenize(source).unwrap();
+        let text = detokenize(&line).unwrap();
+        assert_eq!(text, listed, "{source}");
+        assert_eq!(tokenize(&text).unwrap(), line, "{source}");
+    }
+
+    #[test]
+    fn test_detokenize_shows_hex_number_as_typed() {
+        for source in [
+            "10 PRINT &1F",
+            "10 PRINT &FFFFFFFF",
+            "10 A = &10 + 1",
+            "10 PRINT &80000000",
+        ] {
+            assert_round_trip(source, source);
+        }
+    }
+
+    #[test]
+    fn test_detokenize_shows_hex_number_with_no_leading_zeros() {
+        assert_round_trip("10 PRINT &001F", "10 PRINT &1F");
+        assert_round_trip("10 PRINT &0", "10 PRINT &0");
+    }
+
+    #[test]
+    fn test_detokenize_puts_no_space_between_function_and_bracket() {
+        for source in [
+            "10 PRINT VAL(\"1\")",
+            "10 PRINT LEN(A$)",
+            "10 PRINT LEFT$(A$,1)",
+            "10 PRINT TAB(5)",
+            "10 PRINT SPC(2)",
+            "10 PRINT SIN(X)",
+            "10 PRINT FNa(1)",
+            "10 PROCb(2)",
+            "10 DIM C(3)",
+        ] {
+            assert_round_trip(source, source);
+        }
+        assert_round_trip("10 PRINT LEFT$(A$, 1)", "10 PRINT LEFT$(A$,1)");
+    }
+
+    #[test]
+    fn test_detokenize_keeps_space_after_statement_keyword_and_operator() {
+        for source in [
+            "10 PRINT (1 + 2)",
+            "10 IF (A) THEN PRINT 1",
+            "10 FOR I = 1 TO (2)",
+            "10 A = NOT (B)",
+        ] {
+            assert_round_trip(source, source);
+        }
+    }
+
+    #[test]
+    fn test_minus_after_hex_number_is_subtract() {
+        assert_eq!(
+            tokens_of("PRINT &10-1"),
+            vec![
+                Token::Keyword(0xF1),
+                Token::HexInteger(16),
+                Token::Operator('-'),
+                Token::Integer(1)
+            ]
+        );
+        assert_round_trip("10 PRINT &10-1", "10 PRINT &10 - 1");
+    }
+
+    #[test]
+    fn test_detokenize_puts_space_on_both_sides_of_minus_after_bracket() {
+        assert_round_trip("10 PRINT LEN(\"ABC\")-1", "10 PRINT LEN(\"ABC\") - 1");
+        assert_round_trip("10 Y = A(1)-B", "10 Y = A(1) - B");
     }
 }

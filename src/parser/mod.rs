@@ -1094,7 +1094,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
                     });
                 }
                 match tokens[2] {
-                    Token::Integer(n) => {
+                    Token::Integer(n) | Token::HexInteger(n) => {
                         return Ok(Statement::OnError {
                             line_number: n as u16,
                         });
@@ -1184,7 +1184,7 @@ fn parse_on_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 
     while pos < line_tokens.len() {
         match &line_tokens[pos] {
-            Token::Integer(n) => {
+            Token::Integer(n) | Token::HexInteger(n) => {
                 targets.push(*n as u16);
                 pos += 1;
 
@@ -1987,7 +1987,7 @@ fn parse_restore_statement(tokens: &[Token], _line_number: Option<u16>) -> Resul
     } else if tokens.len() == 1 {
         // RESTORE with line number
         match &tokens[0] {
-            Token::Integer(num) => Ok(Statement::Restore {
+            Token::Integer(num) | Token::HexInteger(num) => Ok(Statement::Restore {
                 line_number: Some(*num as u16),
             }),
             Token::LineNumber(num) => Ok(Statement::Restore {
@@ -2492,7 +2492,7 @@ fn parse_if_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Stat
 /// A block IF cannot be in a branch, because the branch ends with its line.
 fn parse_if_branch(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<Statement>> {
     let target = match tokens.first() {
-        Some(Token::Integer(n)) => *n as u16,
+        Some(Token::Integer(n) | Token::HexInteger(n)) => *n as u16,
         Some(Token::LineNumber(n)) => *n,
         _ => {
             let statements = parse_statements(tokens, line_number)?;
@@ -2676,7 +2676,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expression> {
 
     match token {
         // Literals
-        Token::Integer(val) => {
+        Token::Integer(val) | Token::HexInteger(val) => {
             *pos += 1;
             Ok(Expression::Integer(*val))
         }
