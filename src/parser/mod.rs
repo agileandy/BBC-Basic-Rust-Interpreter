@@ -1628,58 +1628,47 @@ fn parse_dim_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
 }
 
 /// Parse DATA statement
-/// Supports: DATA value1, value2, value3, ...
+///
+/// DATA uses the rest of its line, so the tokenizer gives that text as one
+/// token. A comma separates the items. An item in double quotes is the text
+/// in the quotes, and a doubled quote is one quote. An item with no quotes is
+/// the text with leading spaces removed. Each item is kept as text: a READ
+/// into a numeric variable converts it.
 fn parse_data_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    let mut values = Vec::new();
-    let mut pos = 0;
-
-    while pos < tokens.len() {
-        // Skip commas
-        if matches!(tokens[pos], Token::Separator(',')) {
-            pos += 1;
-            continue;
+    let text = match tokens {
+        [] => return Ok(Statement::Data { values: Vec::new() }),
+        [Token::DataText(text)] => text,
+        _ => {
+            return Err(BBCBasicError::SyntaxError {
+                message: format!("Invalid DATA value: {:?}", tokens),
+                line: line_number,
+            });
         }
+    };
 
-        // Parse value
-        match &tokens[pos] {
-            Token::Integer(val) => {
-                values.push(DataValue::Integer(*val));
-                pos += 1;
-            }
-            Token::Real(val) => {
-                values.push(DataValue::Real(*val));
-                pos += 1;
-            }
-            Token::String(val) => {
-                values.push(DataValue::String(val.clone()));
-                pos += 1;
-            }
-            Token::Operator('-') if pos + 1 < tokens.len() => {
-                // Handle negative numbers
-                pos += 1;
-                match &tokens[pos] {
-                    Token::Integer(val) => {
-                        values.push(DataValue::Integer(-val));
-                        pos += 1;
-                    }
-                    Token::Real(val) => {
-                        values.push(DataValue::Real(-val));
-                        pos += 1;
-                    }
-                    _ => {
-                        return Err(BBCBasicError::SyntaxError {
-                            message: "Expected number after minus in DATA".to_string(),
-                            line: line_number,
-                        });
-                    }
+    let mut values = Vec::new();
+    let mut chars = text.chars().peekable();
+    loop {
+        while chars.next_if_eq(&' ').is_some() {}
+        let mut item = String::new();
+        if chars.next_if_eq(&'"').is_some() {
+            while let Some(ch) = chars.next() {
+                if ch == '"' && chars.next_if_eq(&'"').is_none() {
+                    break;
                 }
+                item.push(ch);
             }
-            _ => {
-                return Err(BBCBasicError::SyntaxError {
-                    message: format!("Invalid DATA value: {:?}", tokens[pos]),
-                    line: line_number,
-                });
+            // Text after the closing quote is not part of the item
+            while chars.next_if(|c| *c != ',').is_some() {}
+        } else {
+            while let Some(ch) = chars.next_if(|c| *c != ',') {
+                item.push(ch);
             }
+        }
+        values.push(DataValue::String(item));
+        // Consume the comma. If there is no comma, the items are complete.
+        if chars.next().is_none() {
+            break;
         }
     }
 
@@ -3595,5 +3584,59 @@ mod tests {
     #[test]
     fn test_parse_unsigned_right_shift_gives_error() {
         assert!(parse_text("1 >>> 2").is_err());
+    }
+
+    fn data_items(source: &str) -> Vec<DataValue> {
+        use crate::tokenizer::tokenize;
+        match parse_line(&tokenize(source).unwrap()).unwrap().as_slice() {
+            [Statement::Data { values }] => values.clone(),
+            other => panic!("not one DATA statement: {:?}", other),
+        }
+    }
+
+    fn texts(items: &[&str]) -> Vec<DataValue> {
+        items
+            .iter()
+            .map(|s| DataValue::String(s.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_parse_data_splits_text_at_commas() {
+        assert_eq!(
+            data_items("10 DATA 1, -2.5, \"A,B\",  C D , ,\"x\"\"y\""),
+            texts(&["1", "-2.5", "A,B", "C D ", "", "x\"y"])
+        );
+    }
+
+    #[test]
+    fn test_parse_data_colon_and_rem_are_part_of_one_item() {
+        assert_eq!(data_items("10 DATA 1 : REM x"), texts(&["1 : REM x"]));
+    }
+
+    #[test]
+    fn test_parse_data_with_no_text_gives_no_items() {
+        assert_eq!(data_items("10 DATA"), texts(&[]));
+    }
+
+    #[test]
+    fn test_parse_data_after_then_keeps_else_in_the_data() {
+        use crate::tokenizer::tokenize;
+        let line = tokenize("IF A% THEN PRINT \"y\" : DATA 1,2 ELSE PRINT \"z\"").unwrap();
+        let Statement::If {
+            then_part,
+            else_part,
+            ..
+        } = parse_statement(&line).unwrap()
+        else {
+            panic!("not an IF statement");
+        };
+        assert_eq!(else_part, None);
+        assert_eq!(
+            then_part[1],
+            Statement::Data {
+                values: texts(&["1", "2 ELSE PRINT \"z\""])
+            }
+        );
     }
 }

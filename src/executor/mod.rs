@@ -26,6 +26,20 @@ fn real_to_integer(value: f64) -> Result<i32> {
     }
 }
 
+/// Convert a DATA text item for a READ into a numeric variable. A `&` item is a
+/// hex number. Other text gives its leading number, as `VAL` does, or 0.
+fn data_item_number(text: &str) -> f64 {
+    match text.trim_start().strip_prefix('&') {
+        Some(hex) => {
+            let digits = hex
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(hex.len());
+            u32::from_str_radix(&hex[..digits], 16).map_or(0.0, |v| v as i32 as f64)
+        }
+        None => parse_leading_number(text),
+    }
+}
+
 /// Read the longest number at the start of `text`, after leading spaces, as `VAL` does.
 /// The number has an optional sign, digits with one optional decimal point, and an
 /// optional exponent. If there is no number, the result is 0.
@@ -884,7 +898,7 @@ impl Executor {
                 let int_val = match data_value {
                     DataValue::Integer(v) => *v,
                     DataValue::Real(v) => *v as i32,
-                    DataValue::String(_) => 0, // BBC BASIC: string to number = 0
+                    DataValue::String(s) => data_item_number(s) as i32,
                 };
                 self.variables.set_integer_var(var_name.clone(), int_val);
             } else if var_name.ends_with('$') {
@@ -900,7 +914,7 @@ impl Executor {
                 let real_val = match data_value {
                     DataValue::Real(v) => *v,
                     DataValue::Integer(v) => *v as f64,
-                    DataValue::String(_) => 0.0, // BBC BASIC: string to number = 0
+                    DataValue::String(s) => data_item_number(s),
                 };
                 self.variables.set_real_var(var_name.clone(), real_val);
             }
