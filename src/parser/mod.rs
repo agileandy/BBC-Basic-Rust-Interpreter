@@ -682,6 +682,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
 /// Parse PRINT statement
 fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
+    Ok(Statement::Print {
+        items: parse_print_items(tokens)?,
+    })
+}
+
+/// Read the items of a PRINT or PRINT# statement
+fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
     let mut items = Vec::new();
     let mut pos = 0;
 
@@ -809,7 +816,7 @@ fn parse_print_statement(tokens: &[Token]) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Print { items })
+    Ok(items)
 }
 
 /// True if this token can start a PRINT item after a complete expression.
@@ -1702,115 +1709,6 @@ fn parse_comma_separated_expressions(
     }
 
     Ok(expressions)
-}
-
-/// Helper function to parse print items (extracted for reuse)
-fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
-    let mut items = Vec::new();
-    let mut pos = 0;
-
-    while pos < tokens.len() {
-        match &tokens[pos] {
-            Token::Separator(';') => {
-                items.push(PrintItem::Semicolon);
-                pos += 1;
-            }
-            Token::Separator(',') => {
-                items.push(PrintItem::Comma);
-                pos += 1;
-            }
-            Token::Operator('~') => {
-                items.push(PrintItem::Hex);
-                pos += 1;
-            }
-            // Handle TAB(expr)
-            Token::Keyword(0x8A) => {
-                pos += 1; // skip TAB keyword
-                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
-                    return Err(BBCBasicError::SyntaxError {
-                        message: "Expected '(' after TAB".to_string(),
-                        line: None,
-                    });
-                }
-                pos += 1; // skip '('
-
-                // Find matching closing paren
-                let mut paren_depth = 1;
-                let start = pos;
-                while pos < tokens.len() && paren_depth > 0 {
-                    match tokens[pos] {
-                        Token::Separator('(') => paren_depth += 1,
-                        Token::Separator(')') => paren_depth -= 1,
-                        _ => {}
-                    }
-                    if paren_depth > 0 {
-                        pos += 1;
-                    }
-                }
-
-                if paren_depth != 0 {
-                    return Err(BBCBasicError::SyntaxError {
-                        message: "Unmatched parenthesis in TAB".to_string(),
-                        line: None,
-                    });
-                }
-
-                let expr = parse_expression(&tokens[start..pos])?;
-                items.push(PrintItem::Tab(expr));
-                pos += 1; // skip ')'
-            }
-            // Handle SPC(expr)
-            Token::Keyword(0xB7) => {
-                pos += 1; // skip SPC keyword
-                if pos >= tokens.len() || !matches!(tokens[pos], Token::Separator('(')) {
-                    return Err(BBCBasicError::SyntaxError {
-                        message: "Expected '(' after SPC".to_string(),
-                        line: None,
-                    });
-                }
-                pos += 1; // skip '('
-
-                // Find matching closing paren
-                let mut paren_depth = 1;
-                let start = pos;
-                while pos < tokens.len() && paren_depth > 0 {
-                    match tokens[pos] {
-                        Token::Separator('(') => paren_depth += 1,
-                        Token::Separator(')') => paren_depth -= 1,
-                        _ => {}
-                    }
-                    if paren_depth > 0 {
-                        pos += 1;
-                    }
-                }
-
-                if paren_depth != 0 {
-                    return Err(BBCBasicError::SyntaxError {
-                        message: "Unmatched parenthesis in SPC".to_string(),
-                        line: None,
-                    });
-                }
-
-                let expr = parse_expression(&tokens[start..pos])?;
-                items.push(PrintItem::Spc(expr));
-                pos += 1; // skip ')'
-            }
-            _ => {
-                // Find the next separator (, or ;) or end of tokens
-                let next_sep = tokens[pos..]
-                    .iter()
-                    .position(|t| matches!(t, Token::Separator(',') | Token::Separator(';')))
-                    .map(|p| p + pos)
-                    .unwrap_or(tokens.len());
-
-                let expr = parse_expression(&tokens[pos..next_sep])?;
-                items.push(PrintItem::Expression(expr));
-                pos = next_sep;
-            }
-        }
-    }
-
-    Ok(items)
 }
 
 /// Parse DIM statement
@@ -3363,6 +3261,66 @@ mod tests {
             Statement::Print { items } => items,
             other => panic!("expected PRINT, got {:?}", other),
         }
+    }
+
+    fn parse_print_file_text(source: &str) -> Vec<PrintItem> {
+        use crate::tokenizer::tokenize;
+        match parse_statement(&tokenize(source).unwrap()).unwrap() {
+            Statement::PrintFile { items, .. } => items,
+            other => panic!("expected PRINT#, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_print_file_two_numbers_with_no_separator_gives_two_items() {
+        assert_eq!(
+            parse_print_file_text("PRINT#F%, 10 58"),
+            vec![
+                PrintItem::Expression(Expression::Integer(10)),
+                PrintItem::Expression(Expression::Integer(58)),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_file_hex_form() {
+        assert_eq!(
+            parse_print_file_text("PRINT#F%, ~255;255"),
+            vec![
+                PrintItem::Hex,
+                PrintItem::Expression(Expression::Integer(255)),
+                PrintItem::Semicolon,
+                PrintItem::Expression(Expression::Integer(255)),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_file_spc_gives_spc_item() {
+        assert_eq!(
+            parse_print_file_text("PRINT#F%, SPC(3);\"A\""),
+            vec![
+                PrintItem::Spc(Expression::Integer(3)),
+                PrintItem::Semicolon,
+                PrintItem::Expression(Expression::String("A".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_print_file_tan_is_a_function_call() {
+        assert!(matches!(
+            parse_print_file_text("PRINT#F%, TAN(0)").as_slice(),
+            [PrintItem::Expression(Expression::FunctionCall { .. })]
+        ));
+    }
+
+    #[test]
+    fn test_parse_print_tan_is_a_function_call() {
+        assert!(matches!(
+            parse_print_text("PRINT TAN(0)").as_slice(),
+            [PrintItem::Expression(Expression::FunctionCall { .. })]
+        ));
     }
 
     #[test]
