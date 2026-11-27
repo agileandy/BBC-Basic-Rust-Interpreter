@@ -89,6 +89,9 @@ pub mod error {
         DiskError(String),
         ChannelNotOpen(i32),
         TooManyOpenFiles,
+        // A directory function used on a path that is not a directory, or
+        // RMDIR of a directory that is not empty. A modern extension.
+        BadDirectory,
 
         // System errors
         IllegalFunction,
@@ -142,6 +145,7 @@ pub mod error {
                 BBCBasicError::DiskError(msg) => write!(f, "Disk error: {}", msg),
                 BBCBasicError::ChannelNotOpen(_) => write!(f, "Channel"),
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
+                BBCBasicError::BadDirectory => write!(f, "Bad directory"),
                 BBCBasicError::IllegalFunction => write!(f, "Illegal function"),
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),
                 BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
