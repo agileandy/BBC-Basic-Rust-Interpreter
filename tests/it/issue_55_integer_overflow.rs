@@ -67,10 +67,16 @@ fn test_power_with_negative_exponent_gives_truncated_value() {
 
 #[test]
 fn test_power_in_range_is_exact() {
-    let (result, output) = run(&["10 PRINT 2 ^ 30", "20 PRINT 2 ^ 0"]);
+    // A power is a real value (issue #175). PRINT shows 9 significant digits,
+    // as BBC BASIC does, and an integer variable keeps the exact value.
+    let (result, output) = run(&[
+        "10 PRINT 2 ^ 30",
+        "20 PRINT 2 ^ 0",
+        "30 A% = 2 ^ 30 : PRINT A%",
+    ]);
 
     assert_eq!(result, Ok(()));
-    assert_eq!(output, "1073741824\n1\n");
+    assert_eq!(output, "1.07374182E9\n1\n1073741824\n");
 }
 
 #[test]
