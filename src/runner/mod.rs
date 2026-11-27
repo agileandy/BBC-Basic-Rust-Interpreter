@@ -1080,6 +1080,10 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::NoSuchFnProc(_) => 29,
         BBCBasicError::FileNotFound(_) => 214,
         BBCBasicError::ChannelNotOpen(_) => 222,
+        BBCBasicError::TooManyOpenFiles => 192,
+        // DiskError groups different failures (create, read, write, flush).
+        // No single BBC BASIC number fits all of them, so it keeps 255.
+        BBCBasicError::DiskError(_) => 255,
         BBCBasicError::BadCall => 30,
         BBCBasicError::NoSuchVariable(_) => 26,
         BBCBasicError::ArrayNotDimensioned(_) => 14,
