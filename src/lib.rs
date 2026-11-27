@@ -64,6 +64,16 @@ pub mod error {
         CantMatchFor,
         // LOCAL outside a procedure or function
         NotLocal,
+        // GOTO, GOSUB or ON to a line that does not exist
+        NoSuchLine(i32),
+        // RETURN with no open GOSUB
+        NoGosub,
+        // A PROC or FN call with the wrong number of arguments
+        Arguments,
+        // ENDPROC with no open PROC
+        NoProc,
+        // A call to a PROC or FN that is not defined. The name has its prefix.
+        NoSuchFnProc(String),
 
         // Variable and array errors
         NoSuchVariable(String),
@@ -114,6 +124,11 @@ pub mod error {
                 BBCBasicError::NoWhile => write!(f, "No WHILE"),
                 BBCBasicError::CantMatchFor => write!(f, "Can't match FOR"),
                 BBCBasicError::NotLocal => write!(f, "Not LOCAL"),
+                BBCBasicError::NoSuchLine(line) => write!(f, "No such line: {}", line),
+                BBCBasicError::NoGosub => write!(f, "No GOSUB"),
+                BBCBasicError::Arguments => write!(f, "Arguments"),
+                BBCBasicError::NoProc => write!(f, "No PROC"),
+                BBCBasicError::NoSuchFnProc(name) => write!(f, "No such FN/PROC: {}", name),
                 BBCBasicError::NoSuchVariable(name) => write!(f, "No such variable: {}", name),
                 BBCBasicError::ArrayNotDimensioned(name) => {
                     write!(f, "Array not dimensioned: {}", name)

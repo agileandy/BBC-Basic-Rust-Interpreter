@@ -259,8 +259,6 @@ impl Cursor<'_> {
 enum BodyAbort {
     /// An error that stops the program
     Fatal(String),
-    /// A BASIC error that stops the program (see `StepError::FatalError`)
-    FatalError(BBCBasicError),
     /// END or STOP in the function body
     Stop,
     /// QUIT in the function body
@@ -285,10 +283,6 @@ enum StepError {
     Runtime(BBCBasicError),
     /// An error that stops the program.
     Fatal(String),
-    /// A BASIC error that stops the program. ON ERROR does not catch it.
-    /// The run loop adds the line, which is the line of a function body
-    /// statement if the error is in a function call.
-    FatalError(BBCBasicError),
 }
 
 impl From<BBCBasicError> for StepError {
@@ -584,6 +578,7 @@ fn run_lines(
         current: start,
     };
     let mut previous_line = None;
+    let local_depth = executor.local_depth();
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
@@ -624,10 +619,6 @@ fn run_lines(
             (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
                 return Err(message);
             }
-            (Some(BodyAbort::FatalError(e)), _) | (None, StepError::FatalError(e)) => {
-                record_error(executor, &e, error_line);
-                return Err(error_text(&e, error_line));
-            }
             (None, StepError::Runtime(e)) => {
                 // Set ERL, ERR and the text for REPORT, also when no
                 // handler catches the error
@@ -646,6 +637,12 @@ fn run_lines(
                         handler_line, error_line
                     ));
                 }
+                // As in BBC BASIC, the handler runs outside each PROC, FN,
+                // GOSUB and loop that was open: it sees the values that
+                // LOCAL statements hid, and a RETURN, ENDPROC, NEXT, UNTIL
+                // or ENDWHILE in it gives an error
+                executor.exit_local_scopes_to(local_depth);
+                executor.clear_control_stacks();
             }
         }
     }
@@ -706,9 +703,6 @@ fn run_function_body(
             }
             Err(StepError::Fatal(message)) => {
                 abort_program(failure, line_number, BodyAbort::Fatal(message))
-            }
-            Err(StepError::FatalError(e)) => {
-                abort_program(failure, line_number, BodyAbort::FatalError(e))
             }
         };
     }
@@ -795,33 +789,34 @@ fn step(
             line_number: target,
         } => {
             if !program.goto_line(*target) {
-                return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                return Err(BBCBasicError::NoSuchLine((*target).into()).into());
             }
             Ok(Flow::Jumped)
         }
         Statement::Gosub {
             line_number: target,
         } => {
-            // Push the current position so RETURN can come back here
-            executor.push_gosub_return(position);
             if !program.goto_line(*target) {
-                return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                return Err(BBCBasicError::NoSuchLine((*target).into()).into());
             }
+            // Push the current position so RETURN can come back here. A
+            // trapped error must not leave a return position.
+            executor.push_gosub_return(position);
             Ok(Flow::Jumped)
         }
         Statement::GotoExpression { target } => {
             let target = executor.eval_integer(target)?;
             if !goto_calculated_line(program, target) {
-                return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                return Err(BBCBasicError::NoSuchLine(target).into());
             }
             Ok(Flow::Jumped)
         }
         Statement::GosubExpression { target } => {
             let target = executor.eval_integer(target)?;
-            executor.push_gosub_return(position);
             if !goto_calculated_line(program, target) {
-                return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                return Err(BBCBasicError::NoSuchLine(target).into());
             }
+            executor.push_gosub_return(position);
             Ok(Flow::Jumped)
         }
         Statement::OnGoto {
@@ -830,14 +825,12 @@ fn step(
             ..
         } => {
             // BBC BASIC uses 1-based indexing
-            let index = executor
-                .eval_integer(expression)
-                .map_err(StepError::FatalError)?;
+            let index = executor.eval_integer(expression)?;
 
             if index >= 1 && (index as usize) <= targets.len() {
                 let target = targets[(index - 1) as usize];
                 if !program.goto_line(target) {
-                    return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                    return Err(BBCBasicError::NoSuchLine(target.into()).into());
                 }
                 return Ok(Flow::Jumped);
             }
@@ -850,16 +843,14 @@ fn step(
             ..
         } => {
             // BBC BASIC uses 1-based indexing
-            let index = executor
-                .eval_integer(expression)
-                .map_err(StepError::FatalError)?;
+            let index = executor.eval_integer(expression)?;
 
             if index >= 1 && (index as usize) <= targets.len() {
                 let target = targets[(index - 1) as usize];
-                executor.push_gosub_return(position);
                 if !program.goto_line(target) {
-                    return Err(format!("No such line: {}{}", target, at_line(line_number)).into());
+                    return Err(BBCBasicError::NoSuchLine(target.into()).into());
                 }
+                executor.push_gosub_return(position);
                 return Ok(Flow::Jumped);
             }
             program.goto_after_next_else(position)?;
@@ -868,7 +859,7 @@ fn step(
         Statement::Return { .. } => {
             let return_position = executor
                 .pop_gosub_return()
-                .map_err(|_| format!("No GOSUB{}", at_line(line_number)))?;
+                .map_err(|_| BBCBasicError::NoGosub)?;
             // Go back to the GOSUB, then continue with the statement after it
             program.goto(return_position);
             Ok(Flow::Next)
@@ -876,17 +867,10 @@ fn step(
         Statement::ProcCall { name, args } => {
             let proc = executor
                 .get_procedure(name)
-                .ok_or_else(|| format!("No such FN/PROC: PROC{}{}", name, at_line(line_number)))?;
+                .ok_or_else(|| BBCBasicError::NoSuchFnProc(format!("PROC{}", name)))?;
 
             if args.len() != proc.params.len() {
-                return Err(format!(
-                    "Procedure {} expects {} parameters, got {}{}",
-                    name,
-                    proc.params.len(),
-                    args.len(),
-                    at_line(line_number)
-                )
-                .into());
+                return Err(BBCBasicError::Arguments.into());
             }
 
             // Clone procedure data before entering local scope
@@ -902,12 +886,16 @@ fn step(
 
             // Bind arguments to parameters (as global variables)
             for (param_name, arg_expr) in params_and_args {
-                executor
-                    .execute_statement(&Statement::Assignment {
-                        target: param_name,
-                        expression: arg_expr,
-                    })
-                    .map_err(StepError::FatalError)?;
+                let bound = executor.execute_statement(&Statement::Assignment {
+                    target: param_name,
+                    expression: arg_expr,
+                });
+                if let Err(error) = bound {
+                    // The PROC did not start: close its scope, so that the
+                    // ON ERROR handler runs in the scope of the caller
+                    executor.exit_local_scope()?;
+                    return Err(error.into());
+                }
             }
 
             executor.push_gosub_return(position);
@@ -919,11 +907,11 @@ fn step(
         Statement::EndProc => {
             executor
                 .exit_local_scope()
-                .map_err(|_| format!("No PROC{}", at_line(line_number)))?;
+                .map_err(|_| BBCBasicError::NoProc)?;
 
             let return_position = executor
                 .pop_gosub_return()
-                .map_err(|_| format!("No PROC{}", at_line(line_number)))?;
+                .map_err(|_| BBCBasicError::NoProc)?;
             // Go back to the PROC call, then continue with the statement after it
             program.goto(return_position);
             Ok(Flow::Next)
@@ -946,13 +934,7 @@ fn step(
             Ok(Flow::Next)
         }
         Statement::Until { condition } => {
-            let repeat_position = executor
-                .check_until(condition)
-                .map_err(|error| match error {
-                    // No open REPEAT loop: ON ERROR can catch this error
-                    BBCBasicError::NoRepeat => StepError::Runtime(error),
-                    _ => StepError::FatalError(error),
-                })?;
+            let repeat_position = executor.check_until(condition)?;
             if let Some(repeat_position) = repeat_position {
                 // Condition false: loop back to the statement after REPEAT
                 program.goto(repeat_position);
@@ -960,9 +942,7 @@ fn step(
             Ok(Flow::Next)
         }
         Statement::While { condition } => {
-            let entered = executor
-                .push_while(position, condition)
-                .map_err(StepError::FatalError)?;
+            let entered = executor.push_while(position, condition)?;
             if entered.is_none() {
                 // Condition false: scan forward to the matching ENDWHILE
                 let mut depth = 1;
@@ -1000,9 +980,7 @@ fn step(
                 )
                 .into());
             };
-            let loop_position = executor
-                .check_endwhile(condition)
-                .map_err(StepError::FatalError)?;
+            let loop_position = executor.check_endwhile(condition)?;
             if let Some(loop_position) = loop_position {
                 // Condition still true: loop back to the statement after WHILE
                 program.goto(loop_position);
@@ -1031,9 +1009,16 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::NoWhile => 46,
         BBCBasicError::CantMatchFor => 33,
         BBCBasicError::NotLocal => 12,
+        BBCBasicError::NoSuchLine(_) => 41,
+        BBCBasicError::NoGosub => 38,
+        BBCBasicError::Arguments => 31,
+        BBCBasicError::NoProc => 13,
+        BBCBasicError::NoSuchFnProc(_) => 29,
+        BBCBasicError::ChannelNotOpen(_) => 222,
+        BBCBasicError::BadCall => 30,
         BBCBasicError::NoSuchVariable(_) => 26,
         BBCBasicError::ArrayNotDimensioned(_) => 14,
-        BBCBasicError::SyntaxError { .. } => 220,
+        BBCBasicError::SyntaxError { .. } => 16,
         BBCBasicError::BadProgram => 254,
         BBCBasicError::IllegalFunction => 31,
         BBCBasicError::BadMode => 25,

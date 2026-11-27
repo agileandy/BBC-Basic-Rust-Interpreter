@@ -2243,6 +2243,7 @@ impl Executor {
             // Real-only functions should not be called as integers
             "SIN" | "COS" | "TAN" | "ATN" | "SQR" | "SQRT" | "ACS" | "ASN" | "EXP" | "LN"
             | "LOG" | "DEG" | "RAD" | "PI" | "RND" => Err(BBCBasicError::TypeMismatch),
+            _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -2468,6 +2469,7 @@ impl Executor {
                 }
                 Ok(val.asin())
             }
+            _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown function: {}", name),
                 line: None,
@@ -2678,6 +2680,7 @@ impl Executor {
                 }
                 Ok(error_msg)
             }
+            _ if name.starts_with("FN") => Err(BBCBasicError::NoSuchFnProc(name.to_string())),
             _ => Err(BBCBasicError::SyntaxError {
                 message: format!("Unknown string function: {}", name),
                 line: None,
@@ -3067,15 +3070,7 @@ impl Executor {
 
         // Check parameter count
         if args.len() != func.params.len() {
-            return Err(BBCBasicError::SyntaxError {
-                message: format!(
-                    "Function {} expects {} parameters, got {}",
-                    name,
-                    func.params.len(),
-                    args.len()
-                ),
-                line: None,
-            });
+            return Err(BBCBasicError::Arguments);
         }
 
         // Evaluate all arguments in the caller scope, before a parameter
