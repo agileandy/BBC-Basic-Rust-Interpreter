@@ -788,11 +788,11 @@ impl Executor {
 
     /// Collect DATA statement values without executing (for program pre-processing)
     /// This is used to collect all DATA statements before program execution begins
-    pub fn collect_data(&mut self, statement: &Statement) -> Result<()> {
+    pub fn collect_data(&mut self, statement: &Statement, line_number: u16) -> Result<()> {
         if let Statement::Data { values } = statement {
             for value in values {
                 self.data_values.push(value.clone());
-                self.data_line_numbers.push(self.current_line);
+                self.data_line_numbers.push(Some(line_number));
             }
         }
         Ok(())
@@ -863,11 +863,8 @@ impl Executor {
                     }
                 }
             }
-            // If no DATA found at or after target line, error
-            return Err(BBCBasicError::SyntaxError {
-                message: format!("No DATA at line {}", target_line),
-                line: None,
-            });
+            // No DATA at or after the target line: the next READ gives "Out of DATA"
+            self.data_pointer = self.data_values.len();
         } else {
             // No line number: reset to beginning
             self.data_pointer = 0;
@@ -4236,7 +4233,7 @@ mod tests {
         // For now, this test will fail because we need a new method to pre-collect DATA
 
         // Simulate what should happen: all DATA is collected first
-        executor.collect_data(&data_stmt).unwrap();
+        executor.collect_data(&data_stmt, 20).unwrap();
 
         // Now READ should work even though we never "executed" line 20
         let read_stmt = Statement::Read {

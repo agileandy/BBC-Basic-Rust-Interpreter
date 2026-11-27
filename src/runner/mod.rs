@@ -234,7 +234,7 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
             };
 
             if matches!(statement, Statement::Data { .. }) {
-                executor.collect_data(statement).map_err(|e| {
+                executor.collect_data(statement, line_number).map_err(|e| {
                     format!("Error collecting DATA at line {}: {:?}", line_number, e)
                 })?;
             }
