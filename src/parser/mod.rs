@@ -392,6 +392,24 @@ pub enum Statement {
     MakeDirectory { path: Expression },
     /// RMDIR statement - remove one empty directory (extension, not BBC BASIC)
     RemoveDirectory { path: Expression },
+    /// LISTADD l, value - add an element at the end of a list (extension, issue #139)
+    ListAdd { list: Expression, value: Expression },
+    /// LISTSET l, i, value - change the element at an index (extension)
+    ListSet {
+        list: Expression,
+        index: Expression,
+        value: Expression,
+    },
+    /// LISTINSERT l, i, value - put an element before an index (extension)
+    ListInsert {
+        list: Expression,
+        index: Expression,
+        value: Expression,
+    },
+    /// LISTREMOVE l, i - remove the element at an index (extension)
+    ListRemove { list: Expression, index: Expression },
+    /// LISTCLEAR l - remove all elements of a list (extension)
+    ListClear { list: Expression },
     /// Empty statement
     Empty,
 }
@@ -820,6 +838,13 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
                         path: parse_expression(&tokens[1..])?,
                     })
                 }
+                // The list statements (issue #139) use the same rule as MKDIR.
+                Err(error) => match &tokens[0] {
+                    Token::Identifier(name) if is_list_statement(name) => {
+                        parse_list_statement(name, &tokens[1..], line.line_number)
+                    }
+                    _ => Err(error),
+                },
                 parsed => parsed,
             }
         }
@@ -1920,6 +1945,76 @@ fn parse_savejson_statement(tokens: &[Token], line_number: Option<u16>) -> Resul
     let json = parse_expression(&tokens[comma_pos + 1..])?;
 
     Ok(Statement::SaveJson { file, json })
+}
+
+/// Tell if a name is a list statement (extension, issue #139).
+fn is_list_statement(name: &str) -> bool {
+    matches!(
+        name,
+        "LISTADD" | "LISTSET" | "LISTINSERT" | "LISTREMOVE" | "LISTCLEAR"
+    )
+}
+
+/// Parse a list statement: LISTADD l, value, LISTSET l, i, value,
+/// LISTINSERT l, i, value, LISTREMOVE l, i or LISTCLEAR l (issue #139).
+/// A comma in brackets does not divide the arguments.
+fn parse_list_statement(
+    name: &str,
+    tokens: &[Token],
+    line_number: Option<u16>,
+) -> Result<Statement> {
+    let mut args = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    for (pos, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Separator('(') => depth += 1,
+            Token::Separator(')') => depth -= 1,
+            Token::Separator(',') if depth == 0 => {
+                args.push(parse_expression(&tokens[start..pos])?);
+                start = pos + 1;
+            }
+            _ => {}
+        }
+    }
+    args.push(parse_expression(&tokens[start..])?);
+
+    let count = match name {
+        "LISTCLEAR" => 1,
+        "LISTADD" | "LISTREMOVE" => 2,
+        _ => 3,
+    };
+    if args.len() != count {
+        return Err(BBCBasicError::SyntaxError {
+            message: format!("{} requires {} arguments, got {}", name, count, args.len()),
+            line: line_number,
+        });
+    }
+
+    let mut args = args.into_iter();
+    let list = args.next().expect("count is checked");
+    let mut next = || args.next().expect("count is checked");
+    Ok(match name {
+        "LISTADD" => Statement::ListAdd {
+            list,
+            value: next(),
+        },
+        "LISTSET" => Statement::ListSet {
+            list,
+            index: next(),
+            value: next(),
+        },
+        "LISTINSERT" => Statement::ListInsert {
+            list,
+            index: next(),
+            value: next(),
+        },
+        "LISTREMOVE" => Statement::ListRemove {
+            list,
+            index: next(),
+        },
+        _ => Statement::ListClear { list },
+    })
 }
 
 /// Parse PTR# assignment (file I/O)

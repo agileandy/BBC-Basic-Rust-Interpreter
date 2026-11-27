@@ -7,6 +7,7 @@
 mod key_input;
 mod vdu;
 
+use crate::collections::{CollectionStore, Element};
 use crate::error::{BBCBasicError, Result};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::memory::MemoryManager;
@@ -41,6 +42,14 @@ fn real_to_integer(value: f64) -> Result<i32> {
         Ok(truncated as i32)
     } else {
         Err(BBCBasicError::TooBig)
+    }
+}
+
+/// The error of a list function with the wrong count of arguments (issue #139).
+fn list_arguments_error(name: &str, count: usize) -> BBCBasicError {
+    BBCBasicError::SyntaxError {
+        message: format!("{} requires {} arguments", name, count),
+        line: None,
     }
 }
 
@@ -391,6 +400,8 @@ pub struct Executor {
     // Bytes of a VDU command that waits for more parameter bytes. They stay
     // between VDU statements.
     vdu_queue: Vec<u8>,
+    // Lists of the program, found by handle (extension, issue #139)
+    collections: CollectionStore,
 }
 
 impl Executor {
@@ -432,6 +443,7 @@ impl Executor {
             text_foreground: 1,
             text_background: 0,
             vdu_queue: Vec::new(),
+            collections: CollectionStore::new(),
         }
     }
 
@@ -558,6 +570,32 @@ impl Executor {
             }
             Statement::RemoveDirectory { path } => {
                 crate::filesystem::remove_directory(&self.eval_string(path)?)
+            }
+            Statement::ListAdd { list, value } => {
+                let list = self.eval_integer(list)?;
+                let value = self.eval_list_element(value)?;
+                self.collections.add(list, value)
+            }
+            Statement::ListSet { list, index, value } => {
+                let list = self.eval_integer(list)?;
+                let index = self.eval_integer(index)?;
+                let value = self.eval_list_element(value)?;
+                self.collections.set(list, index, value)
+            }
+            Statement::ListInsert { list, index, value } => {
+                let list = self.eval_integer(list)?;
+                let index = self.eval_integer(index)?;
+                let value = self.eval_list_element(value)?;
+                self.collections.insert(list, index, value)
+            }
+            Statement::ListRemove { list, index } => {
+                let list = self.eval_integer(list)?;
+                let index = self.eval_integer(index)?;
+                self.collections.remove(list, index)
+            }
+            Statement::ListClear { list } => {
+                let list = self.eval_integer(list)?;
+                self.collections.clear_list(list)
             }
             Statement::DefProc { .. } => {
                 // DEF PROC is handled during procedure collection in main.rs
@@ -1396,12 +1434,13 @@ impl Executor {
     }
 
     /// Remove all variables, arrays and DIM blocks, close the loops, the calls and the
-    /// LOCAL scopes, move the DATA pointer to the first value and remove a
+    /// LOCAL scopes, remove all lists, move the DATA pointer to the first value and remove a
     /// VDU command that is not complete. The
     /// resident integer variables A% to Z%, the procedures and the
     /// functions stay. CLEAR, RUN, NEW, LOAD and CHAIN use this.
     pub fn clear_variables(&mut self) {
         self.vdu_queue.clear();
+        self.collections.clear();
         self.variables.clear();
         self.reset_dim_space();
         self.clear_control_stacks();
@@ -1679,6 +1718,12 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val),
             Expression::Real(val) => real_to_integer(*val),
+            Expression::Variable(name) if self.is_new_list_call(name) => {
+                self.collections.new_list()
+            }
+            Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
+                real_to_integer(self.eval_list_function(name, indices)?)
+            }
             Expression::Variable(name) => {
                 // Check for pseudo-variables first
                 if name == "TIME" {
@@ -1893,6 +1938,12 @@ impl Executor {
         match expr {
             Expression::Integer(val) => Ok(*val as f64),
             Expression::Real(val) => Ok(*val),
+            Expression::Variable(name) if self.is_new_list_call(name) => {
+                self.collections.new_list().map(f64::from)
+            }
+            Expression::ArrayAccess { name, indices } if self.is_list_call(name) => {
+                self.eval_list_function(name, indices)
+            }
             Expression::Variable(name) => {
                 // Check for pseudo-variables first
                 match name.as_str() {
@@ -2143,6 +2194,18 @@ impl Executor {
                 .get_string_var(name)
                 .map(|s| s.to_string())
                 .ok_or_else(|| BBCBasicError::NoSuchVariable(name.clone())),
+            // LISTGET$(l, i) is an extension (issue #139). An array named
+            // LISTGET$ keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if name == "LISTGET$" && !self.variables.has_array(name) =>
+            {
+                let [list, index] = indices.as_slice() else {
+                    return Err(list_arguments_error(name, 2));
+                };
+                let list = self.eval_integer(list)?;
+                let index = self.eval_integer(index)?;
+                self.collections.get_text(list, index)
+            }
             Expression::ArrayAccess { name, indices } if self.is_json_call(name, "LOADJSON$") => {
                 let file = self.eval_json_argument(name, indices)?;
                 let text = crate::json::load_file(&file)?;
@@ -2901,6 +2964,54 @@ impl Executor {
     /// name in the program has priority, so that old programs do not change.
     fn is_json_call(&self, name: &str, function: &str) -> bool {
         name == function && !self.variables.has_array(name)
+    }
+
+    /// Tell if `name` with no bracket is a call of NEWLIST (issue #139). A
+    /// variable named NEWLIST has priority, so that old programs do not change.
+    fn is_new_list_call(&self, name: &str) -> bool {
+        name == "NEWLIST" && !self.variables.has_variable(name)
+    }
+
+    /// Tell if `name(...)` is a call of a numeric list function (issue #139).
+    /// An array of the same name has priority.
+    fn is_list_call(&self, name: &str) -> bool {
+        matches!(name, "NEWLIST" | "LISTLEN" | "LISTGET" | "LISTISSTR")
+            && !self.variables.has_array(name)
+    }
+
+    /// Evaluate a numeric list function: NEWLIST(), LISTLEN(l), LISTGET(l, i)
+    /// or LISTISSTR(l, i). LISTISSTR gives TRUE (-1) or FALSE (0).
+    fn eval_list_function(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
+        match (name, args) {
+            ("NEWLIST", []) => self.collections.new_list().map(f64::from),
+            ("LISTLEN", [list]) => {
+                let list = self.eval_integer(list)?;
+                Ok(self.collections.length(list)? as f64)
+            }
+            ("LISTGET" | "LISTISSTR", [list, index]) => {
+                let list = self.eval_integer(list)?;
+                let index = self.eval_integer(index)?;
+                if name == "LISTGET" {
+                    self.collections.get_number(list, index)
+                } else if self.collections.is_text(list, index)? {
+                    Ok(-1.0)
+                } else {
+                    Ok(0.0)
+                }
+            }
+            ("NEWLIST", _) => Err(list_arguments_error(name, 0)),
+            ("LISTLEN", _) => Err(list_arguments_error(name, 1)),
+            _ => Err(list_arguments_error(name, 2)),
+        }
+    }
+
+    /// Evaluate the value of LISTADD, LISTSET or LISTINSERT: a string or a number.
+    fn eval_list_element(&mut self, value: &Expression) -> Result<Element> {
+        if self.is_string_expr(value) {
+            Ok(Element::Text(self.eval_string(value)?))
+        } else {
+            Ok(Element::Number(self.eval_number(value)?))
+        }
     }
 
     /// Evaluate the one text argument of a JSON function.

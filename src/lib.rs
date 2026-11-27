@@ -7,6 +7,7 @@
 // The tests use 3.14 as an arbitrary real value, not as PI.
 #![cfg_attr(test, allow(clippy::approx_constant))]
 
+pub mod collections;
 pub mod executor;
 pub mod extensions;
 pub mod filesystem;
@@ -104,6 +105,8 @@ pub mod error {
         // A JSON path with wrong syntax, or with no value at it, with the
         // path text (issue #103)
         BadPath(String),
+        // A handle that is not a collection (issue #139)
+        BadCollection,
 
         // Custom error for ON ERROR handling
         UserError(u8),
@@ -152,6 +155,7 @@ pub mod error {
                 BBCBasicError::BadMode => write!(f, "Bad MODE"),
                 BBCBasicError::BadJson(detail) => write!(f, "Bad JSON: {}", detail),
                 BBCBasicError::BadPath(path) => write!(f, "Bad path: {}", path),
+                BBCBasicError::BadCollection => write!(f, "Bad collection"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError(code) => write!(f, "Error {}", code),
             }
