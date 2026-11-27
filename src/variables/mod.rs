@@ -180,7 +180,10 @@ impl VariableStore {
         }
     }
 
-    /// Dimension an array
+    /// Dimension an array.
+    ///
+    /// Each value in `dimensions` is the element count of that dimension,
+    /// not the top index. `DIM A(N)` must pass N + 1.
     pub fn dim_array(
         &mut self,
         name: String,

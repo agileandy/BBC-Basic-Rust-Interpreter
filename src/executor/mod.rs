@@ -678,7 +678,8 @@ impl Executor {
                 if size < 0 {
                     return Err(BBCBasicError::SubscriptOutOfRange);
                 }
-                dim_sizes.push(size as usize);
+                // DIM A(N) gives the elements 0 to N, so N + 1 elements
+                dim_sizes.push(size as usize + 1);
             }
 
             // Determine array type from variable name suffix
