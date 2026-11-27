@@ -857,6 +857,18 @@ impl Executor {
         self.data_pointer = 0;
     }
 
+    /// Use the DATA values of the stored program (before a typed line). If
+    /// they are the same as the current values, the DATA pointer stays, so
+    /// READ continues. Otherwise the pointer goes to the first value.
+    pub fn use_data_pool(&mut self, values: Vec<DataValue>, line_numbers: Vec<Option<u16>>) {
+        if values == self.data_values && line_numbers == self.data_line_numbers {
+            return;
+        }
+        self.data_values = values;
+        self.data_line_numbers = line_numbers;
+        self.data_pointer = 0;
+    }
+
     /// Execute READ statement - reads data into variables
     fn execute_read(&mut self, variables: &[String]) -> Result<()> {
         for var_name in variables {
@@ -2273,6 +2285,20 @@ impl Executor {
         Ok(())
     }
 
+    /// The number of open local scopes
+    pub fn local_depth(&self) -> usize {
+        self.local_stack.len()
+    }
+
+    /// Exit local scopes until `depth` scopes are open, and restore their
+    /// saved variables (after a run that stopped inside a PROC or FN)
+    pub fn exit_local_scopes_to(&mut self, depth: usize) {
+        while self.local_stack.len() > depth {
+            // The stack is not empty, so exit_local_scope cannot fail
+            let _ = self.exit_local_scope();
+        }
+    }
+
     /// Exit local scope and restore saved variables (called on ENDPROC/ENDFN)
     pub fn exit_local_scope(&mut self) -> Result<()> {
         let frame = self
@@ -2322,6 +2348,14 @@ impl Executor {
     pub fn clear_functions(&mut self) {
         self.functions.clear();
         self.function_body_runner = BodyRunnerSlot::default();
+    }
+
+    /// Remove the multi-line functions. A typed line uses this before it
+    /// defines the functions of the stored program again. A function that
+    /// the user defined in immediate mode stays.
+    pub fn clear_multi_line_functions(&mut self) {
+        self.functions
+            .retain(|_, function| !matches!(function.body, FunctionBody::Lines(_)));
     }
 
     /// Clear the GOSUB, FOR, REPEAT and WHILE stacks (used at the start of a
@@ -2517,7 +2551,7 @@ impl Executor {
                 let runner = self.function_body_runner.0.clone().ok_or_else(|| {
                     BBCBasicError::SyntaxError {
                         message: "A multi-line function needs a running program".to_string(),
-                        line: Some(def_position.line),
+                        line: def_position.stored_line(),
                     }
                 })?;
                 let mut result = None;

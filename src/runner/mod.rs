@@ -12,7 +12,8 @@ use std::rc::Rc;
 use crate::error::BBCBasicError;
 use crate::executor::{Executor, FunctionBody, ResultEvaluator};
 use crate::parser::{parse_line, Expression, Statement};
-use crate::program::{Position, ProgramStore};
+use crate::program::{Position, ProgramStore, TYPED_LINE};
+use crate::tokenizer::TokenizedLine;
 
 /// What the run loop does after a statement.
 enum Flow {
@@ -46,6 +47,9 @@ enum Item {
     /// An ELSE: the run goes to the item at this index on the same line (the
     /// end of the line).
     Skip(usize),
+    /// A stored line that does not parse. The run stops with this parse
+    /// error when it gets to the line.
+    Invalid(String),
 }
 
 /// Make the run list of the statements of one line.
@@ -66,7 +70,7 @@ fn flatten_line(statements: Vec<Statement>) -> Vec<Item> {
                 after_next_else = index + 1;
             }
             Item::If { otherwise, .. } => *otherwise = after_next_else,
-            Item::Statement(_) => {}
+            Item::Statement(_) | Item::Invalid(_) => {}
         }
     }
     items
@@ -100,8 +104,10 @@ fn flatten(statements: Vec<Statement>, items: &mut Vec<Item>) {
 
 /// The parsed lines of the program, shared with the function body runner.
 struct ProgramLines {
-    items: HashMap<u16, Vec<Item>>,
-    line_numbers: BTreeSet<u16>,
+    items: HashMap<u32, Vec<Item>>,
+    /// The stored line numbers. The typed line is not in this set, so a jump
+    /// or the end of a stored line never goes to it.
+    line_numbers: BTreeSet<u32>,
 }
 
 impl ProgramLines {
@@ -130,7 +136,7 @@ impl Cursor<'_> {
     /// Go to the first statement of a line. Returns false if the line does
     /// not exist.
     fn goto_line(&mut self, line_number: u16) -> bool {
-        if self.lines.line_numbers.contains(&line_number) {
+        if self.lines.line_numbers.contains(&u32::from(line_number)) {
             self.current = Some(Position::line_start(line_number));
             true
         } else {
@@ -149,7 +155,10 @@ impl Cursor<'_> {
                 .line_numbers
                 .range((Bound::Excluded(position.line), Bound::Unbounded))
                 .next()
-                .map(|line| Position::line_start(*line))
+                .map(|line| Position {
+                    line: *line,
+                    index: 0,
+                })
         };
     }
 
@@ -191,7 +200,7 @@ enum BodyAbort {
 #[derive(Default)]
 struct BodyFailure {
     /// Line of the deepest body statement that failed (for ERL and the message)
-    line: Option<u16>,
+    line: Option<u32>,
     /// Set when the program must stop
     abort: Option<BodyAbort>,
 }
@@ -249,47 +258,22 @@ pub fn run_program_with_outcome(
     executor.clear_control_stacks();
 
     // First pass: parse each line, collect DATA statements and procedure definitions
-    let mut all_items: HashMap<u16, Vec<Item>> = HashMap::new();
+    let mut all_items: HashMap<u32, Vec<Item>> = HashMap::new();
     for (line_number, line) in program.list() {
         let statements = parse_line(line)
             .map_err(|e| format!("Parse error at line {}: {:?}", line_number, e))?;
         let items = flatten_line(statements);
 
-        for (index, item) in items.iter().enumerate() {
-            let Item::Statement(statement) = item else {
-                continue;
-            };
-            let position = Position {
-                line: line_number,
-                index,
-            };
-
-            if matches!(statement, Statement::Data { .. }) {
+        for item in &items {
+            if let Item::Statement(statement @ Statement::Data { .. }) = item {
                 executor.collect_data(statement, line_number).map_err(|e| {
                     format!("Error collecting DATA at line {}: {:?}", line_number, e)
                 })?;
             }
-
-            if let Statement::DefProc { name, params } = statement {
-                executor.define_procedure(name.clone(), position, params.clone());
-            }
-
-            // Define each function before the run, so that a DEF FN after END works
-            if let Statement::DefFn {
-                name,
-                params,
-                expression,
-            } = statement
-            {
-                let body = match expression {
-                    Some(expression) => FunctionBody::Expression(expression.clone()),
-                    None => FunctionBody::Lines(position),
-                };
-                executor.define_function(name.clone(), params.clone(), body);
-            }
         }
+        define_routines(executor, line_number, &items);
 
-        all_items.insert(line_number, items);
+        all_items.insert(line_number.into(), items);
     }
 
     let line_numbers = all_items.keys().copied().collect();
@@ -297,10 +281,131 @@ pub fn run_program_with_outcome(
         items: all_items,
         line_numbers,
     });
-    let failure = Rc::new(RefCell::new(BodyFailure::default()));
+    let failure = install_function_body_runner(executor, &lines);
 
-    // A call to a multi-line function runs its body with this runner
-    let runner_lines = Rc::clone(&lines);
+    let start = lines.line_numbers.first().map(|line| Position {
+        line: *line,
+        index: 0,
+    });
+    let local_depth = executor.local_depth();
+    let outcome = run_lines(executor, &lines, &failure, start);
+    // A run that stops inside a PROC or FN restores its LOCAL variables
+    executor.exit_local_scopes_to(local_depth);
+    outcome
+}
+
+/// Run a line typed with no line number, with the same control flow as a
+/// program line.
+///
+/// A jump or a call goes to the stored program. GOSUB, PROC and FN come back
+/// to the typed line. GOTO continues in the stored program. The variables
+/// and the functions defined in immediate mode stay. The control stacks and
+/// the LOCAL scopes are as before the line, also after an error. An error in
+/// a stored line goes to the ON ERROR handler. An error in the typed line
+/// does not.
+pub fn run_typed_line(
+    executor: &mut Executor,
+    program: &ProgramStore,
+    line: &TokenizedLine,
+) -> Result<RunOutcome, String> {
+    let statements = parse_line(line).map_err(|e| format!("Parse error: {:?}", e))?;
+    let typed_items = flatten_line(statements);
+    for item in &typed_items {
+        match item {
+            Item::Statement(Statement::DefProc { .. }) => {
+                return Err("DEF PROC needs a line number".to_string());
+            }
+            Item::Statement(Statement::DefFn {
+                expression: None, ..
+            }) => return Err("DEF FN needs a line number".to_string()),
+            _ => {}
+        }
+    }
+
+    // Define the procedures and functions of the stored program again, so
+    // that a changed or deleted DEF does not keep an old position
+    executor.clear_procedures();
+    executor.clear_multi_line_functions();
+
+    let mut all_items: HashMap<u32, Vec<Item>> = HashMap::new();
+    let mut data_values = Vec::new();
+    let mut data_line_numbers = Vec::new();
+    for (line_number, stored) in program.list() {
+        let items = match parse_line(stored) {
+            Ok(statements) => flatten_line(statements),
+            // The run gives the parse error only if it gets to this line
+            Err(e) => vec![Item::Invalid(format!(
+                "Parse error at line {}: {:?}",
+                line_number, e
+            ))],
+        };
+        for item in &items {
+            if let Item::Statement(Statement::Data { values }) = item {
+                data_values.extend(values.iter().cloned());
+                data_line_numbers.extend(values.iter().map(|_| Some(line_number)));
+            }
+        }
+        define_routines(executor, line_number, &items);
+        all_items.insert(line_number.into(), items);
+    }
+    executor.use_data_pool(data_values, data_line_numbers);
+
+    let line_numbers = all_items.keys().copied().collect();
+    all_items.insert(TYPED_LINE, typed_items);
+    let lines = Rc::new(ProgramLines {
+        items: all_items,
+        line_numbers,
+    });
+    let failure = install_function_body_runner(executor, &lines);
+
+    executor.clear_control_stacks();
+    let local_depth = executor.local_depth();
+    let start = Some(Position {
+        line: TYPED_LINE,
+        index: 0,
+    });
+    let outcome = run_lines(executor, &lines, &failure, start);
+    executor.exit_local_scopes_to(local_depth);
+    executor.clear_control_stacks();
+    outcome
+}
+
+/// Define the DEF PROC and DEF FN statements of a line before the run, so
+/// that a definition after END works.
+fn define_routines(executor: &mut Executor, line_number: u16, items: &[Item]) {
+    for (index, item) in items.iter().enumerate() {
+        let position = Position {
+            line: line_number.into(),
+            index,
+        };
+        match item {
+            Item::Statement(Statement::DefProc { name, params }) => {
+                executor.define_procedure(name.clone(), position, params.clone());
+            }
+            Item::Statement(Statement::DefFn {
+                name,
+                params,
+                expression,
+            }) => {
+                let body = match expression {
+                    Some(expression) => FunctionBody::Expression(expression.clone()),
+                    None => FunctionBody::Lines(position),
+                };
+                executor.define_function(name.clone(), params.clone(), body);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Make a call to a multi-line function run its body in `lines`. Returns the
+/// record of a failed body run, for the run loop.
+fn install_function_body_runner(
+    executor: &mut Executor,
+    lines: &Rc<ProgramLines>,
+) -> Rc<RefCell<BodyFailure>> {
+    let failure = Rc::new(RefCell::new(BodyFailure::default()));
+    let runner_lines = Rc::clone(lines);
     let runner_failure = Rc::clone(&failure);
     executor.set_function_body_runner(Rc::new(move |executor, def_position, evaluate| {
         run_function_body(
@@ -311,14 +416,30 @@ pub fn run_program_with_outcome(
             evaluate,
         )
     }));
+    failure
+}
 
-    let mut cursor = Cursor {
-        lines: &lines,
-        current: None,
-    };
-    if let Some(first_line) = lines.line_numbers.first() {
-        cursor.goto_line(*first_line);
+/// " at line N" for a stored line, and nothing for the typed line.
+fn at_line(line_key: u32) -> String {
+    if line_key == TYPED_LINE {
+        String::new()
+    } else {
+        format!(" at line {}", line_key)
     }
+}
+
+/// Run from `start` until the run stops. A BASIC error in a stored line goes
+/// to the ON ERROR handler.
+fn run_lines(
+    executor: &mut Executor,
+    lines: &ProgramLines,
+    failure: &RefCell<BodyFailure>,
+    start: Option<Position>,
+) -> Result<RunOutcome, String> {
+    let mut cursor = Cursor {
+        lines,
+        current: start,
+    };
 
     while let Some(position) = cursor.current {
         let line_number = position.line;
@@ -335,7 +456,7 @@ pub fn run_program_with_outcome(
             Ok(Flow::Stop) => break,
             Ok(Flow::Quit) => return Ok(RunOutcome::Quit),
             Ok(Flow::FnReturn(_)) => {
-                return Err(format!("= without FN call at line {}", line_number));
+                return Err(format!("= without FN call{}", at_line(line_number)));
             }
             Err(error) => error,
         };
@@ -351,13 +472,16 @@ pub fn run_program_with_outcome(
                 return Err(message);
             }
             (None, StepError::Runtime(e)) => {
-                // Handle the error with the ON ERROR handler if one is set
-                let Some(handler_line) = executor.get_error_handler() else {
-                    return Err(format!("Runtime error at line {}: {:?}", error_line, e));
+                // Handle an error in a stored line with the ON ERROR handler
+                // if one is set
+                let handler = executor.get_error_handler();
+                let (Some(handler_line), Ok(stored_line)) = (handler, u16::try_from(error_line))
+                else {
+                    return Err(format!("Runtime error{}: {:?}", at_line(error_line), e));
                 };
 
                 // Set error information (ERL and ERR)
-                executor.set_last_error(error_number(&e), error_line, format!("{:?}", e));
+                executor.set_last_error(error_number(&e), stored_line, format!("{:?}", e));
 
                 if !cursor.goto_line(handler_line) {
                     return Err(format!(
@@ -438,7 +562,7 @@ fn run_function_body(
 /// unwinds the callers. The main run loop reads `failure` and stops.
 fn abort_program(
     failure: &RefCell<BodyFailure>,
-    line_number: u16,
+    line_number: u32,
     abort: BodyAbort,
 ) -> Result<(), BBCBasicError> {
     let mut failure = failure.borrow_mut();
@@ -478,6 +602,7 @@ fn step(
             });
             return Ok(Flow::Jumped);
         }
+        Item::Invalid(message) => return Err(StepError::Fatal(message.clone())),
     };
 
     executor.execute_statement(statement)?;

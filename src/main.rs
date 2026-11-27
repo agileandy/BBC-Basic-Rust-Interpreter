@@ -1,8 +1,7 @@
 use bbc_basic_interpreter::{
     executor::Executor,
-    parser::parse_line,
     program::ProgramStore,
-    runner::{run_program_with_outcome, RunOutcome},
+    runner::{run_program_with_outcome, run_typed_line, RunOutcome},
     tokenizer::{detokenize, tokenize},
 };
 use std::io::{self, Write};
@@ -126,7 +125,11 @@ fn main() {
 
         // Process the line (either store or execute)
         match process_line(&mut executor, &mut program, input) {
-            Ok(()) => {}
+            Ok(RunOutcome::Ended) => {}
+            Ok(RunOutcome::Quit) => {
+                println!("Goodbye!");
+                break;
+            }
             Err(e) => println!("Error: {}", e),
         }
     }
@@ -136,7 +139,7 @@ fn process_line(
     executor: &mut Executor,
     program: &mut ProgramStore,
     line: &str,
-) -> Result<(), String> {
+) -> Result<RunOutcome, String> {
     // Tokenize
     let tokenized = tokenize(line).map_err(|e| format!("Tokenization error: {:?}", e))?;
 
@@ -151,18 +154,10 @@ fn process_line(
             program.store_line(tokenized);
             // Silent storage (like real BBC BASIC)
         }
-        Ok(())
+        Ok(RunOutcome::Ended)
     } else {
-        // Immediate mode: execute each statement of the line, in order
-        let statements = parse_line(&tokenized).map_err(|e| format!("Parse error: {:?}", e))?;
-
-        for statement in &statements {
-            executor
-                .execute_statement(statement)
-                .map_err(|e| format!("Runtime error: {:?}", e))?;
-        }
-
-        Ok(())
+        // Immediate mode: run the line with the control flow of a program line
+        run_typed_line(executor, program, &tokenized)
     }
 }
 
