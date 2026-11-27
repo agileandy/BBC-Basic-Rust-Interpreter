@@ -144,12 +144,16 @@ pub enum Statement {
     ProcCall { name: String, args: Vec<Expression> },
     /// DEF PROC - define a procedure
     DefProc { name: String, params: Vec<String> },
-    /// DEF FN - define a function (single-line with return expression)
+    /// DEF FN - define a function. A single-line function has its return
+    /// expression. A multi-line function has no expression: its body lines
+    /// follow, and a `=expr` line ends it.
     DefFn {
         name: String,
         params: Vec<String>,
-        expression: Expression,
+        expression: Option<Expression>,
     },
+    /// `=expr` - end a multi-line function and give its result
+    FnReturn { value: Expression },
     /// ENDPROC - end procedure definition
     EndProc,
     /// LOCAL statement - declares local variables in a procedure
@@ -449,6 +453,11 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // DEF statement (DEF PROC or DEF FN)
         Token::Keyword(0xDD) => parse_def_statement(&tokens[1..], line.line_number),
+
+        // =expr: the end of a multi-line function and its result
+        Token::Operator('=') => Ok(Statement::FnReturn {
+            value: parse_expression(&tokens[1..])?,
+        }),
 
         // ENDPROC statement
         Token::Keyword(0xE1) => Ok(Statement::EndProc),
@@ -1866,8 +1875,17 @@ fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement>
         (Vec::new(), 1)
     };
 
+    // No more tokens: a multi-line function. Its body follows on the next lines.
+    if rest_start >= tokens.len() {
+        return Ok(Statement::DefFn {
+            name,
+            params,
+            expression: None,
+        });
+    }
+
     // Expect = after parameters
-    if rest_start >= tokens.len() || !matches!(tokens[rest_start], Token::Operator('=')) {
+    if !matches!(tokens[rest_start], Token::Operator('=')) {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected = after function parameters".to_string(),
             line: line_number,
@@ -1875,7 +1893,7 @@ fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement>
     }
 
     // Parse the expression after =
-    let expression = parse_expression(&tokens[rest_start + 1..])?;
+    let expression = Some(parse_expression(&tokens[rest_start + 1..])?);
 
     Ok(Statement::DefFn {
         name,

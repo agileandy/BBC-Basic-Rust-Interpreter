@@ -101,10 +101,11 @@ pub fn tokenize(source_line: &str) -> Result<TokenizedLine> {
                 {
                     temp_chars.next();
                 }
-                // Check if what follows looks like a statement (keyword or identifier, not operator)
+                // Check if what follows looks like a statement (keyword or identifier, not
+                // operator). A `=expr` line ends a multi-line function.
                 let next_is_statement = temp_chars
                     .peek()
-                    .map(|c| c.is_alphabetic() || *c == '_')
+                    .map(|c| c.is_alphabetic() || *c == '_' || *c == '=')
                     .unwrap_or(false);
 
                 if next_is_statement {

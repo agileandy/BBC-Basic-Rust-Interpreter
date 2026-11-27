@@ -3,11 +3,13 @@
 //! Runs a stored program from its first line and handles the control flow
 //! between lines (GOTO, GOSUB, loops, procedures and ON ERROR).
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 use crate::error::BBCBasicError;
-use crate::executor::Executor;
-use crate::parser::{parse_statement, Statement};
+use crate::executor::{Executor, FunctionBody, ResultEvaluator};
+use crate::parser::{parse_statement, Expression, Statement};
 use crate::program::ProgramStore;
 
 /// What the run loop does after a statement.
@@ -18,6 +20,77 @@ enum Flow {
     Jumped,
     /// Stop the program
     Stop,
+    /// A `=expr` line ended a multi-line function
+    FnReturn(Expression),
+}
+
+/// The parsed lines of the program, shared with the function body runner.
+struct ProgramLines {
+    statements: HashMap<u16, Statement>,
+    line_numbers: BTreeSet<u16>,
+}
+
+/// Moves the line position of a run.
+trait LineCursor {
+    /// Go to a line. Returns false if the line does not exist.
+    fn goto_line(&mut self, line_number: u16) -> bool;
+    /// Go to the next line and return it (None at the end of the program).
+    fn next_line(&mut self) -> Option<u16>;
+}
+
+impl LineCursor for ProgramStore {
+    fn goto_line(&mut self, line_number: u16) -> bool {
+        ProgramStore::goto_line(self, line_number)
+    }
+
+    fn next_line(&mut self) -> Option<u16> {
+        ProgramStore::next_line(self)
+    }
+}
+
+/// The line position of a function body run. It is separate from the
+/// position of the caller, so the caller continues from its own line.
+struct BodyCursor<'a> {
+    line_numbers: &'a BTreeSet<u16>,
+    current: Option<u16>,
+}
+
+impl LineCursor for BodyCursor<'_> {
+    fn goto_line(&mut self, line_number: u16) -> bool {
+        if self.line_numbers.contains(&line_number) {
+            self.current = Some(line_number);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn next_line(&mut self) -> Option<u16> {
+        self.current = self
+            .current
+            .and_then(|current| self.line_numbers.range((current + 1)..).next().copied());
+        self.current
+    }
+}
+
+/// Why a function body run stopped the program instead of giving a BASIC error.
+enum BodyAbort {
+    /// An error that stops the program
+    Fatal(String),
+    /// END or STOP in the function body
+    Stop,
+}
+
+/// What a failed function body run tells the main run loop.
+///
+/// The error itself goes back through the expression evaluation of the
+/// caller, which does not know the line of the body statement.
+#[derive(Default)]
+struct BodyFailure {
+    /// Line of the deepest body statement that failed (for ERL and the message)
+    line: Option<u16>,
+    /// Set when the program must stop
+    abort: Option<BodyAbort>,
 }
 
 /// Why a statement failed.
@@ -69,36 +142,80 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
             executor.define_procedure(name.clone(), line_number, params.clone());
         }
 
+        // Define each function before the run, so that a DEF FN after END works
+        if let Statement::DefFn {
+            name,
+            params,
+            expression,
+        } = &statement
+        {
+            let body = match expression {
+                Some(expression) => FunctionBody::Expression(expression.clone()),
+                None => FunctionBody::Lines(line_number),
+            };
+            executor.define_function(name.clone(), params.clone(), body);
+        }
+
         statements.insert(line_number, statement);
     }
+
+    let line_numbers = statements.keys().copied().collect();
+    let lines = Rc::new(ProgramLines {
+        statements,
+        line_numbers,
+    });
+    let failure = Rc::new(RefCell::new(BodyFailure::default()));
+
+    // A call to a multi-line function runs its body lines with this runner
+    let runner_lines = Rc::clone(&lines);
+    let runner_failure = Rc::clone(&failure);
+    executor.set_function_body_runner(Rc::new(move |executor, def_line, evaluate| {
+        run_function_body(executor, &runner_lines, &runner_failure, def_line, evaluate)
+    }));
 
     program.start_execution();
 
     while let Some(line_number) = program.get_current_line() {
-        let statement = statements
+        let statement = lines
+            .statements
             .get(&line_number)
             .ok_or_else(|| format!("Line {} not found", line_number))?;
 
-        match step(executor, program, &statements, statement, line_number) {
+        let error = match step(executor, program, &lines.statements, statement, line_number) {
             Ok(Flow::Next) => {
                 program.next_line();
+                continue;
             }
-            Ok(Flow::Jumped) => {}
+            Ok(Flow::Jumped) => continue,
             Ok(Flow::Stop) => break,
-            Err(StepError::Fatal(message)) => return Err(message),
-            Err(StepError::Runtime(e)) => {
+            Ok(Flow::FnReturn(_)) => {
+                return Err(format!("= without FN call at line {}", line_number));
+            }
+            Err(error) => error,
+        };
+
+        // An error in a function body: use the line of the body statement
+        let body = std::mem::take(&mut *failure.borrow_mut());
+        let error_line = body.line.unwrap_or(line_number);
+
+        match (body.abort, error) {
+            (Some(BodyAbort::Stop), _) => break,
+            (Some(BodyAbort::Fatal(message)), _) | (None, StepError::Fatal(message)) => {
+                return Err(message);
+            }
+            (None, StepError::Runtime(e)) => {
                 // Handle the error with the ON ERROR handler if one is set
                 let Some(handler_line) = executor.get_error_handler() else {
-                    return Err(format!("Runtime error at line {}: {:?}", line_number, e));
+                    return Err(format!("Runtime error at line {}: {:?}", error_line, e));
                 };
 
                 // Set error information (ERL and ERR)
-                executor.set_last_error(error_number(&e), line_number, format!("{:?}", e));
+                executor.set_last_error(error_number(&e), error_line, format!("{:?}", e));
 
                 if !program.goto_line(handler_line) {
                     return Err(format!(
                         "Error handler line {} not found (from error at line {})",
-                        handler_line, line_number
+                        handler_line, error_line
                     ));
                 }
             }
@@ -109,10 +226,90 @@ pub fn run_program(executor: &mut Executor, program: &mut ProgramStore) -> Resul
     Ok(())
 }
 
+/// Run the body of a multi-line function, from the line after its DEF line
+/// to the `=expr` line. `evaluate` gets the expression of the `=expr` line.
+///
+/// The body run has its own line position. If a body statement fails, the
+/// line and any stop of the program go to `failure` for the main run loop.
+fn run_function_body(
+    executor: &mut Executor,
+    lines: &ProgramLines,
+    failure: &RefCell<BodyFailure>,
+    def_line: u16,
+    evaluate: ResultEvaluator,
+) -> Result<(), BBCBasicError> {
+    let mut cursor = BodyCursor {
+        line_numbers: &lines.line_numbers,
+        current: Some(def_line),
+    };
+    cursor.next_line();
+
+    while let Some(line_number) = cursor.current {
+        let statement = lines
+            .statements
+            .get(&line_number)
+            .ok_or(BBCBasicError::BadProgram)?;
+
+        let result = match step(
+            executor,
+            &mut cursor,
+            &lines.statements,
+            statement,
+            line_number,
+        ) {
+            Ok(Flow::Next) => {
+                cursor.next_line();
+                continue;
+            }
+            Ok(Flow::Jumped) => continue,
+            Ok(Flow::Stop) => return abort_program(failure, line_number, BodyAbort::Stop),
+            Ok(Flow::FnReturn(value)) => evaluate(executor, &value).map_err(StepError::Runtime),
+            Err(error) => Err(error),
+        };
+
+        return match result {
+            Ok(()) => {
+                // The caller ignored the errors of earlier body runs (for
+                // example a PRINT that tries each type). Forget their line.
+                let mut failure = failure.borrow_mut();
+                if failure.abort.is_none() {
+                    failure.line = None;
+                }
+                Ok(())
+            }
+            Err(StepError::Runtime(e)) => {
+                // Keep the line of the deepest failed statement
+                failure.borrow_mut().line.get_or_insert(line_number);
+                Err(e)
+            }
+            Err(StepError::Fatal(message)) => {
+                abort_program(failure, line_number, BodyAbort::Fatal(message))
+            }
+        };
+    }
+
+    // The body ran past the last line of the program
+    let message = format!("Function at line {} has no = line", def_line);
+    abort_program(failure, def_line, BodyAbort::Fatal(message))
+}
+
+/// Record that a function body stops the program. The returned error only
+/// unwinds the callers. The main run loop reads `failure` and stops.
+fn abort_program(
+    failure: &RefCell<BodyFailure>,
+    line_number: u16,
+    abort: BodyAbort,
+) -> Result<(), BBCBasicError> {
+    let mut failure = failure.borrow_mut();
+    failure.line.get_or_insert(line_number);
+    failure.abort.get_or_insert(abort);
+    Err(BBCBasicError::BadCall)
+}
+
 /// Execute one statement and apply its control flow.
 fn step(
     executor: &mut Executor,
-    program: &mut ProgramStore,
+    program: &mut impl LineCursor,
     statements: &HashMap<u16, Statement>,
     statement: &Statement,
     line_number: u16,
@@ -347,6 +544,7 @@ fn step(
             }
             Ok(Flow::Next)
         }
+        Statement::FnReturn { value } => Ok(Flow::FnReturn(value.clone())),
         _ => Ok(Flow::Next),
     }
 }

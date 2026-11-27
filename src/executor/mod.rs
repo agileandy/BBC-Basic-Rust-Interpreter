@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::rc::Rc;
 
 /// File handle for file I/O operations
 #[derive(Debug)]
@@ -48,7 +49,41 @@ pub struct ProcedureDefinition {
 #[derive(Debug, Clone)]
 pub struct FunctionDefinition {
     pub params: Vec<String>,
-    pub expression: Expression,
+    pub body: FunctionBody,
+}
+
+/// The body of a function definition
+#[derive(Debug, Clone)]
+pub enum FunctionBody {
+    /// Single-line function: `DEF FNname(params) = expr`
+    Expression(Expression),
+    /// Multi-line function: the body starts on the line after this DEF line
+    Lines(u16),
+}
+
+/// Evaluates the `=expr` result of a multi-line function in the type that
+/// the caller asks for, and keeps the value.
+pub type ResultEvaluator<'a> = &'a mut dyn FnMut(&mut Executor, &Expression) -> Result<()>;
+
+/// Runs the body of a multi-line function from its DEF line.
+///
+/// At the `=expr` line that ends the body, it calls the evaluator with the
+/// expression. The function scope is still active at that time, and an error
+/// in the expression has the line number of the `=expr` line.
+pub type FunctionBodyRunner = Rc<dyn Fn(&mut Executor, u16, ResultEvaluator) -> Result<()>>;
+
+/// Holds the optional function body runner, so that `Executor` can derive `Debug`.
+#[derive(Clone, Default)]
+struct BodyRunnerSlot(Option<FunctionBodyRunner>);
+
+impl std::fmt::Debug for BodyRunnerSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Some(<function body runner>)"
+        } else {
+            "None"
+        })
+    }
 }
 
 /// Error information for ON ERROR handling
@@ -90,6 +125,8 @@ pub struct Executor {
     procedures: HashMap<String, ProcedureDefinition>,
     // Function definitions (DEF FN): name -> (params, expression)
     functions: HashMap<String, FunctionDefinition>,
+    // Runs the body lines of a multi-line function (set by the run loop)
+    function_body_runner: BodyRunnerSlot,
     // Local variable stack for PROC/FN scoping
     local_stack: Vec<LocalFrame>,
     // Error handler: line number to jump to on error (None = no handler)
@@ -126,6 +163,7 @@ impl Executor {
             rng: RefCell::new(rand::thread_rng()),
             procedures: HashMap::new(),
             functions: HashMap::new(),
+            function_body_runner: BodyRunnerSlot::default(),
             local_stack: Vec::new(),
             error_handler: None,
             last_error: None,
@@ -239,8 +277,14 @@ impl Executor {
             Statement::DefFn {
                 name,
                 params,
-                expression,
+                expression: Some(expression),
             } => self.execute_def_fn(name, params, expression),
+            Statement::DefFn {
+                expression: None, ..
+            } => {
+                // A multi-line DEF FN is collected before the program runs
+                Ok(())
+            }
             Statement::EndProc => {
                 // ENDPROC is handled as control flow in main.rs
                 Ok(())
@@ -2164,120 +2208,55 @@ impl Executor {
         params: &[String],
         expression: &Expression,
     ) -> Result<()> {
-        self.functions.insert(
+        self.define_function(
             name.to_string(),
-            FunctionDefinition {
-                params: params.to_vec(),
-                expression: expression.clone(),
-            },
+            params.to_vec(),
+            FunctionBody::Expression(expression.clone()),
         );
         Ok(())
     }
 
+    /// Define a function (single-line or multi-line)
+    pub fn define_function(&mut self, name: String, params: Vec<String>, body: FunctionBody) {
+        self.functions
+            .insert(name, FunctionDefinition { params, body });
+    }
+
+    /// Set the runner for the body lines of multi-line functions
+    pub fn set_function_body_runner(&mut self, runner: FunctionBodyRunner) {
+        self.function_body_runner = BodyRunnerSlot(Some(runner));
+    }
+
     /// Call a function and return integer result
     fn call_function_int(&mut self, name: &str, args: &[Expression]) -> Result<i32> {
-        let func = self
-            .functions
-            .get(name)
-            .ok_or_else(|| BBCBasicError::NoSuchVariable(format!("Function {} not defined", name)))?
-            .clone();
-
-        // Check parameter count
-        if args.len() != func.params.len() {
-            return Err(BBCBasicError::SyntaxError {
-                message: format!(
-                    "Function {} expects {} parameters, got {}",
-                    name,
-                    func.params.len(),
-                    args.len()
-                ),
-                line: None,
-            });
+        if name.ends_with('$') {
+            // A string function: do not run its body for a number
+            return Err(BBCBasicError::TypeMismatch);
         }
-
-        // Enter local scope for function
-        self.enter_local_scope();
-
-        // Evaluate arguments and bind to parameters
-        for (param_name, arg_expr) in func.params.iter().zip(args.iter()) {
-            // Declare parameter as local
-            self.declare_local(param_name)?;
-
-            // Evaluate argument and assign to parameter
-            if param_name.ends_with('%') {
-                let value = self.eval_integer(arg_expr)?;
-                self.variables.set_integer_var(param_name.clone(), value);
-            } else if param_name.ends_with('$') {
-                let value = self.eval_string(arg_expr)?;
-                self.variables.set_string_var(param_name.clone(), value)?;
-            } else {
-                let value = self.eval_real(arg_expr)?;
-                self.variables.set_real_var(param_name.clone(), value);
-            }
-        }
-
-        // Evaluate function expression
-        let result = self.eval_integer(&func.expression)?;
-
-        // Exit local scope (restore variables)
-        self.exit_local_scope()?;
-
-        Ok(result)
+        self.call_function(name, args, Self::eval_integer)
     }
 
     /// Call a function and return real result
     fn call_function_real(&mut self, name: &str, args: &[Expression]) -> Result<f64> {
-        let func = self
-            .functions
-            .get(name)
-            .ok_or_else(|| BBCBasicError::NoSuchVariable(format!("Function {} not defined", name)))?
-            .clone();
-
-        // Check parameter count
-        if args.len() != func.params.len() {
-            return Err(BBCBasicError::SyntaxError {
-                message: format!(
-                    "Function {} expects {} parameters, got {}",
-                    name,
-                    func.params.len(),
-                    args.len()
-                ),
-                line: None,
-            });
+        if name.ends_with('$') {
+            // A string function: do not run its body for a number
+            return Err(BBCBasicError::TypeMismatch);
         }
-
-        // Enter local scope for function
-        self.enter_local_scope();
-
-        // Evaluate arguments and bind to parameters
-        for (param_name, arg_expr) in func.params.iter().zip(args.iter()) {
-            // Declare parameter as local
-            self.declare_local(param_name)?;
-
-            // Evaluate argument and assign to parameter
-            if param_name.ends_with('%') {
-                let value = self.eval_integer(arg_expr)?;
-                self.variables.set_integer_var(param_name.clone(), value);
-            } else if param_name.ends_with('$') {
-                let value = self.eval_string(arg_expr)?;
-                self.variables.set_string_var(param_name.clone(), value)?;
-            } else {
-                let value = self.eval_real(arg_expr)?;
-                self.variables.set_real_var(param_name.clone(), value);
-            }
-        }
-
-        // Evaluate function expression
-        let result = self.eval_real(&func.expression)?;
-
-        // Exit local scope (restore variables)
-        self.exit_local_scope()?;
-
-        Ok(result)
+        self.call_function(name, args, Self::eval_real)
     }
 
     /// Call a function and return string result
     fn call_function_string(&mut self, name: &str, args: &[Expression]) -> Result<String> {
+        self.call_function(name, args, Self::eval_string)
+    }
+
+    /// Call a user-defined function and evaluate its result with `eval`.
+    fn call_function<T>(
+        &mut self,
+        name: &str,
+        args: &[Expression],
+        eval: fn(&mut Self, &Expression) -> Result<T>,
+    ) -> Result<T> {
         let func = self
             .functions
             .get(name)
@@ -2297,34 +2276,72 @@ impl Executor {
             });
         }
 
+        // Evaluate all arguments in the caller scope, before a parameter
+        // hides a caller variable of the same name (for example FNfact(N-1))
+        let mut values = Vec::with_capacity(args.len());
+        for (param_name, arg_expr) in func.params.iter().zip(args.iter()) {
+            let value = if param_name.ends_with('%') {
+                Variable::Integer(self.eval_integer(arg_expr)?)
+            } else if param_name.ends_with('$') {
+                Variable::String(self.eval_string(arg_expr)?)
+            } else {
+                Variable::Real(self.eval_real(arg_expr)?)
+            };
+            values.push(value);
+        }
+
+        let local_depth = self.local_stack.len();
+        let return_depth = self.return_stack.len();
+
         // Enter local scope for function
         self.enter_local_scope();
+        let result = self.run_function(&func, values, eval);
 
-        // Evaluate arguments and bind to parameters
-        for (param_name, arg_expr) in func.params.iter().zip(args.iter()) {
-            // Declare parameter as local
+        // Exit local scope (restore variables), also after an error in the
+        // function. Scopes and returns that the body did not close go too.
+        while self.local_stack.len() > local_depth {
+            self.exit_local_scope()?;
+        }
+        self.return_stack.truncate(return_depth);
+
+        result
+    }
+
+    /// Bind the parameters, run the function body and evaluate the result.
+    fn run_function<T>(
+        &mut self,
+        func: &FunctionDefinition,
+        values: Vec<Variable>,
+        eval: fn(&mut Self, &Expression) -> Result<T>,
+    ) -> Result<T> {
+        for (param_name, value) in func.params.iter().zip(values) {
+            // Declare parameter as local, then assign the argument value
             self.declare_local(param_name)?;
-
-            // Evaluate argument and assign to parameter
-            if param_name.ends_with('%') {
-                let value = self.eval_integer(arg_expr)?;
-                self.variables.set_integer_var(param_name.clone(), value);
-            } else if param_name.ends_with('$') {
-                let value = self.eval_string(arg_expr)?;
-                self.variables.set_string_var(param_name.clone(), value)?;
-            } else {
-                let value = self.eval_real(arg_expr)?;
-                self.variables.set_real_var(param_name.clone(), value);
+            match value {
+                Variable::Integer(v) => self.variables.set_integer_var(param_name.clone(), v),
+                Variable::String(v) => self.variables.set_string_var(param_name.clone(), v)?,
+                Variable::Real(v) => self.variables.set_real_var(param_name.clone(), v),
+                _ => return Err(BBCBasicError::TypeMismatch),
             }
         }
 
-        // Evaluate function expression
-        let result = self.eval_string(&func.expression)?;
-
-        // Exit local scope (restore variables)
-        self.exit_local_scope()?;
-
-        Ok(result)
+        match &func.body {
+            FunctionBody::Expression(expression) => eval(self, expression),
+            FunctionBody::Lines(def_line) => {
+                let runner = self.function_body_runner.0.clone().ok_or_else(|| {
+                    BBCBasicError::SyntaxError {
+                        message: "A multi-line function needs a running program".to_string(),
+                        line: Some(*def_line),
+                    }
+                })?;
+                let mut result = None;
+                runner(self, *def_line, &mut |executor, expression| {
+                    result = Some(eval(executor, expression)?);
+                    Ok(())
+                })?;
+                result.ok_or(BBCBasicError::BadCall)
+            }
+        }
     }
 
     /// Open a file for reading (OPENIN)
@@ -4480,11 +4497,11 @@ mod tests {
         let def_fn_stmt = Statement::DefFn {
             name: "add".to_string(),
             params: vec!["X".to_string(), "Y".to_string()],
-            expression: Expression::BinaryOp {
+            expression: Some(Expression::BinaryOp {
                 left: Box::new(Expression::Variable("X".to_string())),
                 op: BinaryOperator::Add,
                 right: Box::new(Expression::Variable("Y".to_string())),
-            },
+            }),
         };
         executor.execute_statement(&def_fn_stmt).unwrap();
 
@@ -4515,11 +4532,11 @@ mod tests {
         let def_fn_stmt = Statement::DefFn {
             name: "double".to_string(),
             params: vec!["X".to_string()],
-            expression: Expression::BinaryOp {
+            expression: Some(Expression::BinaryOp {
                 left: Box::new(Expression::Variable("X".to_string())),
                 op: BinaryOperator::Multiply,
                 right: Box::new(Expression::Integer(2)),
-            },
+            }),
         };
         executor.execute_statement(&def_fn_stmt).unwrap();
 
