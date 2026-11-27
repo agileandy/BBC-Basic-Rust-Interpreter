@@ -1,0 +1,3 @@
+# A new test module is one line in tests/it/main.rs. Keep the order that the
+# merges give, so that 2 branches that each add a line do not conflict.
+reorder_modules = false
