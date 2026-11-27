@@ -1,5 +1,6 @@
-//! The run of structures (issues #191 and #192). The form is the form of BBC
-//! BASIC for Windows: see `src/parser/structures.rs` for the manual page.
+//! The run of structures (issues #191, #192 and #193). The form is the form
+//! of BBC BASIC for Windows: see `src/parser/structures.rs` for the manual
+//! page.
 //!
 //! The suffix of a member name gives its type, as for a variable: `%` is an
 //! integer, `$` is a string, and no suffix is a real.
@@ -7,8 +8,40 @@
 use super::{format_number, format_real, real_to_integer, Executor};
 use crate::error::{BBCBasicError, Result};
 use crate::parser::{Expression, InputItem, MemberDecl, MemberPath};
-use crate::variables::{MemberValue, Members, StructureId, Variable};
+use crate::variables::{zero_members, MemberValue, Members, StructureId, Variable, VariableStore};
 use std::collections::HashMap;
+
+/// The index values of a member path: the element of an array of
+/// structures (issue #193) and the indices of an array member. Each list is
+/// empty when the path has no indices there.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct MemberIndices {
+    pub(super) element: Vec<usize>,
+    pub(super) member: Vec<usize>,
+}
+
+impl MemberIndices {
+    /// The value of the member of `path` at these indices
+    pub(super) fn get(&self, variables: &VariableStore, path: &MemberPath) -> Result<Variable> {
+        variables.get_member(&path.structure, &self.element, &path.members, &self.member)
+    }
+
+    /// Store a value in the member of `path` at these indices
+    pub(super) fn set(
+        &self,
+        variables: &mut VariableStore,
+        path: &MemberPath,
+        value: Variable,
+    ) -> Result<()> {
+        variables.set_member(
+            &path.structure,
+            &self.element,
+            &path.members,
+            &self.member,
+            value,
+        )
+    }
+}
 
 /// The value of one argument of a PROC or FN call
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +64,12 @@ impl Executor {
         members: &[MemberDecl],
     ) -> Result<()> {
         let members = self.make_members(members)?;
+        self.dim_structure_members(name, members)
+    }
+
+    /// Declare the structure `name` with these members, for
+    /// `execute_dim_structure` and for a prototype (issue #193)
+    fn dim_structure_members(&mut self, name: &str, members: Members) -> Result<()> {
         let local = self.variables.is_local_structure_without_dim(name);
         let id = self.variables.dim_structure(name, members)?;
         if local {
@@ -54,12 +93,85 @@ impl Executor {
     /// (https://www.bbcbasic.co.uk/bbcwin/manual/bbcwin2.html#structures),
     /// says that the structure is passed by reference. The manual names no
     /// error for an argument that is not a structure: it gives Bad use of
-    /// structure.
-    pub(super) fn structure_argument(&self, argument: &Expression) -> Result<StructureId> {
+    /// structure. An element of an array of structures, such as `t{(3)}`, is
+    /// an argument by reference too (issue #193).
+    pub(super) fn structure_argument(&mut self, argument: &Expression) -> Result<StructureId> {
         match argument {
             Expression::Structure(name) => self.variables.structure_id(name),
+            Expression::Member(path) if path.members.is_empty() => self.structure_of_path(path),
             _ => Err(BBCBasicError::BadStructure),
         }
+    }
+
+    /// The structure of a path with no members: a structure, such as `a{}`,
+    /// or an element, such as `t{(1)}` (issue #193). A negative index gives
+    /// Subscript out of range.
+    fn structure_of_path(&mut self, path: &MemberPath) -> Result<StructureId> {
+        let element = self.index_values(&path.element)?;
+        self.variables
+            .structure_or_element(&path.structure, &element)
+    }
+
+    /// Execute `DIM name{(dimensions) members}` (issue #193). The manual
+    /// page is the page of `structure_argument`, section "Arrays of
+    /// structures".
+    pub(super) fn execute_dim_structure_array(
+        &mut self,
+        name: &str,
+        dimensions: &[Expression],
+        members: &[MemberDecl],
+    ) -> Result<()> {
+        let sizes = self.eval_dimensions(dimensions)?;
+        let members = self.make_members(members)?;
+        self.variables.dim_structure_array(name, sizes, members)
+    }
+
+    /// Execute `DIM name{} = a{}` or `DIM name{(dimensions)} = a{}` (issue
+    /// #193). The manual page is the page of `structure_argument`, section
+    /// "Structure prototypes".
+    pub(super) fn execute_dim_prototype(
+        &mut self,
+        name: &str,
+        dimensions: &[Expression],
+        prototype: &MemberPath,
+    ) -> Result<()> {
+        if dimensions.is_empty() {
+            let members = self.prototype_members(prototype)?;
+            return self.dim_structure_members(name, members);
+        }
+        let sizes = self.eval_dimensions(dimensions)?;
+        let members = self.prototype_members(prototype)?;
+        self.variables.dim_structure_array(name, sizes, members)
+    }
+
+    /// The members of a prototype, with each value at 0 or an empty string.
+    /// The manual says that a LOCAL structure cannot be a prototype: BBC
+    /// BASIC for SDL gives Bad DIM (bbexec.c, function `structure`).
+    fn prototype_members(&mut self, prototype: &MemberPath) -> Result<Members> {
+        let id = self.structure_of_path(prototype)?;
+        let local = self
+            .local_stack
+            .iter()
+            .any(|frame| frame.local_structures.contains(&id));
+        if local {
+            return Err(BBCBasicError::BadDim);
+        }
+        Ok(zero_members(self.variables.members_of(id)?))
+    }
+
+    /// Execute `target{} = source{}` (issue #193). The manual page is the
+    /// page of `structure_argument`, section "Copying a structure". The copy
+    /// is deep, also for string members. BBC BASIC for SDL gives Type
+    /// mismatch for 2 structures of a different size (bbexec.c, LET): this
+    /// interpreter gives it for 2 structures of a different format.
+    pub(super) fn execute_structure_copy(
+        &mut self,
+        target: &MemberPath,
+        source: &MemberPath,
+    ) -> Result<()> {
+        let target = self.structure_of_path(target)?;
+        let source = self.structure_of_path(source)?;
+        self.variables.copy_structure(target, source)
     }
 
     /// Make the structure parameter `name{}` a second name for the structure
@@ -113,17 +225,20 @@ impl Executor {
                 MemberDecl::Structure { members, .. } => {
                     MemberValue::Structure(self.make_members(members)?)
                 }
+                MemberDecl::Prototype { prototype, .. } => {
+                    MemberValue::Structure(self.prototype_members(prototype)?)
+                }
             };
             values.push((member.name().to_string(), value));
         }
         Ok(values)
     }
 
-    /// The index values of a member path. A negative index gives Subscript
-    /// out of range, as for an array.
-    pub(super) fn member_indices(&mut self, path: &MemberPath) -> Result<Vec<usize>> {
-        let mut values = Vec::with_capacity(path.indices.len());
-        for index in &path.indices {
+    /// The values of a list of indices. A negative index gives Subscript out
+    /// of range, as for an array.
+    fn index_values(&mut self, indices: &[Expression]) -> Result<Vec<usize>> {
+        let mut values = Vec::with_capacity(indices.len());
+        for index in indices {
             let value = self.eval_integer(index)?;
             if value < 0 {
                 return Err(BBCBasicError::SubscriptOutOfRange);
@@ -133,16 +248,24 @@ impl Executor {
         Ok(values)
     }
 
+    /// The index values of a member path: the element index first, then the
+    /// indices of an array member (issue #193)
+    pub(super) fn member_indices(&mut self, path: &MemberPath) -> Result<MemberIndices> {
+        Ok(MemberIndices {
+            element: self.index_values(&path.element)?,
+            member: self.index_values(&path.indices)?,
+        })
+    }
+
     /// Store a value in a member, or in an element of an array member. The
     /// indices are the values that `member_indices` gave.
     pub(super) fn store_member(
         &mut self,
         path: &MemberPath,
-        indices: &[usize],
+        indices: &MemberIndices,
         value: Variable,
     ) -> Result<()> {
-        self.variables
-            .set_member(&path.structure, &path.members, indices, value)
+        indices.set(&mut self.variables, path, value)
     }
 
     /// Execute `structure.member = expression`. The value gets the type of
@@ -155,8 +278,7 @@ impl Executor {
         // Find the member first, so that an error in it comes before an
         // error in the expression. The indices are evaluated one time.
         let indices = self.member_indices(target)?;
-        let (structure, path) = (&target.structure, &target.members);
-        self.variables.get_member(structure, path, &indices)?;
+        indices.get(&self.variables, target)?;
         let member = target.member();
         let value = if member.ends_with('%') {
             Variable::Integer(self.eval_integer(expression)?)
@@ -165,14 +287,13 @@ impl Executor {
         } else {
             Variable::Real(self.eval_real(expression)?)
         };
-        self.variables.set_member(structure, path, &indices, value)
+        indices.set(&mut self.variables, target, value)
     }
 
     /// The value of a member, or of an element of an array member
     pub(super) fn member_value(&mut self, path: &MemberPath) -> Result<Variable> {
         let indices = self.member_indices(path)?;
-        self.variables
-            .get_member(&path.structure, &path.members, &indices)
+        indices.get(&self.variables, path)
     }
 
     /// The value of a member as an integer. A string gives Type mismatch.
@@ -221,13 +342,12 @@ impl Executor {
     /// the statement takes a reply, a DATA value or a record. Give the index
     /// values of the member, for the store: the indices are evaluated one
     /// time (issue 202). Another target needs no check and gives no indices.
-    pub(super) fn check_member_target(&mut self, target: &InputItem) -> Result<Vec<usize>> {
+    pub(super) fn check_member_target(&mut self, target: &InputItem) -> Result<MemberIndices> {
         let InputItem::Member(path) = target else {
-            return Ok(Vec::new());
+            return Ok(MemberIndices::default());
         };
         let indices = self.member_indices(path)?;
-        self.variables
-            .get_member(&path.structure, &path.members, &indices)?;
+        indices.get(&self.variables, path)?;
         Ok(indices)
     }
 
@@ -235,14 +355,41 @@ impl Executor {
     /// A scalar member is one line, such as `point.x = 1.5`. An array member
     /// shows its top indices, such as `s.a(3)`. A sub-structure is a line
     /// such as `s.p{}`, and its members follow it with 2 more spaces of
-    /// indent (issue #192).
+    /// indent (issue #192). An array of structures is one line after them,
+    /// in the form of its DIM, such as `t{(10) x,a(3),p{y}}` (issue #193).
     pub(super) fn structure_listing(&self) -> Vec<String> {
         let mut lines = Vec::new();
         for (name, members) in self.variables.structures() {
             list_members(name, members, "", &mut lines);
         }
+        for (name, top_indices, members) in self.variables.structure_arrays() {
+            let top_indices: Vec<String> = top_indices.iter().map(usize::to_string).collect();
+            let format = member_format(members);
+            lines.push(format!("{name}{{({}) {format}}}", top_indices.join(",")));
+        }
         lines
     }
+}
+
+/// The member names of a structure, as in a DIM: `x,a(3),p{y}` (issue #193)
+fn member_format(members: &Members) -> String {
+    let names: Vec<String> = members
+        .iter()
+        .map(|(name, value)| match value {
+            MemberValue::Structure(inner) => format!("{name}{{{}}}", member_format(inner)),
+            MemberValue::Variable(variable) => match variable.dimensions() {
+                Some(dimensions) => {
+                    let top: Vec<String> = dimensions
+                        .iter()
+                        .map(|size| (size - 1).to_string())
+                        .collect();
+                    format!("{name}({})", top.join(","))
+                }
+                None => name.clone(),
+            },
+        })
+        .collect();
+    names.join(",")
 }
 
 /// Add the LVAR lines of these members to `lines`. `prefix` is the path of

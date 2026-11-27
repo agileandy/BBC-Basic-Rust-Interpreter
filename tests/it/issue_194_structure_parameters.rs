@@ -262,7 +262,8 @@ fn test_a_variable_and_an_array_with_the_parameter_name_still_work() {
 
 #[test]
 fn test_a_whole_structure_outside_an_argument_is_still_an_error() {
-    let (result, _) = run(&["10 DIM a{x}, b{x}", "20 b{} = a{}"]);
+    // The copy b{} = a{} is valid since issue #193
+    let (result, _) = run(&["10 DIM a{x}, b{x}", "20 PRINT a{}"]);
     assert_eq!(
         result,
         Err(

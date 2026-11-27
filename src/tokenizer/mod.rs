@@ -497,6 +497,21 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
                 chars.next();
                 tokens.push(Token::Operator(ch));
             }
+            // A full stop and a letter after a closing brace start the
+            // members of an element of an array of structures, such as
+            // t{(1)}.p.x (issue #193). The token has no structure name.
+            '.' if tokens.last() == Some(&Token::Separator('}'))
+                && chars.clone().nth(1).is_some_and(starts_member_name) =>
+            {
+                let mut members = Vec::new();
+                while chars.peek() == Some(&'.')
+                    && chars.clone().nth(1).is_some_and(starts_member_name)
+                {
+                    chars.next(); // consume the '.'
+                    members.push(take_name(&mut chars));
+                }
+                tokens.push(Token::Member(String::new(), members));
+            }
             // { and } enclose the members of a structure (issue #191)
             ',' | ';' | ':' | '(' | ')' | '{' | '}' => {
                 chars.next();
@@ -553,6 +568,8 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 // A structure lists as typed: DIM point{x,y%}
                 (Token::Identifier(_), Token::Separator('{')) => false,
                 (_, Token::Separator('}')) => false,
+                // The = of a copy or a prototype: b{} = a{} (issue #193)
+                (Token::Separator('}'), Token::Operator('=')) => true,
                 (Token::Keyword(FN | PROC), Token::Identifier(_)) => false,
                 // A keyword after a closing bracket: IF (A) THEN
                 (Token::Separator(')'), Token::Keyword(_)) => true,
@@ -2271,6 +2288,26 @@ mod tests {
         );
         assert_round_trip("10 DIM p{x,y%},q{s$}", "10 DIM p{x,y%},q{s$}");
         assert_round_trip("20 p.x?1 = q.s$", "20 p.x?1 = q.s$");
+    }
+
+    #[test]
+    fn test_members_after_a_closing_brace_have_no_structure_name() {
+        // An element of an array of structures (issue #193)
+        assert_eq!(
+            tokens_of("t{(1)}.p.x"),
+            vec![
+                Token::Identifier("t".to_string()),
+                Token::Separator('{'),
+                Token::Separator('('),
+                Token::Integer(1),
+                Token::Separator(')'),
+                Token::Separator('}'),
+                Token::Member(String::new(), vec!["p".to_string(), "x".to_string()]),
+            ]
+        );
+        // A full stop and no letter after a brace is still an error
+        assert!(tokenize("t{(1)}.").is_err());
+        assert_round_trip("10 t{(I%)}.a(2) = b{} = a{}", "10 t{(I%)}.a(2) = b{} = a{}");
     }
 
     #[test]

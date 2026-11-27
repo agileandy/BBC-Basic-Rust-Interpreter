@@ -191,24 +191,13 @@ fn test_a_structure_name_that_is_a_short_form() {
 
 #[test]
 fn test_the_forms_of_later_issues_give_a_syntax_error() {
-    // Array members and nested structures are valid since issue #192
-    let cases: [(&[&str], u16, &str); 3] = [
-        (
-            &["10 DIM p{(3)a}"],
-            10,
-            "Arrays of structures are not supported",
-        ),
-        (
-            &["10 DIM a{x}", "20 DIM b{} = a{}"],
-            20,
-            "A structure from a prototype is not supported",
-        ),
-        (
-            &["10 DIM a{x}, b{x}", "20 b{} = a{}"],
-            20,
-            "A reference to a whole structure is not supported",
-        ),
-    ];
+    // Array members and nested structures are valid since issue #192.
+    // Arrays of structures, prototypes and the copy are valid since #193.
+    let cases: [(&[&str], u16, &str); 1] = [(
+        &["10 DIM a{x}, b{x}", "20 PRINT a{}"],
+        20,
+        "A reference to a whole structure is not supported",
+    )];
     for (source, line, message) in cases {
         let (result, _) = run(source);
         assert_eq!(

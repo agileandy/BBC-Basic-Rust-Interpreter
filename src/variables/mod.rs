@@ -143,6 +143,92 @@ pub struct VariableStore {
     structures: HashMap<StructureId, Members>,
     /// The id of the next structure that a DIM makes
     next_structure_id: StructureId,
+    /// The arrays of structures, apart from the structures of the same name
+    /// (issue #193)
+    structure_arrays: HashMap<String, StructureArray>,
+}
+
+/// An array of structures (issue #193). Each element is a structure with
+/// its own id, so that an element can be a structure argument.
+#[derive(Debug, Clone)]
+struct StructureArray {
+    /// The element count of each dimension, as for `dim_array`
+    dimensions: Vec<usize>,
+    /// The structure of each element, in the order of `linear_index`
+    elements: Vec<StructureId>,
+}
+
+/// The position of an element in a list with these dimensions. A wrong
+/// count of indices or an index out of range gives Subscript out of range,
+/// as `Variable::calculate_index` does for an array.
+fn linear_index(dimensions: &[usize], indices: &[usize]) -> Result<usize> {
+    if indices.len() != dimensions.len() {
+        return Err(BBCBasicError::SubscriptOutOfRange);
+    }
+    let mut position = 0;
+    for (&index, &size) in indices.iter().zip(dimensions) {
+        if index >= size {
+            return Err(BBCBasicError::SubscriptOutOfRange);
+        }
+        position = position * size + index;
+    }
+    Ok(position)
+}
+
+/// The members with the names and the format of these members, with each
+/// value at 0 or an empty string: a structure from a prototype (issue #193)
+pub fn zero_members(members: &Members) -> Members {
+    members
+        .iter()
+        .map(|(name, value)| {
+            let zero = match value {
+                MemberValue::Structure(inner) => MemberValue::Structure(zero_members(inner)),
+                MemberValue::Variable(variable) => match variable.dimensions() {
+                    Some(dimensions) => MemberValue::array(name, dimensions.to_vec()),
+                    None => MemberValue::scalar(name),
+                },
+            };
+            (name.clone(), zero)
+        })
+        .collect()
+}
+
+/// True if the 2 member lists have the same format: the same count of
+/// members, and in each position the same type, the same array dimensions
+/// and the same format of a sub-structure. The names can be different.
+fn same_format(first: &Members, second: &Members) -> bool {
+    first.len() == second.len()
+        && first
+            .iter()
+            .zip(second)
+            .all(|((_, a), (_, b))| match (a, b) {
+                (MemberValue::Structure(a), MemberValue::Structure(b)) => same_format(a, b),
+                (MemberValue::Variable(a), MemberValue::Variable(b)) => {
+                    std::mem::discriminant(a) == std::mem::discriminant(b)
+                        && a.dimensions() == b.dimensions()
+                }
+                _ => false,
+            })
+}
+
+/// Put the values of `source` in `target`, which has the same format. The
+/// names of `target` do not change.
+fn copy_values(target: &mut Members, source: Members) {
+    for ((_, to), (_, from)) in target.iter_mut().zip(source) {
+        match (to, from) {
+            (MemberValue::Structure(to), MemberValue::Structure(from)) => copy_values(to, from),
+            (to, from) => *to = from,
+        }
+    }
+}
+
+/// The text of a structure or an element in an error, such as `t{(1,2)}`
+fn structure_label(structure: &str, element: &[usize]) -> String {
+    if element.is_empty() {
+        return structure.to_string();
+    }
+    let indices: Vec<String> = element.iter().map(usize::to_string).collect();
+    format!("{structure}{{({})}}", indices.join(","))
 }
 
 /// The value of a structure member: a variable, which is a scalar or an
@@ -261,7 +347,87 @@ impl VariableStore {
             structure_names: HashMap::new(),
             structures: HashMap::new(),
             next_structure_id: 0,
+            structure_arrays: HashMap::new(),
         }
+    }
+
+    /// Declare an array of structures (issue #193). Each value in
+    /// `dimensions` is the element count of that dimension, and each
+    /// element gets a copy of `members`. A second DIM gives Bad DIM.
+    pub fn dim_structure_array(
+        &mut self,
+        name: &str,
+        dimensions: Vec<usize>,
+        members: Members,
+    ) -> Result<()> {
+        if self.structure_arrays.contains_key(name) {
+            return Err(BBCBasicError::BadDim);
+        }
+        let count = dimensions
+            .iter()
+            .try_fold(1usize, |count, &size| count.checked_mul(size))
+            .ok_or(BBCBasicError::BadDim)?;
+        let first = self.next_structure_id;
+        self.next_structure_id += count;
+        let elements: Vec<StructureId> = (first..first + count).collect();
+        for &id in &elements {
+            self.structures.insert(id, members.clone());
+        }
+        let array = StructureArray {
+            dimensions,
+            elements,
+        };
+        self.structure_arrays.insert(name.to_string(), array);
+        Ok(())
+    }
+
+    /// The id of an element of an array of structures (issue #193). A name
+    /// that is not an array of structures gives Bad use of structure. A
+    /// wrong count of indices or an index out of range gives Subscript out
+    /// of range.
+    pub fn element_id(&self, name: &str, element: &[usize]) -> Result<StructureId> {
+        let array = self
+            .structure_arrays
+            .get(name)
+            .ok_or(BBCBasicError::BadStructure)?;
+        Ok(array.elements[linear_index(&array.dimensions, element)?])
+    }
+
+    /// The members of the structure of an id
+    pub fn members_of(&self, id: StructureId) -> Result<&Members> {
+        self.structures.get(&id).ok_or(BBCBasicError::BadStructure)
+    }
+
+    /// Copy each member value of the structure `source` to the structure
+    /// `target`, as `target{} = source{}` (issue #193). The copy is deep. 2
+    /// structures with a different format give Type mismatch.
+    pub fn copy_structure(&mut self, target: StructureId, source: StructureId) -> Result<()> {
+        let values = self.members_of(source)?.clone();
+        let members = self
+            .structures
+            .get_mut(&target)
+            .ok_or(BBCBasicError::BadStructure)?;
+        if !same_format(members, &values) {
+            return Err(BBCBasicError::TypeMismatch);
+        }
+        copy_values(members, values);
+        Ok(())
+    }
+
+    /// The arrays of structures in name order, each with its top indices and
+    /// the members of its first element (issue #193)
+    pub fn structure_arrays(&self) -> Vec<(&str, Vec<usize>, &Members)> {
+        let mut arrays: Vec<_> = self
+            .structure_arrays
+            .iter()
+            .filter_map(|(name, array)| {
+                let members = self.structures.get(array.elements.first()?)?;
+                let top_indices = array.dimensions.iter().map(|size| size - 1).collect();
+                Some((name.as_str(), top_indices, members))
+            })
+            .collect();
+        arrays.sort_by_key(|(name, ..)| *name);
+        arrays
     }
 
     /// Declare a structure with these members (issues #191 and #192), and
@@ -328,15 +494,25 @@ impl VariableStore {
         self.structures.remove(&id);
     }
 
-    /// The members of the structure of a name
-    fn structure_members(&self, name: &str) -> Result<&Members> {
-        let id = self.structure_id(name)?;
+    /// The id of the structure of a name, or of an element of the array of
+    /// structures of the name if `element` is not empty (issue #193)
+    pub fn structure_or_element(&self, name: &str, element: &[usize]) -> Result<StructureId> {
+        if element.is_empty() {
+            self.structure_id(name)
+        } else {
+            self.element_id(name, element)
+        }
+    }
+
+    /// The members of the structure of a name or of an element
+    fn structure_members(&self, name: &str, element: &[usize]) -> Result<&Members> {
+        let id = self.structure_or_element(name, element)?;
         self.structures.get(&id).ok_or(BBCBasicError::BadStructure)
     }
 
-    /// The members of the structure of a name (mutable)
-    fn structure_members_mut(&mut self, name: &str) -> Result<&mut Members> {
-        let id = self.structure_id(name)?;
+    /// The members of the structure of a name or of an element (mutable)
+    fn structure_members_mut(&mut self, name: &str, element: &[usize]) -> Result<&mut Members> {
+        let id = self.structure_or_element(name, element)?;
         self.structures
             .get_mut(&id)
             .ok_or(BBCBasicError::BadStructure)
@@ -346,13 +522,20 @@ impl VariableStore {
     /// `shape.pos.x` (issue #192). A name that is not a structure gives Bad
     /// use of structure, and so does a name after a member that is not a
     /// sub-structure. A member that does not exist gives No such variable.
-    fn find_member(&self, structure: &str, path: &[String]) -> Result<&MemberValue> {
-        let mut members = self.structure_members(structure)?;
+    /// The structure is an element if `element` is not empty (issue #193).
+    fn find_member(
+        &self,
+        structure: &str,
+        element: &[usize],
+        path: &[String],
+    ) -> Result<&MemberValue> {
+        let label = structure_label(structure, element);
+        let mut members = self.structure_members(structure, element)?;
         for (depth, name) in path.iter().enumerate() {
             let (_, value) = members
                 .iter()
                 .find(|(member, _)| member == name)
-                .ok_or_else(|| no_such_member(structure, &path[..=depth]))?;
+                .ok_or_else(|| no_such_member(&label, &path[..=depth]))?;
             match value {
                 _ if depth + 1 == path.len() => return Ok(value),
                 MemberValue::Structure(inner) => members = inner,
@@ -364,13 +547,19 @@ impl VariableStore {
 
     /// The member at the end of a path (mutable), with the errors of
     /// `find_member`
-    fn find_member_mut(&mut self, structure: &str, path: &[String]) -> Result<&mut Variable> {
-        let mut members = self.structure_members_mut(structure)?;
+    fn find_member_mut(
+        &mut self,
+        structure: &str,
+        element: &[usize],
+        path: &[String],
+    ) -> Result<&mut Variable> {
+        let label = structure_label(structure, element);
+        let mut members = self.structure_members_mut(structure, element)?;
         for (depth, name) in path.iter().enumerate() {
             let (_, value) = members
                 .iter_mut()
                 .find(|(member, _)| member == name)
-                .ok_or_else(|| no_such_member(structure, &path[..=depth]))?;
+                .ok_or_else(|| no_such_member(&label, &path[..=depth]))?;
             match value {
                 MemberValue::Variable(variable) if depth + 1 == path.len() => return Ok(variable),
                 MemberValue::Structure(inner) if depth + 1 < path.len() => members = inner,
@@ -385,13 +574,15 @@ impl VariableStore {
     /// `find_member`, and Bad use of structure for an index on a member that
     /// is not an array, for an array member with no index, and for a
     /// sub-structure. An index out of range gives Subscript out of range.
+    /// The structure is an element if `element` is not empty (issue #193).
     pub fn get_member(
         &self,
         structure: &str,
+        element: &[usize],
         path: &[String],
         indices: &[usize],
     ) -> Result<Variable> {
-        let MemberValue::Variable(variable) = self.find_member(structure, path)? else {
+        let MemberValue::Variable(variable) = self.find_member(structure, element, path)? else {
             return Err(BBCBasicError::BadStructure);
         };
         match (variable.is_array(), indices.is_empty()) {
@@ -407,11 +598,12 @@ impl VariableStore {
     pub fn set_member(
         &mut self,
         structure: &str,
+        element: &[usize],
         path: &[String],
         indices: &[usize],
         value: Variable,
     ) -> Result<()> {
-        let slot = self.find_member_mut(structure, path)?;
+        let slot = self.find_member_mut(structure, element, path)?;
         match (slot.is_array(), indices.is_empty()) {
             (false, true) => {}
             (true, false) => return store_element(slot, indices, value),
@@ -638,6 +830,7 @@ impl VariableStore {
         // cannot name a new structure
         self.structure_names.clear();
         self.structures.clear();
+        self.structure_arrays.clear();
     }
 }
 
@@ -739,26 +932,26 @@ mod tests {
         let path = |name: &str| [name.to_string()];
         store.dim_structure("p", members.clone()).unwrap();
         assert_eq!(
-            store.get_member("p", &path("n%"), &[]).unwrap(),
+            store.get_member("p", &[], &path("n%"), &[]).unwrap(),
             Variable::Integer(0)
         );
         store
-            .set_member("p", &path("x"), &[], Variable::Real(1.5))
+            .set_member("p", &[], &path("x"), &[], Variable::Real(1.5))
             .unwrap();
         assert_eq!(
-            store.get_member("p", &path("x"), &[]).unwrap(),
+            store.get_member("p", &[], &path("x"), &[]).unwrap(),
             Variable::Real(1.5)
         );
         assert!(matches!(
-            store.set_member("p", &path("s$"), &[], Variable::Integer(1)),
+            store.set_member("p", &[], &path("s$"), &[], Variable::Integer(1)),
             Err(BBCBasicError::TypeMismatch)
         ));
         assert!(matches!(
-            store.get_member("p", &path("z"), &[]),
+            store.get_member("p", &[], &path("z"), &[]),
             Err(BBCBasicError::NoSuchVariable(name)) if name == "p.z"
         ));
         assert!(matches!(
-            store.get_member("q", &path("x"), &[]),
+            store.get_member("q", &[], &path("x"), &[]),
             Err(BBCBasicError::BadStructure)
         ));
         assert!(matches!(
@@ -779,14 +972,16 @@ mod tests {
         // A parameter p{} is a second name for point
         let saved = store.save_structure("p");
         store.bind_structure("p", id);
-        store.set_member("p", &x, &[], Variable::Real(2.0)).unwrap();
+        store
+            .set_member("p", &[], &x, &[], Variable::Real(2.0))
+            .unwrap();
         assert_eq!(
-            store.get_member("point", &x, &[]).unwrap(),
+            store.get_member("point", &[], &x, &[]).unwrap(),
             Variable::Real(2.0)
         );
         store.restore_structure("p".to_string(), saved);
         assert!(matches!(
-            store.get_member("p", &x, &[]),
+            store.get_member("p", &[], &x, &[]),
             Err(BBCBasicError::BadStructure)
         ));
 
@@ -820,17 +1015,19 @@ mod tests {
             |names: &[&str]| -> Vec<String> { names.iter().map(|name| name.to_string()).collect() };
         let text = Variable::String("x".to_string());
         store
-            .set_member("s", &path(&["p", "t$"]), &[1, 0], text.clone())
+            .set_member("s", &[], &path(&["p", "t$"]), &[1, 0], text.clone())
             .unwrap();
         assert_eq!(
-            store.get_member("s", &path(&["p", "t$"]), &[1, 0]).unwrap(),
+            store
+                .get_member("s", &[], &path(&["p", "t$"]), &[1, 0])
+                .unwrap(),
             text
         );
         store
-            .set_member("s", &path(&["a%"]), &[2], Variable::Integer(7))
+            .set_member("s", &[], &path(&["a%"]), &[2], Variable::Integer(7))
             .unwrap();
         assert_eq!(
-            store.get_member("s", &path(&["a%"]), &[2]).unwrap(),
+            store.get_member("s", &[], &path(&["a%"]), &[2]).unwrap(),
             Variable::Integer(7)
         );
         let errors = [
@@ -842,10 +1039,10 @@ mod tests {
             (path(&["p", "z"]), vec![], "NoSuchVariable(\"s.p.z\")"),
         ];
         for (members, indices, error) in errors {
-            let found = store.get_member("s", &members, &indices).unwrap_err();
+            let found = store.get_member("s", &[], &members, &indices).unwrap_err();
             assert_eq!(format!("{found:?}"), error, "{members:?} {indices:?}");
             let found = store
-                .set_member("s", &members, &indices, Variable::Integer(1))
+                .set_member("s", &[], &members, &indices, Variable::Integer(1))
                 .unwrap_err();
             assert_eq!(format!("{found:?}"), error, "{members:?} {indices:?}");
         }

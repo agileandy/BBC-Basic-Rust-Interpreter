@@ -14,6 +14,7 @@ mod whole_array;
 
 pub use console::{Console, CursorMove, Interrupt};
 pub use structures::Argument;
+use structures::MemberIndices;
 
 use crate::collections::{CollectionStore, Element};
 use crate::error::{BBCBasicError, Result};
@@ -61,11 +62,11 @@ fn real_to_integer(value: f64) -> Result<i32> {
 
 /// Where the value of a SWAP target is: a variable, the index values of an
 /// array element, or the path and the index values of a member (issues
-/// #191 and #192)
+/// #191, #192 and #193)
 enum SwapPlace<'a> {
     Variable,
     Element(Vec<usize>),
-    Member(&'a MemberPath, Vec<usize>),
+    Member(&'a MemberPath, MemberIndices),
 }
 
 /// The name of a SWAP target, which gives its type, and its place
@@ -81,7 +82,7 @@ enum ForTarget {
     Member {
         structure: String,
         members: Vec<String>,
-        indices: Vec<usize>,
+        indices: MemberIndices,
     },
 }
 
@@ -858,6 +859,9 @@ impl Executor {
             } => self.execute_matrix_statement(*statement, target, source),
             Statement::MemberAssignment { target, expression } => {
                 self.execute_member_assignment(target, expression)
+            }
+            Statement::StructureCopy { target, source } => {
+                self.execute_structure_copy(target, source)
             }
             Statement::MemoryAssignment {
                 width,
@@ -1882,7 +1886,9 @@ impl Executor {
                 structure,
                 members,
                 indices,
-            } => self.variables.get_member(structure, members, indices),
+            } => self
+                .variables
+                .get_member(structure, &indices.element, members, &indices.member),
         }
     }
 
@@ -1897,9 +1903,13 @@ impl Executor {
                 structure,
                 members,
                 indices,
-            } => self
-                .variables
-                .set_member(structure, members, indices, value),
+            } => self.variables.set_member(
+                structure,
+                &indices.element,
+                members,
+                &indices.member,
+                value,
+            ),
         }
     }
 
@@ -1958,7 +1968,7 @@ impl Executor {
     fn store_target(
         &mut self,
         target: &InputItem,
-        member_indices: &[usize],
+        member_indices: &MemberIndices,
         value: Variable,
     ) -> Result<()> {
         match target {
@@ -2094,6 +2104,22 @@ impl Executor {
                 }
                 DimItem::Structure { name, members } => {
                     self.execute_dim_structure(name, members)?;
+                    continue;
+                }
+                DimItem::StructureArray {
+                    name,
+                    dimensions,
+                    members,
+                } => {
+                    self.execute_dim_structure_array(name, dimensions, members)?;
+                    continue;
+                }
+                DimItem::StructurePrototype {
+                    name,
+                    dimensions,
+                    prototype,
+                } => {
+                    self.execute_dim_prototype(name, dimensions, prototype)?;
                     continue;
                 }
             };
@@ -2382,11 +2408,7 @@ impl Executor {
     fn swap_value(&self, (name, place): &SwapLocation) -> Result<Variable> {
         match place {
             SwapPlace::Element(indices) => return self.variables.get_array_element(name, indices),
-            SwapPlace::Member(path, indices) => {
-                return self
-                    .variables
-                    .get_member(&path.structure, &path.members, indices)
-            }
+            SwapPlace::Member(path, indices) => return indices.get(&self.variables, path),
             SwapPlace::Variable => {}
         }
         let value = if name.ends_with('$') {
@@ -2408,10 +2430,7 @@ impl Executor {
     fn store_swap_value(&mut self, (name, place): &SwapLocation, value: Variable) -> Result<()> {
         match place {
             SwapPlace::Element(indices) => self.variables.set_array_element(name, indices, value),
-            SwapPlace::Member(path, indices) => {
-                self.variables
-                    .set_member(&path.structure, &path.members, indices, value)
-            }
+            SwapPlace::Member(path, indices) => indices.set(&mut self.variables, path, value),
             SwapPlace::Variable => self.store_input_value(name, None, value),
         }
     }

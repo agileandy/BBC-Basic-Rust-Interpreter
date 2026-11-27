@@ -222,6 +222,13 @@ pub enum Statement {
         target: MemberPath,
         expression: Expression,
     },
+    /// The copy of a whole structure, `b{} = a{}` (issue #193). Each path
+    /// has no members: it is a structure or an element of an array of
+    /// structures.
+    StructureCopy {
+        target: MemberPath,
+        source: MemberPath,
+    },
     /// Memory write: `?addr = value`, `!addr = value`, `base?offset = value`
     /// or `base!offset = value`. The address includes the offset.
     MemoryAssignment {
@@ -522,6 +529,21 @@ pub enum DimItem {
     Structure {
         name: String,
         members: Vec<MemberDecl>,
+    },
+    /// An array of structures, such as `t{(1000) f(10), n%}` (issue #193).
+    /// The dimensions are the top indices.
+    StructureArray {
+        name: String,
+        dimensions: Vec<Expression>,
+        members: Vec<MemberDecl>,
+    },
+    /// A structure or an array of structures from a prototype, such as
+    /// `b{} = a{}` or `c{(10)} = a{}` (issue #193). No dimensions is a
+    /// structure. The prototype path has no members.
+    StructurePrototype {
+        name: String,
+        dimensions: Vec<Expression>,
+        prototype: MemberPath,
     },
 }
 
@@ -1368,7 +1390,7 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
         return parse_memory_assignment(tokens, line_number);
     }
 
-    if matches!(tokens.first(), Some(Token::Member(..))) {
+    if structures::starts_member_path(tokens, 0) {
         return structures::parse_member_assignment(tokens, line_number);
     }
 
@@ -1959,6 +1981,12 @@ fn parse_input_items(tokens: &[Token], line_number: Option<u16>) -> Result<Vec<I
                     indices,
                 }
             }
+            Token::Identifier(_) if structures::starts_member_path(tokens, pos) => {
+                // A member of an element, such as t{(1)}.x (issue #193)
+                let (path, last) = structures::parse_member_path(tokens, pos, line_number)?;
+                pos = last;
+                InputItem::Member(path)
+            }
             Token::Identifier(name) => InputItem::Variable(name.clone()),
             Token::Member(..) => {
                 let (path, last) = structures::parse_member_path(tokens, pos, line_number)?;
@@ -2100,7 +2128,8 @@ fn parse_input_file_target(part: &[Token], line_number: Option<u16>) -> Result<I
         [Token::Identifier(_) | Token::Member(..), Token::Separator('('), ..] => {
             find_closing_bracket(part, 1) == Some(part.len() - 1)
         }
-        _ => false,
+        // A member of an element, such as t{(1)}.x (issue #193)
+        _ => structures::member_target(part, line_number)?.is_some(),
     };
     if !is_target {
         return Err(BBCBasicError::SyntaxError {
@@ -2874,7 +2903,9 @@ fn parse_swap_target(tokens: &[Token], line_number: Option<u16>) -> Result<Input
         ]
     ) && tokens.len() > 3
         && find_closing_bracket(tokens, 1) == Some(tokens.len() - 1);
-    if is_variable || is_element {
+    // A member of an element, such as t{(1)}.x (issue #193)
+    let is_member = structures::starts_member_path(tokens, 0);
+    if is_variable || is_element || is_member {
         parse_read_target(tokens, line_number)
     } else {
         Err(BBCBasicError::SyntaxError {
@@ -3835,6 +3866,12 @@ fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> 
             *pos += 1;
             if let Some(structure) = structures::whole_structure(name, tokens, pos) {
                 return Ok(structure);
+            }
+            // An element of an array of structures or a member of it, such
+            // as t{(1)} or t{(1)}.x (issue #193)
+            if structures::starts_member_path(tokens, *pos - 1) {
+                *pos -= 1;
+                return structures::member_expression(tokens, pos);
             }
             // Check if this is followed by '(' for array access
             if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
@@ -4932,6 +4969,7 @@ mod tests {
     fn member_x() -> InputItem {
         InputItem::Member(MemberPath {
             structure: "p".to_string(),
+            element: Vec::new(),
             members: vec!["x".to_string()],
             indices: Vec::new(),
         })
