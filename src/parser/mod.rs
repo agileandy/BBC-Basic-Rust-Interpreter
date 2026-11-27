@@ -1295,11 +1295,20 @@ fn parse_print_items(tokens: &[Token]) -> Result<Vec<PrintItem>> {
                     let mut used = 0;
                     let expr = parse_expr_precedence(item_tokens, &mut used, 0)?;
                     items.push(PrintItem::Expression(expr));
-                    // A new value with no separator before it is the next item (BBC rule)
-                    pos = if used < item_tokens.len() && starts_print_item(&item_tokens[used]) {
-                        start_pos + used
-                    } else {
-                        end_pos
+                    // A new value with no separator before it is the next item (BBC rule).
+                    // Another token after the value is a syntax error (issue 196).
+                    pos = match item_tokens.get(used) {
+                        None => end_pos,
+                        Some(token) if starts_print_item(token) => start_pos + used,
+                        Some(token) => {
+                            return Err(BBCBasicError::SyntaxError {
+                                message: format!(
+                                    "Unexpected {} in PRINT",
+                                    tokens_text(std::slice::from_ref(token))
+                                ),
+                                line: None,
+                            })
+                        }
                     };
                 } else {
                     break;
