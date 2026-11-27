@@ -2004,6 +2004,19 @@ impl Executor {
         }
     }
 
+    /// Evaluate an expression one time and give its value as a literal
+    /// expression. The CASE statement compares this value with each WHEN
+    /// value, and does not evaluate its expression again.
+    pub fn eval_to_literal(&mut self, expr: &Expression) -> Result<Expression> {
+        if self.is_string_expr(expr) {
+            Ok(Expression::String(self.eval_string(expr)?))
+        } else if self.is_real_expr(expr) {
+            Ok(Expression::Real(self.eval_real(expr)?))
+        } else {
+            Ok(Expression::Integer(self.eval_integer(expr)?))
+        }
+    }
+
     /// Tell if an expression can give a value with a fraction part.
     fn is_real_expr(&self, expr: &Expression) -> bool {
         use crate::parser::{BinaryOperator, UnaryOperator};

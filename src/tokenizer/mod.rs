@@ -438,6 +438,8 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Separator(')'), Token::Keyword(_)) => true,
                 // A subtract after a closing bracket: LEN("ABC") - 1
                 (Token::Separator(')'), Token::Operator('-')) => true,
+                // The OF of a CASE after a closing bracket: CASE LEN(A$) OF
+                (Token::Separator(')'), Token::Identifier(name)) if name == "OF" => true,
                 // No space before/after certain operators
                 (Token::Separator(_), _) => false,
                 (_, Token::Separator(',')) => false,
@@ -719,6 +721,9 @@ const EXTENDED_STATEMENTS: &[(&str, u8)] = &[
     ("OVERLAY", 0xA3),
     ("ENDWHILE", 0xA4),
     ("ENDIF", 0xA5),
+    // OF, WHEN, OTHERWISE and ENDCASE are not keywords here. The parser
+    // finds them by their place on the line, so that a variable with one of
+    // these names still works (issue #107).
 ];
 
 /// Split a word such as `PROCgreet` or `FNadd` into its keyword and its name.
@@ -908,6 +913,49 @@ mod tests {
         assert_eq!(result.line_number, Some(40));
         assert_eq!(result.tokens, vec![Token::ExtendedKeyword(0xC8, 0xA5)]);
         assert_eq!(detokenize(&result).unwrap(), "40 ENDIF");
+    }
+
+    #[test]
+    fn test_tokenize_case_lines_and_list_them_again() {
+        for source in [
+            "20 CASE X OF",
+            "20 CASE LEN(\"ab\") OF",
+            "20 CASE A(1) OF",
+            "30 WHEN 1,2:PRINT 1",
+            "40 OTHERWISE PRINT 2",
+            "50 ENDCASE",
+        ] {
+            let result = tokenize(source).unwrap();
+            assert_eq!(detokenize(&result).unwrap(), source);
+        }
+        let result = tokenize("20 CASE X OF").unwrap();
+        assert_eq!(result.tokens[0], Token::ExtendedKeyword(0xC8, 0x8E));
+    }
+
+    #[test]
+    fn test_tokenize_of_when_otherwise_and_endcase_are_identifiers() {
+        // The parser finds these words by their place on the line, so that
+        // a variable with one of these names still works (issue #107)
+        for word in [
+            "OF",
+            "WHEN",
+            "OTHERWISE",
+            "ENDCASE",
+            "of",
+            "when",
+            "otherwise",
+            "endcase",
+            "When",
+        ] {
+            let result = tokenize(&format!("{}=5", word)).unwrap();
+            assert_eq!(result.tokens[0], Token::Identifier(word.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_tokenize_lower_case_case_is_identifier() {
+        let result = tokenize("case=5").unwrap();
+        assert_eq!(result.tokens[0], Token::Identifier("case".to_string()));
     }
 
     #[test]
