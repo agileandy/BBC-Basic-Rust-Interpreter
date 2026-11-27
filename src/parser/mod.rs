@@ -2391,7 +2391,8 @@ fn get_keyword_precedence(keyword_code: u8) -> Option<u8> {
         0x81 => Some(50), // DIV - same as / (integer division)
         0x83 => Some(50), // MOD - same as / (modulo)
         0x80 => Some(20), // AND - lower than comparison
-        0x82 => Some(15), // OR - lower than AND
+        0x82 => Some(15), // EOR - lower than AND, same as OR
+        0x84 => Some(15), // OR - lower than AND
         _ => None,
     }
 }
@@ -2417,7 +2418,8 @@ fn keyword_to_binary_op(keyword_code: u8) -> Option<BinaryOperator> {
         0x81 => Some(BinaryOperator::IntegerDivide), // DIV
         0x83 => Some(BinaryOperator::Modulo),        // MOD
         0x80 => Some(BinaryOperator::And),           // AND
-        0x82 => Some(BinaryOperator::Or),            // OR
+        0x82 => Some(BinaryOperator::Eor),           // EOR
+        0x84 => Some(BinaryOperator::Or),            // OR
         _ => None,
     }
 }
@@ -2912,6 +2914,130 @@ mod tests {
                 op: UnaryOperator::Not,
                 operand: Box::new(constant("FALSE")),
             }
+        );
+    }
+
+    #[test]
+    fn test_keyword_codes_give_their_operators() {
+        // The tokenizer gives AND 0x80, DIV 0x81, EOR 0x82, MOD 0x83 and OR 0x84.
+        let cases = [
+            (0x80, BinaryOperator::And),
+            (0x81, BinaryOperator::IntegerDivide),
+            (0x82, BinaryOperator::Eor),
+            (0x83, BinaryOperator::Modulo),
+            (0x84, BinaryOperator::Or),
+        ];
+        for (code, op) in cases {
+            let tokens = [Token::Integer(6), Token::Keyword(code), Token::Integer(3)];
+            let expr = parse_expression(&tokens).unwrap();
+
+            assert_eq!(
+                expr,
+                binary(Expression::Integer(6), op, Expression::Integer(3)),
+                "keyword code {code:#04X}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_and_binds_more_than_or() {
+        // 1 OR 2 AND 4 is 1 OR (2 AND 4)
+        let tokens = [
+            Token::Integer(1),
+            Token::Keyword(0x84),
+            Token::Integer(2),
+            Token::Keyword(0x80),
+            Token::Integer(4),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            binary(
+                Expression::Integer(1),
+                BinaryOperator::Or,
+                binary(
+                    Expression::Integer(2),
+                    BinaryOperator::And,
+                    Expression::Integer(4)
+                ),
+            )
+        );
+    }
+
+    #[test]
+    fn test_or_and_eor_have_equal_precedence() {
+        // 1 EOR 2 OR 3 is (1 EOR 2) OR 3, and 1 OR 2 EOR 3 is (1 OR 2) EOR 3
+        let eor_first = [
+            Token::Integer(1),
+            Token::Keyword(0x82),
+            Token::Integer(2),
+            Token::Keyword(0x84),
+            Token::Integer(3),
+        ];
+        let or_first = [
+            Token::Integer(1),
+            Token::Keyword(0x84),
+            Token::Integer(2),
+            Token::Keyword(0x82),
+            Token::Integer(3),
+        ];
+
+        assert_eq!(
+            parse_expression(&eor_first).unwrap(),
+            binary(
+                binary(
+                    Expression::Integer(1),
+                    BinaryOperator::Eor,
+                    Expression::Integer(2)
+                ),
+                BinaryOperator::Or,
+                Expression::Integer(3),
+            )
+        );
+        assert_eq!(
+            parse_expression(&or_first).unwrap(),
+            binary(
+                binary(
+                    Expression::Integer(1),
+                    BinaryOperator::Or,
+                    Expression::Integer(2)
+                ),
+                BinaryOperator::Eor,
+                Expression::Integer(3),
+            )
+        );
+    }
+
+    #[test]
+    fn test_comparison_binds_more_than_or() {
+        // 1 = 1 OR 2 = 3 is (1 = 1) OR (2 = 3)
+        let tokens = [
+            Token::Integer(1),
+            Token::Operator('='),
+            Token::Integer(1),
+            Token::Keyword(0x84),
+            Token::Integer(2),
+            Token::Operator('='),
+            Token::Integer(3),
+        ];
+        let expr = parse_expression(&tokens).unwrap();
+
+        assert_eq!(
+            expr,
+            binary(
+                binary(
+                    Expression::Integer(1),
+                    BinaryOperator::Equal,
+                    Expression::Integer(1)
+                ),
+                BinaryOperator::Or,
+                binary(
+                    Expression::Integer(2),
+                    BinaryOperator::Equal,
+                    Expression::Integer(3)
+                ),
+            )
         );
     }
 
