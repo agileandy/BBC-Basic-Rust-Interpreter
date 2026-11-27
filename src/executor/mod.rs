@@ -1693,8 +1693,8 @@ impl Executor {
                 }
                 Ok((name, Some(index_values)))
             }
-            // The parser gives no prompt text in SWAP
-            InputItem::Prompt { .. } => Err(BBCBasicError::SyntaxError {
+            // The parser gives no prompt text and no ' in SWAP
+            InputItem::Prompt { .. } | InputItem::NewLine => Err(BBCBasicError::SyntaxError {
                 message: "Expected variable name in SWAP".to_string(),
                 line: None,
             }),
