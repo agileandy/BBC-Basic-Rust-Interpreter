@@ -192,7 +192,7 @@ fn test_a_structure_name_that_is_a_short_form() {
 
 #[test]
 fn test_the_forms_of_later_issues_give_a_syntax_error() {
-    let cases: [(&[&str], u16, &str); 8] = [
+    let cases: [(&[&str], u16, &str); 7] = [
         (&["10 DIM p{a(3)}"], 10, "Array members are not supported"),
         (
             &["10 DIM p{q{a}}"],
@@ -211,17 +211,6 @@ fn test_the_forms_of_later_issues_give_a_syntax_error() {
         ),
         (
             &["10 DIM a{x}, b{x}", "20 b{} = a{}"],
-            20,
-            "A reference to a whole structure is not supported",
-        ),
-        (
-            &[
-                "10 DIM a{x}",
-                "20 PROCa(a{})",
-                "30 END",
-                "40 DEF PROCa(s{})",
-                "50 ENDPROC",
-            ],
             20,
             "A reference to a whole structure is not supported",
         ),

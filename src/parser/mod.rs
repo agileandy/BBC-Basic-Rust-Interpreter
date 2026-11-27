@@ -110,6 +110,9 @@ pub enum Expression {
     Variable(String),
     /// A structure member, such as `point.x` (issue #191)
     Member { structure: String, member: String },
+    /// A whole structure, such as `point{}`: an argument for a structure
+    /// parameter of a PROC or FN (issue #194)
+    Structure(String),
     /// Array access with indices
     ArrayAccess {
         name: String,
@@ -561,6 +564,7 @@ impl Expression {
                 }
             }
             Expression::FunctionCall { .. } => ExpressionType::Unknown, // Depends on function
+            Expression::Structure(_) => ExpressionType::Unknown,
             Expression::BinaryOp { op, .. } => match op {
                 BinaryOperator::Add
                 | BinaryOperator::Subtract
@@ -3035,8 +3039,15 @@ fn parse_def_fn(tokens: &[Token], line_number: Option<u16>) -> Result<Statement>
             // Expect identifier
             match &tokens[pos] {
                 Token::Identifier(param) => {
-                    params.push(param.clone());
                     pos += 1;
+                    // A structure parameter is name{} (issue #194)
+                    match structures::structure_name(param, &tokens[pos..close_pos], line_number)? {
+                        Some(structure) => {
+                            params.push(structure);
+                            pos += 2;
+                        }
+                        None => params.push(param.clone()),
+                    }
                 }
                 _ => {
                     return Err(BBCBasicError::SyntaxError {
@@ -3132,6 +3143,12 @@ fn parse_local_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
                     && is_paren(&tokens[pos + 1], ')')
                 {
                     variables.push(format!("{name}()"));
+                    pos += 2;
+                } else if let Some(structure) =
+                    structures::structure_name(name, &tokens[pos..], line_number)?
+                {
+                    // LOCAL name{} (issue #194)
+                    variables.push(structure);
                     pos += 2;
                 } else {
                     variables.push(name.clone());
@@ -3248,8 +3265,15 @@ fn parse_parameter_list(tokens: &[Token], line_number: Option<u16>) -> Result<Ve
     while i < close_pos {
         match &tokens[i] {
             Token::Identifier(name) => {
-                params.push(name.clone());
                 i += 1;
+                // A structure parameter is name{} (issue #194)
+                match structures::structure_name(name, &tokens[i..close_pos], line_number)? {
+                    Some(structure) => {
+                        params.push(structure);
+                        i += 2;
+                    }
+                    None => params.push(name.clone()),
+                }
 
                 // Check for comma or end
                 if i < close_pos {
@@ -3699,6 +3723,9 @@ fn parse_operand_level(tokens: &[Token], pos: &mut usize) -> Result<Expression> 
         // Variables and array access
         Token::Identifier(name) => {
             *pos += 1;
+            if let Some(structure) = structures::whole_structure(name, tokens, pos) {
+                return Ok(structure);
+            }
             // Check if this is followed by '(' for array access
             if *pos < tokens.len() && matches!(tokens[*pos], Token::Separator('(')) {
                 // This is array access: name(index1, index2, ...)

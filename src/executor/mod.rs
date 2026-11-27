@@ -13,6 +13,7 @@ mod vdu;
 mod whole_array;
 
 pub use console::{Console, Interrupt};
+pub use structures::Argument;
 
 use crate::collections::{CollectionStore, Element};
 use crate::error::{BBCBasicError, Result};
@@ -22,8 +23,8 @@ use crate::memory::MemoryManager;
 use crate::parser::{DataValue, DimItem, Expression, Indirection, InputItem, Statement, TraceMode};
 use crate::program::{Position, TYPED_LINE};
 use crate::variables::{
-    is_resident_integer, resident_default, Variable, VariableStore, PRINT_FORMAT_DEFAULT,
-    PRINT_FORMAT_NAME,
+    is_resident_integer, resident_default, StructureId, Variable, VariableStore,
+    PRINT_FORMAT_DEFAULT, PRINT_FORMAT_NAME,
 };
 use rand::Rng;
 use std::cell::RefCell;
@@ -477,6 +478,11 @@ struct LocalFrame {
     saved_variables: HashMap<String, Option<Variable>>,
     /// Saved arrays (array name -> saved entry, see `VariableStore::save_array`)
     saved_arrays: HashMap<String, Option<Option<Variable>>>,
+    /// Saved structure names, for LOCAL and for a structure parameter (see
+    /// `VariableStore::save_structure`, issue #194)
+    saved_structures: HashMap<String, Option<Option<StructureId>>>,
+    /// The LOCAL structures that a DIM made for this frame. The exit removes them.
+    local_structures: Vec<StructureId>,
 }
 
 impl LocalFrame {
@@ -484,6 +490,8 @@ impl LocalFrame {
         Self {
             saved_variables: HashMap::new(),
             saved_arrays: HashMap::new(),
+            saved_structures: HashMap::new(),
+            local_structures: Vec::new(),
         }
     }
 }
@@ -2924,7 +2932,7 @@ impl Executor {
         use crate::parser::{BinaryOperator, UnaryOperator};
         match expr {
             Expression::Real(_) => true,
-            Expression::Integer(_) | Expression::String(_) => false,
+            Expression::Integer(_) | Expression::String(_) | Expression::Structure(_) => false,
             Expression::Variable(name) => {
                 name == "PI"
                     || (!name.ends_with('%')
@@ -4401,6 +4409,10 @@ impl Executor {
             self.variables.declare_local_array(array_name.to_string());
             return Ok(());
         }
+        if let Some(structure) = name.strip_suffix("{}") {
+            self.declare_local_structure(structure);
+            return Ok(());
+        }
 
         // Save current value (or None if doesn't exist).
         // A second LOCAL for the same name in this frame keeps the first saved value.
@@ -4463,6 +4475,7 @@ impl Executor {
         for (name, saved_array) in frame.saved_arrays {
             self.variables.restore_array(name, saved_array);
         }
+        self.restore_structures(frame.saved_structures, frame.local_structures);
 
         Ok(())
     }
@@ -4697,15 +4710,19 @@ impl Executor {
         &mut self,
         params: &[String],
         args: &[Expression],
-    ) -> Result<Vec<Variable>> {
+    ) -> Result<Vec<Argument>> {
         let mut values = Vec::with_capacity(args.len());
         for (param_name, arg_expr) in params.iter().zip(args.iter()) {
-            let value = if param_name.ends_with('%') {
-                Variable::Integer(self.eval_integer(arg_expr)?)
+            let value = if param_name.ends_with("{}") {
+                Argument::Structure(self.structure_argument(arg_expr)?)
+            } else if matches!(arg_expr, Expression::Structure(_)) {
+                return Err(BBCBasicError::BadStructure);
+            } else if param_name.ends_with('%') {
+                Argument::Value(Variable::Integer(self.eval_integer(arg_expr)?))
             } else if param_name.ends_with('$') {
-                Variable::String(self.eval_string(arg_expr)?)
+                Argument::Value(Variable::String(self.eval_string(arg_expr)?))
             } else {
-                Variable::Real(self.eval_real(arg_expr)?)
+                Argument::Value(Variable::Real(self.eval_real(arg_expr)?))
             };
             values.push(value);
         }
@@ -4714,14 +4731,21 @@ impl Executor {
 
     /// Declare each parameter as local in the current scope, then assign its
     /// argument value. ENDPROC or ENDFN restores the caller variable.
-    pub fn bind_parameters(&mut self, params: &[String], values: Vec<Variable>) -> Result<()> {
+    pub fn bind_parameters(&mut self, params: &[String], values: Vec<Argument>) -> Result<()> {
         for (param_name, value) in params.iter().zip(values) {
             self.declare_local(param_name)?;
             match value {
-                Variable::Integer(v) => self.variables.set_integer_var(param_name.clone(), v),
-                Variable::String(v) => self.variables.set_string_var(param_name.clone(), v)?,
-                Variable::Real(v) => self.variables.set_real_var(param_name.clone(), v),
-                _ => return Err(BBCBasicError::TypeMismatch),
+                Argument::Structure(id) => self.bind_structure_parameter(param_name, id),
+                Argument::Value(Variable::Integer(v)) => {
+                    self.variables.set_integer_var(param_name.clone(), v)
+                }
+                Argument::Value(Variable::String(v)) => {
+                    self.variables.set_string_var(param_name.clone(), v)?
+                }
+                Argument::Value(Variable::Real(v)) => {
+                    self.variables.set_real_var(param_name.clone(), v)
+                }
+                Argument::Value(_) => return Err(BBCBasicError::TypeMismatch),
             }
         }
         Ok(())
@@ -4826,7 +4850,7 @@ impl Executor {
     fn run_function<T>(
         &mut self,
         func: &FunctionDefinition,
-        values: Vec<Variable>,
+        values: Vec<Argument>,
         eval: fn(&mut Self, &Expression) -> Result<T>,
     ) -> Result<T> {
         self.bind_parameters(&func.params, values)?;
