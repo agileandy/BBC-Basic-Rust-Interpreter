@@ -160,3 +160,4 @@ mod issue_180_comment_after_then_line;
 mod issue_181_str_of_large_number;
 mod issue_179_rem_text_as_typed;
 mod issue_170_ide_edit_mode;
+mod issue_182_plot_colour_actions;
