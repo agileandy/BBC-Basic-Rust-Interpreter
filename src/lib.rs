@@ -45,6 +45,7 @@ pub mod error {
         // Runtime errors
         TypeMismatch,
         NoRoom,
+        BadDim,
         SubscriptOutOfRange,
         DivisionByZero,
         StringTooLong,
@@ -87,6 +88,7 @@ pub mod error {
                 BBCBasicError::BadProgram => write!(f, "Bad program"),
                 BBCBasicError::TypeMismatch => write!(f, "Type mismatch"),
                 BBCBasicError::NoRoom => write!(f, "No room"),
+                BBCBasicError::BadDim => write!(f, "Bad DIM"),
                 BBCBasicError::SubscriptOutOfRange => write!(f, "Subscript out of range"),
                 BBCBasicError::DivisionByZero => write!(f, "Division by zero"),
                 BBCBasicError::StringTooLong => write!(f, "String too long"),

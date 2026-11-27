@@ -330,6 +330,7 @@ pub fn run_program_with_outcome(
     // RUN starts with no variables, except A% to Z%
     executor.clear_variables();
     executor.set_program_size(program.size_in_bytes());
+    executor.reset_dim_space();
     executor.reset_column();
 
     // First pass: parse each line, collect DATA statements and procedure definitions
@@ -978,6 +979,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::TypeMismatch => 6,
         BBCBasicError::SubscriptOutOfRange => 15,
         BBCBasicError::NoRoom => 11,
+        BBCBasicError::BadDim => 10,
         BBCBasicError::StringTooLong => 19,
         BBCBasicError::TooBig => 20,
         BBCBasicError::OnRange => 40,
