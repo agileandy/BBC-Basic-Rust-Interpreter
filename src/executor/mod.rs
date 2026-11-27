@@ -259,6 +259,8 @@ pub struct Executor {
     next_loop_line: Option<Position>,
     // Start instant: TIME counts centiseconds from here
     start_time: std::time::Instant,
+    // Size in bytes of the stored program: TOP is PAGE plus this size
+    program_size: usize,
     // Replies for INPUT, used before stdin (for testing)
     input_queue: VecDeque<String>,
     // Output buffer (for testing)
@@ -293,6 +295,7 @@ impl Executor {
             next_file_handle: 1,
             next_loop_line: None,
             start_time: std::time::Instant::now(),
+            program_size: 0,
             input_queue: VecDeque::new(),
             output: String::new(),
             column: 0,
@@ -1132,6 +1135,17 @@ impl Executor {
         self.graphics.render()
     }
 
+    /// Set the size in bytes of the stored program. The runner sets it
+    /// before a run and before a typed line, so that TOP agrees with it.
+    pub fn set_program_size(&mut self, size: usize) {
+        self.program_size = size;
+    }
+
+    /// The first free address after the stored program
+    fn top(&self) -> i32 {
+        self.memory.get_page() as i32 + self.program_size as i32
+    }
+
     /// Evaluate an expression to an integer value
     pub fn eval_integer(&mut self, expr: &Expression) -> Result<i32> {
         // An operation that can give a fraction part, such as `/`, uses real
@@ -1157,9 +1171,13 @@ impl Executor {
                 } else if name == "HIMEM" {
                     // HIMEM returns top of available memory
                     return Ok(self.memory.get_himem() as i32);
-                } else if name == "LOMEM" {
-                    // LOMEM returns bottom of user memory (PAGE)
+                } else if name == "PAGE" {
+                    // PAGE returns the start of program memory
                     return Ok(self.memory.get_page() as i32);
+                } else if name == "TOP" || name == "LOMEM" {
+                    // TOP returns the first free address after the program.
+                    // LOMEM, the start of the variables, is equal to TOP.
+                    return Ok(self.top());
                 } else if name == "ERR" {
                     // ERR returns the last error number (0 if no error)
                     return Ok(self
@@ -1342,7 +1360,7 @@ impl Executor {
                 // Check for pseudo-variables first
                 match name.as_str() {
                     "PI" => return Ok(std::f64::consts::PI),
-                    "TIME" | "HIMEM" | "LOMEM" | "ERR" | "ERL" => {
+                    "TIME" | "HIMEM" | "LOMEM" | "PAGE" | "TOP" | "ERR" | "ERL" => {
                         return self.eval_integer(expr).map(f64::from);
                     }
                     _ => {}

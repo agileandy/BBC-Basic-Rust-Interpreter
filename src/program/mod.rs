@@ -2,7 +2,7 @@
 //!
 //! Manages BBC BASIC program lines in tokenized format with automatic sorting.
 
-use crate::tokenizer::TokenizedLine;
+use crate::tokenizer::{Token, TokenizedLine};
 use std::collections::BTreeMap;
 
 /// The line key of a line typed with no line number. It is wider than a
@@ -94,6 +94,33 @@ impl ProgramStore {
     pub fn list(&self) -> Vec<(u16, &TokenizedLine)> {
         self.lines.iter().map(|(k, v)| (*k, v)).collect()
     }
+
+    /// The size of the program in BBC Micro memory: for each line, 4 header
+    /// bytes and the bytes of its tokens, then 2 bytes for the end marker.
+    /// TOP is PAGE plus this size.
+    pub fn size_in_bytes(&self) -> usize {
+        const LINE_HEADER: usize = 4; // CR, line number high and low, length
+        const END_MARKER: usize = 2; // CR, &FF
+        self.lines
+            .values()
+            .map(|line| LINE_HEADER + line.tokens.iter().map(token_size).sum::<usize>())
+            .sum::<usize>()
+            + END_MARKER
+    }
+}
+
+/// The number of bytes that a token uses in a stored line
+fn token_size(token: &Token) -> usize {
+    match token {
+        Token::Keyword(_) | Token::Operator(_) | Token::Separator(_) => 1,
+        Token::ExtendedKeyword(..) => 2,
+        Token::LineNumber(_) => 4, // &8D and 3 encoded bytes
+        Token::Integer(value) => value.to_string().len(),
+        Token::Real(value) => value.to_string().len(),
+        Token::String(text) => text.len() + 2,
+        Token::DataText(text) | Token::Identifier(text) => text.len(),
+        Token::EndOfLine => 0,
+    }
 }
 
 impl Default for ProgramStore {
@@ -106,6 +133,23 @@ impl Default for ProgramStore {
 mod tests {
     use super::*;
     use crate::tokenizer::tokenize;
+
+    #[test]
+    fn test_size_of_empty_program_is_end_marker() {
+        assert_eq!(ProgramStore::new().size_in_bytes(), 2);
+    }
+
+    #[test]
+    fn test_size_counts_line_header_and_tokens() {
+        let mut store = ProgramStore::new();
+        // 4 header bytes, 1 byte for the END token, 2 end marker bytes
+        store.store_line(tokenize("10 END").unwrap());
+        assert_eq!(store.size_in_bytes(), 7);
+
+        // 4 header bytes, 1 PRINT token, 2 quotes and 2 characters
+        store.store_line(tokenize("20 PRINT \"AB\"").unwrap());
+        assert_eq!(store.size_in_bytes(), 7 + 9);
+    }
 
     #[test]
     fn test_program_store_creation() {
