@@ -27,7 +27,8 @@ fn write_with(name: &str, print_line: &str) -> Vec<u8> {
 fn test_print_file_two_numbers_with_no_separator_writes_both() {
     let bytes = write_with("two_numbers", "PRINT#F%, 10 58");
 
-    assert_eq!(String::from_utf8_lossy(&bytes), "1058\n");
+    // Each item is one record (issue #157)
+    assert_eq!(String::from_utf8_lossy(&bytes), "10\n58\n");
 }
 
 #[test]
@@ -41,13 +42,14 @@ fn test_print_file_tan_is_a_function() {
 fn test_print_file_hex_form() {
     let bytes = write_with("hex", "PRINT#F%, ~255;255");
 
-    assert_eq!(String::from_utf8_lossy(&bytes), "FF255\n");
+    // Each item is one record (issue #157)
+    assert_eq!(String::from_utf8_lossy(&bytes), "FF\n255\n");
 }
 
 #[test]
 fn test_print_file_number_comma_string() {
-    // D3: this build writes text. A comma writes a tab character.
+    // This build writes text. Each item is one record (issue #157).
     let bytes = write_with("comma", "PRINT#F%, 1, \"A\"");
 
-    assert_eq!(String::from_utf8_lossy(&bytes), "1\tA\n");
+    assert_eq!(String::from_utf8_lossy(&bytes), "1\nA\n");
 }

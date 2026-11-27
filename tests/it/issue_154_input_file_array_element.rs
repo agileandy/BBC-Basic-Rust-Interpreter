@@ -34,7 +34,7 @@ fn write_then_read(
 fn test_input_file_reads_into_array_elements_and_a_variable() {
     let (result, output) = write_then_read(
         "three_values",
-        "7;\",\";\"AB\";\",\";3.5",
+        "7, \"AB\", 3.5",
         &[
             "50 DIM V(3), N$(3)",
             "60 INPUT#H, V(1), N$(2), X",
@@ -79,7 +79,7 @@ fn test_input_file_evaluates_the_indices_when_the_target_gets_its_value() {
     // D3: I% gets 2 before the index of V(I%) is evaluated
     let (result, output) = write_then_read(
         "index_order",
-        "\"2,9\"",
+        "2, 9",
         &[
             "50 DIM V(3)",
             "60 I% = 0",
@@ -96,7 +96,7 @@ fn test_input_file_evaluates_the_indices_when_the_target_gets_its_value() {
 fn test_input_file_variables_are_unchanged() {
     let (result, output) = write_then_read(
         "variables",
-        "\"5,HELLO\"",
+        "5, \"HELLO\"",
         &["60 INPUT#H, A, B$", "70 PRINT A;\" \";B$"],
     );
 

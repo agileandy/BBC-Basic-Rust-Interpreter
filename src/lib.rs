@@ -94,6 +94,11 @@ pub mod error {
         // A directory function used on a path that is not a directory, or
         // RMDIR of a directory that is not empty. A modern extension.
         BadDirectory,
+        // INPUT# with no record left in the file (issue #157)
+        Eof,
+        // PRINT# of a string with a line feed or a carriage return, which
+        // cannot be one record of a text file. An extension (issue #157).
+        BadRecord,
 
         // Math errors (issue #152)
         NegativeRoot,
@@ -158,6 +163,8 @@ pub mod error {
                 BBCBasicError::ChannelNotOpen(_) => write!(f, "Channel"),
                 BBCBasicError::TooManyOpenFiles => write!(f, "Too many open files"),
                 BBCBasicError::BadDirectory => write!(f, "Bad directory"),
+                BBCBasicError::Eof => write!(f, "EOF"),
+                BBCBasicError::BadRecord => write!(f, "Bad record"),
                 BBCBasicError::NegativeRoot => write!(f, "-ve root"),
                 BBCBasicError::LogRange => write!(f, "Log range"),
                 BBCBasicError::ExpRange => write!(f, "Exp range"),

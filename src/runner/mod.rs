@@ -1286,6 +1286,10 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::FileNotFound(_) => 214,
         BBCBasicError::ChannelNotOpen(_) => 222,
         BBCBasicError::TooManyOpenFiles => 192,
+        // The EOF error of the Acorn filing systems is &DF (issue #157)
+        BBCBasicError::Eof => 223,
+        // Bad record is an extension error. BBC BASIC does not use ERR 155 (issue #157).
+        BBCBasicError::BadRecord => 155,
         // DiskError groups different failures (create, read, write, flush).
         // No single BBC BASIC number fits all of them, so it keeps 255.
         BBCBasicError::DiskError(_) => 255,
