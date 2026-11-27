@@ -1969,6 +1969,12 @@ impl Executor {
                     .unwrap_or(0);
                 Ok(format_time_string(seconds))
             }
+            // REPORT$ is an extension. A variable named REPORT$ keeps its old meaning.
+            Expression::Variable(name)
+                if name == "REPORT$" && self.variables.get_string_var(name).is_none() =>
+            {
+                self.eval_extension_string_function(name, &[])
+            }
             Expression::Variable(name) => self
                 .variables
                 .get_string_var(name)
@@ -1994,6 +2000,13 @@ impl Executor {
                     });
                 };
                 crate::filesystem::list_directory(&self.eval_string(path)?)
+            }
+            // UPPER$(s$) and LOWER$(s$) are extensions. The parser gives them as
+            // an array access, so an array of the same name keeps its old meaning.
+            Expression::ArrayAccess { name, indices }
+                if (name == "UPPER$" || name == "LOWER$") && !self.variables.has_array(name) =>
+            {
+                self.eval_extension_string_function(name, indices)
             }
             Expression::ArrayAccess { name, indices } => {
                 use crate::variables::Variable;
