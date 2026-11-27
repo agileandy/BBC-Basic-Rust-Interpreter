@@ -332,3 +332,125 @@ fn test_handler_can_call_a_proc_after_error_in_proc() {
     assert_eq!(result, Ok(()));
     assert_eq!(output, "b\ndone\n");
 }
+
+// K1: a trapped error clears the LOCAL scopes and the GOSUB, FOR, REPEAT
+// and WHILE stacks before the handler runs, as in BBC BASIC
+
+#[test]
+fn test_handler_that_ends_with_end_stops_after_error_in_proc() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 PROCa",
+        "30 PRINT \"back\":END",
+        "50 DEF PROCa",
+        "60 PRINT 1/0",
+        "70 ENDPROC",
+        "100 PRINT \"h\"",
+        "110 END",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "h\n");
+}
+
+#[test]
+fn test_endproc_in_handler_after_error_in_proc_gives_no_proc() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 PROCa",
+        "30 PRINT \"back\":END",
+        "50 DEF PROCa",
+        "60 PRINT 1/0",
+        "70 ENDPROC",
+        "100 ON ERROR OFF : PRINT \"h\"",
+        "110 ENDPROC",
+    ]);
+    assert_eq!(result, Err("No PROC at line 110".to_string()));
+    assert_eq!(output, "h\n");
+}
+
+#[test]
+fn test_return_in_handler_after_error_in_gosub_gives_no_gosub() {
+    let (result, _) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 GOSUB 50",
+        "30 END",
+        "50 PRINT 1/0",
+        "60 RETURN",
+        "100 ON ERROR OFF : RETURN",
+    ]);
+    assert_eq!(result, Err("No GOSUB at line 100".to_string()));
+}
+
+#[test]
+fn test_next_in_handler_after_error_in_for_loop_gives_no_for() {
+    let (result, _) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 FOR I = 1 TO 3",
+        "30 PRINT 1/0",
+        "40 NEXT",
+        "50 END",
+        "100 ON ERROR OFF : NEXT",
+    ]);
+    assert_eq!(result, Err("No FOR at line 100".to_string()));
+}
+
+#[test]
+fn test_until_in_handler_after_error_in_repeat_loop_gives_no_repeat() {
+    let (result, _) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 REPEAT",
+        "30 PRINT 1/0",
+        "40 UNTIL TRUE",
+        "50 END",
+        "100 ON ERROR OFF : UNTIL TRUE",
+    ]);
+    assert_eq!(result, Err("No REPEAT at line 100".to_string()));
+}
+
+#[test]
+fn test_endwhile_in_handler_after_error_in_while_loop_gives_no_while() {
+    let (result, _) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 WHILE TRUE",
+        "30 PRINT 1/0",
+        "40 ENDWHILE",
+        "50 END",
+        "100 ON ERROR OFF : ENDWHILE",
+    ]);
+    assert_eq!(result, Err("No WHILE at line 100".to_string()));
+}
+
+#[test]
+fn test_handler_goto_after_the_loop_continues() {
+    let (result, output) = run(&[
+        "10 ON ERROR GOTO 100",
+        "20 FOR I = 1 TO 3",
+        "30 PRINT 1/0",
+        "40 NEXT",
+        "50 PRINT \"after\"",
+        "60 FOR J = 1 TO 2",
+        "70 PRINT J",
+        "80 NEXT",
+        "90 END",
+        "100 PRINT \"h\"",
+        "110 GOTO 50",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "h\nafter\n1\n2\n");
+}
+
+// K2: Arguments, ERR 31, for a wrong argument count
+
+#[test]
+fn test_proc_with_wrong_argument_count_is_trapped() {
+    let body = ["20 PROCa(1, 2)", "30 END", "40 DEF PROCa(X)", "50 ENDPROC"];
+    assert_eq!(trapped_output(&body), "31 20\n");
+    assert_eq!(error_of(&body), "Arguments at line 20");
+}
+
+#[test]
+fn test_fn_with_wrong_argument_count_is_trapped() {
+    let body = ["20 PRINT FNa(1, 2)", "30 END", "40 DEF FNa(X) = X"];
+    assert_eq!(trapped_output(&body), "31 20\n");
+    assert_eq!(error_of(&body), "Arguments at line 20");
+}

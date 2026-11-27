@@ -637,9 +637,12 @@ fn run_lines(
                         handler_line, error_line
                     ));
                 }
-                // The handler runs outside the PROC that failed, and sees
-                // the values that its LOCAL statements hid
+                // As in BBC BASIC, the handler runs outside each PROC, FN,
+                // GOSUB and loop that was open: it sees the values that
+                // LOCAL statements hid, and a RETURN, ENDPROC, NEXT, UNTIL
+                // or ENDWHILE in it gives an error
                 executor.exit_local_scopes_to(local_depth);
+                executor.clear_control_stacks();
             }
         }
     }
@@ -867,14 +870,7 @@ fn step(
                 .ok_or_else(|| BBCBasicError::NoSuchFnProc(format!("PROC{}", name)))?;
 
             if args.len() != proc.params.len() {
-                return Err(format!(
-                    "Procedure {} expects {} parameters, got {}{}",
-                    name,
-                    proc.params.len(),
-                    args.len(),
-                    at_line(line_number)
-                )
-                .into());
+                return Err(BBCBasicError::Arguments.into());
             }
 
             // Clone procedure data before entering local scope
@@ -1015,6 +1011,7 @@ fn error_number(error: &BBCBasicError) -> i32 {
         BBCBasicError::NotLocal => 12,
         BBCBasicError::NoSuchLine(_) => 41,
         BBCBasicError::NoGosub => 38,
+        BBCBasicError::Arguments => 31,
         BBCBasicError::NoProc => 13,
         BBCBasicError::NoSuchFnProc(_) => 29,
         BBCBasicError::ChannelNotOpen(_) => 222,

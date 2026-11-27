@@ -3070,15 +3070,7 @@ impl Executor {
 
         // Check parameter count
         if args.len() != func.params.len() {
-            return Err(BBCBasicError::SyntaxError {
-                message: format!(
-                    "Function {} expects {} parameters, got {}",
-                    name,
-                    func.params.len(),
-                    args.len()
-                ),
-                line: None,
-            });
+            return Err(BBCBasicError::Arguments);
         }
 
         // Evaluate all arguments in the caller scope, before a parameter

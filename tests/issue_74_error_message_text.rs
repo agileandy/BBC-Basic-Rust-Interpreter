@@ -281,7 +281,7 @@ fn test_error_in_until_condition_shows_its_text() {
 fn test_procedure_argument_count_has_the_line() {
     assert_eq!(
         error_of(&["10 PROCa(1, 2)", "20 END", "30 DEF PROCa(X)", "40 ENDPROC"]),
-        "Procedure a expects 1 parameters, got 2 at line 10"
+        "Arguments at line 10"
     );
 }
 
