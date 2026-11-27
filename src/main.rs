@@ -206,7 +206,7 @@ fn resolve_program_path(filename: &str) -> String {
     }
 }
 
-/// Save current program to a .bbas file
+/// Save current program to a file (.bbas added if no extension)
 fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     if program.is_empty() {
         return Err("No program to save".to_string());
@@ -215,8 +215,8 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     let path = resolve_program_path(filename);
 
     // Open file for writing
-    let mut file =
-        std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut file = std::fs::File::create(&path)
+        .map_err(|e| format!("Failed to create file {}: {}", path, e))?;
 
     // Write each line (detokenized)
     use std::io::Write;
@@ -231,7 +231,7 @@ fn save_program(program: &ProgramStore, filename: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Load program from a .bbas file
+/// Load program from a file (.bbas added if no extension)
 fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String> {
     let path = resolve_program_path(filename);
 
@@ -270,7 +270,7 @@ fn load_program(program: &mut ProgramStore, filename: &str) -> Result<(), String
     Ok(())
 }
 
-/// Catalog all .bbas files in current directory
+/// Catalog all .bbas and .bas files in current directory
 fn catalog_files() -> Result<(), String> {
     let paths = std::fs::read_dir(".").map_err(|e| format!("Failed to read directory: {}", e))?;
 
@@ -291,7 +291,7 @@ fn catalog_files() -> Result<(), String> {
         let filename = path.file_name();
         let filename_str = filename.to_string_lossy();
 
-        if filename_str.ends_with(".bbas") {
+        if filename_str.ends_with(".bbas") || filename_str.ends_with(".bas") {
             let metadata = path
                 .metadata()
                 .map_err(|e| format!("Failed to read metadata: {}", e))?;
@@ -321,7 +321,7 @@ fn catalog_files() -> Result<(), String> {
     }
 
     if count == 0 {
-        println!("(no .bbas files found)");
+        println!("(no .bbas or .bas files found)");
     } else {
         println!("\n{} file(s)", count);
     }
@@ -344,7 +344,7 @@ fn print_help() {
     println!("  SAVE \"filename\"          - Save program to filename.bbas");
     println!("  LOAD \"filename\"          - Load program from filename.bbas");
     println!("  CHAIN \"filename\"         - Load and run program");
-    println!("  *CAT                     - List all .bbas files");
+    println!("  *CAT                     - List all .bbas and .bas files");
     println!();
     println!("Immediate Mode (no line numbers):");
     println!("  A% = 42                  - Execute immediately");

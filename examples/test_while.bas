@@ -1,5 +1,5 @@
-REM Test WHILE...ENDWHILE loops
-REM This test demonstrates the WHILE loop functionality
+1 REM Test WHILE...ENDWHILE loops
+2 REM This test demonstrates the WHILE loop functionality
 
 10 REM Test 1: Basic WHILE loop counting from 1 to 5
 20 PRINT "Test 1: Basic WHILE loop"
