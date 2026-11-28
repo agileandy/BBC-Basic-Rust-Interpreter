@@ -10,7 +10,7 @@ use super::theme;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Padding, Paragraph};
 use ratatui::Frame;
 use std::cell::Cell;
 
@@ -151,7 +151,7 @@ impl Help {
     /// Draw the help screen over the area of the pane.
     pub(super) fn draw(&self, frame: &mut Frame, area: Rect) {
         frame.render_widget(Clear, area);
-        let inner = Block::new().borders(Borders::ALL).inner(area);
+        let inner = help_block().inner(area);
         if columns_fit(inner) {
             self.max_scroll.set(0);
             draw_block(frame, area, " Keys: press a key to close ");
@@ -181,14 +181,20 @@ impl Help {
     }
 }
 
-/// The border and the title of the help screen.
+/// The background of the help screen, with no border (issue #203). The
+/// first row is for the title, and one column at each side stays empty.
+fn help_block() -> Block<'static> {
+    Block::new()
+        .padding(Padding::new(1, 1, 1, 0))
+        .style(theme::text())
+}
+
+/// The background and the title of the help screen.
 fn draw_block(frame: &mut Frame, area: Rect, title: &'static str) {
-    let block = Block::new()
-        .borders(Borders::ALL)
-        .border_style(theme::dim())
-        .title(Span::styled(title, theme::highlight()))
-        .style(theme::text());
-    frame.render_widget(block, area);
+    frame.render_widget(help_block(), area);
+    let title_area = Rect::new(area.x + 1, area.y, area.width.saturating_sub(1), 1);
+    let title = Line::from(Span::styled(title, theme::highlight()));
+    frame.render_widget(Paragraph::new(title), title_area);
 }
 
 /// The keys of the frame in 3 columns, and the keys of each mode in one

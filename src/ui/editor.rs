@@ -17,7 +17,7 @@ use std::cell::Cell;
 /// The smallest width of the line number column.
 const NUMBER_WIDTH: usize = 5;
 /// The text between the line number column and the statements.
-const BAR: &str = " │ ";
+const BAR: &str = "  ";
 /// The text for a typed tab character.
 const TAB_TEXT: &str = "  ";
 /// The page for Page Up and Page Down before the first draw.
@@ -64,7 +64,7 @@ impl EditorPane {
     /// lines and the size of the program in bytes.
     pub fn status(&self, document: &Document) -> String {
         format!(
-            "Ln {} Col {} │ {} lines │ {} bytes",
+            "Ln {} Col {}   {} lines   {} bytes",
             self.row + 1,
             self.col + 1,
             document.lines().len(),

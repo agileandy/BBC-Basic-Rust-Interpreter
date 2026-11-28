@@ -23,7 +23,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -807,11 +807,11 @@ impl RunPane {
     }
 
     /// The part of the pane for the text screen. A pane that is wider than
-    /// the screen of the mode has the screen in the centre, with a dim
-    /// border at each side if there is space. A pane that is narrower shows
-    /// the left part, and the status line says so. A pane that is higher
-    /// than the screen of the mode has the screen at the top.
-    fn screen_area(&self, frame: &mut Frame, area: Rect, mode: Option<ScreenMode>) -> Rect {
+    /// the screen of the mode has the screen in the centre, with no border
+    /// (issue #203). A pane that is narrower shows the left part, and the
+    /// status line says so. A pane that is higher than the screen of the
+    /// mode has the screen at the top.
+    fn screen_area(&self, area: Rect, mode: Option<ScreenMode>) -> Rect {
         self.cut.set(None);
         let Some(mode) = mode else {
             return area;
@@ -823,15 +823,7 @@ impl RunPane {
             return Rect::new(area.x, area.y, area.width, rows);
         }
         let x = area.x + (area.width - columns) / 2;
-        let screen = Rect::new(x, area.y, columns, rows);
-        if area.width >= columns + 2 {
-            let border = Rect::new(x - 1, area.y, columns + 2, rows);
-            let block = Block::new()
-                .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(theme::dim());
-            frame.render_widget(block, border);
-        }
-        screen
+        Rect::new(x, area.y, columns, rows)
     }
 
     fn page(&self) -> usize {
@@ -847,7 +839,7 @@ impl RunPane {
         let screen = &self.screen;
         frame.render_widget(Paragraph::new("").style(theme::text()), area);
         let pane = area;
-        let area = self.screen_area(frame, pane, screen.mode);
+        let area = self.screen_area(pane, screen.mode);
         // The picture and the text screen of the mode share one rectangle,
         // if the picture stays readable (issue #200)
         let picture_area = match screen.mode {

@@ -88,9 +88,9 @@ fn type_three_lines_and_read_the_screen() {
     type_lines(&mut app, "10 PRINT \"A\"", &["PRINT \"B\"", "END"]);
     assert_eq!(lines(&app), ["10 PRINT \"A\"", "20 PRINT \"B\"", "30 END"]);
     let (buffer, _) = draw(&app, 80, 24);
-    assert_eq!(row_text(&buffer, 1).trim_end(), "   10 │ PRINT \"A\"");
-    assert_eq!(row_text(&buffer, 2).trim_end(), "   20 │ PRINT \"B\"");
-    assert_eq!(row_text(&buffer, 3).trim_end(), "   30 │ END");
+    assert_eq!(row_text(&buffer, 1).trim_end(), "   10  PRINT \"A\"");
+    assert_eq!(row_text(&buffer, 2).trim_end(), "   20  PRINT \"B\"");
+    assert_eq!(row_text(&buffer, 3).trim_end(), "   30  END");
 }
 
 #[test]
@@ -99,18 +99,18 @@ fn the_line_number_has_a_dim_colour_and_the_text_is_white() {
     let (buffer, _) = draw(&app, 80, 24);
     assert_eq!(buffer[(3, 1)].symbol(), "1");
     assert_eq!(buffer[(3, 1)].fg, Color::DarkGray);
-    assert_eq!(buffer[(8, 1)].symbol(), "E");
-    assert_eq!(buffer[(8, 1)].fg, Color::White);
-    assert_eq!(buffer[(8, 1)].bg, Color::Black);
+    assert_eq!(buffer[(7, 1)].symbol(), "E");
+    assert_eq!(buffer[(7, 1)].fg, Color::White);
+    assert_eq!(buffer[(7, 1)].bg, Color::Black);
 }
 
 #[test]
 fn the_screen_cursor_follows_the_text_cursor() {
     let mut app = app_with_lines(&["10 PRINT 1"]);
-    // After the "P": the number column is 5 wide, then " │ ".
+    // After the "P": the number column is 5 wide, then 2 spaces.
     keys(&mut app, KeyCode::Left, 6);
     assert_eq!(app.cursor(), (0, 4));
-    assert_eq!(draw(&app, 80, 24).1, (9, 1));
+    assert_eq!(draw(&app, 80, 24).1, (8, 1));
     // In the line number
     app.key(press(KeyCode::Home));
     assert_eq!(draw(&app, 80, 24).1, (3, 1));
@@ -328,16 +328,16 @@ fn a_text_of_200_lines_scrolls() {
     assert_eq!(app.document().lines().len(), 200);
     let (buffer, cursor) = draw(&app, 80, 24);
     let text = screen_text(&buffer);
-    assert!(text.contains(" 2000 │ PRINT 2000"), "{text}");
+    assert!(text.contains(" 2000  PRINT 2000"), "{text}");
     assert!(
-        !(1..23).any(|row| row_text(&buffer, row).trim_end() == "   10 │ PRINT 10"),
+        !(1..23).any(|row| row_text(&buffer, row).trim_end() == "   10  PRINT 10"),
         "{text}"
     );
-    assert_eq!(row_text(&buffer, 22).trim_end(), " 2000 │ PRINT 2000");
+    assert_eq!(row_text(&buffer, 22).trim_end(), " 2000  PRINT 2000");
     assert_eq!(cursor.1, 22);
     app.key(ctrl_key(KeyCode::Home));
     let (buffer, cursor) = draw(&app, 80, 24);
-    assert_eq!(row_text(&buffer, 1).trim_end(), "   10 │ PRINT 10");
+    assert_eq!(row_text(&buffer, 1).trim_end(), "   10  PRINT 10");
     assert_eq!(cursor, (3, 1));
 }
 
@@ -349,12 +349,12 @@ fn a_long_line_scrolls_to_the_right_and_back() {
     let row = row_text(&buffer, 1);
     assert!(row.contains("xEND"), "{row:?}");
     assert!(!row.contains("REM"), "{row:?}");
-    assert!(row.starts_with("   10 │ "), "{row:?}");
+    assert!(row.starts_with("   10  "), "{row:?}");
     assert_eq!(cursor, (79, 1));
     app.key(press(KeyCode::Home));
     let (buffer, _) = draw(&app, 80, 24);
     let row = row_text(&buffer, 1);
-    assert!(row.starts_with("   10 │ REM xxx"), "{row:?}");
+    assert!(row.starts_with("   10  REM xxx"), "{row:?}");
 }
 
 #[test]
@@ -488,7 +488,7 @@ fn the_status_line_shows_the_line_the_column_the_lines_and_the_bytes() {
     // 4 + 1 bytes, then 2 bytes end the program.
     let status = row_text(&draw(&app, 100, 24).0, 23);
     assert!(
-        status.contains("Ln 2 Col 6 │ 2 lines │ 13 bytes"),
+        status.contains("Ln 2 Col 6   2 lines   13 bytes"),
         "{status:?}"
     );
 }
