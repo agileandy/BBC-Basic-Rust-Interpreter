@@ -21,6 +21,6 @@ mod output;
 mod pitch;
 
 pub use chip::{Chip, CHIP_TICK_HZ, DEFAULT_SAMPLE_RATE};
-pub use engine::SoundEngine;
+pub use engine::{SoundEngine, StartedNote};
 pub use output::{lock, ClockOutput, OutputFactory, SharedEngine, SoundOutput};
 pub use pitch::{divider, frequency, CHIP_CLOCK_HZ};

@@ -469,6 +469,13 @@ pub enum Statement {
         channel: Expression,
         position: Expression,
     },
+    /// SOUND channel, amplitude, pitch, duration - queue a note (issue #208)
+    Sound {
+        channel: Expression,
+        amplitude: Expression,
+        pitch: Expression,
+        duration: Expression,
+    },
     /// INSTALL file$ - load a library file of procedures and functions
     /// (issue #185). The run loop executes it.
     Install { file: Expression },
@@ -1165,6 +1172,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         // COLOUR statement
         Token::Keyword(0xFB) => parse_colour_statement(&tokens[1..], line.line_number),
 
+        // SOUND statement (issue #208)
+        Token::Keyword(0xD4) => parse_sound_statement(&tokens[1..], line.line_number),
+
         // VDU statement
         Token::Keyword(0xEF) => parse_vdu_statement(&tokens[1..], line.line_number),
 
@@ -1189,6 +1199,12 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
             0x93 => parse_rectangle_statement(&tokens[1..], line.line_number),
             // STEREO statement
             0xA2 => parse_stereo_statement(&tokens[1..], line.line_number),
+            // TEMPO, VOICES and VOICE are statements of BBC BASIC V for the
+            // sound system of an Archimedes (issue #208)
+            0x9F..=0xA1 => Err(BBCBasicError::SyntaxError {
+                message: "Not supported on the BBC Micro".to_string(),
+                line: line.line_number,
+            }),
             // ELLIPSE statement
             0x9D => parse_ellipse_statement(&tokens[1..], line.line_number),
             // QUIT statement
@@ -2596,6 +2612,31 @@ fn parse_stereo_statement(tokens: &[Token], line_number: Option<u16>) -> Result<
         Err(args) => Err(BBCBasicError::SyntaxError {
             message: format!(
                 "STEREO requires 2 parameters (channel, position), got {}",
+                args.len()
+            ),
+            line: line_number,
+        }),
+    }
+}
+
+/// Parse SOUND channel, amplitude, pitch, duration (issue #208)
+fn parse_sound_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let args = if tokens.is_empty() {
+        Vec::new()
+    } else {
+        parse_comma_separated_expressions(tokens, line_number)?
+    };
+
+    match <[Expression; 4]>::try_from(args) {
+        Ok([channel, amplitude, pitch, duration]) => Ok(Statement::Sound {
+            channel,
+            amplitude,
+            pitch,
+            duration,
+        }),
+        Err(args) => Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "SOUND requires 4 parameters (channel, amplitude, pitch, duration), got {}",
                 args.len()
             ),
             line: line_number,

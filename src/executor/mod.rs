@@ -8,6 +8,7 @@ mod console;
 #[cfg_attr(test, allow(dead_code))]
 mod key_input;
 mod matrix;
+mod sound;
 mod structures;
 mod vdu;
 mod whole_array;
@@ -778,6 +779,8 @@ pub struct Executor {
     collections: CollectionStore,
     // The screen and keyboard of a front end (issue #171). None: stdout and stdin
     console: console::ConsoleSlot,
+    // The sound engine and its output, from the first SOUND (issue #208)
+    sound: sound::SoundSlot,
 }
 
 impl Executor {
@@ -829,6 +832,7 @@ impl Executor {
             vdu_queue: Vec::new(),
             collections: CollectionStore::new(),
             console: console::ConsoleSlot::default(),
+            sound: sound::SoundSlot::default(),
         }
     }
 
@@ -1001,6 +1005,12 @@ impl Executor {
                 self.eval_integer(position)?;
                 Ok(())
             }
+            Statement::Sound {
+                channel,
+                amplitude,
+                pitch,
+                duration,
+            } => self.execute_sound(channel, amplitude, pitch, duration),
             Statement::MakeDirectory { path } => {
                 crate::filesystem::make_directory(&self.eval_string(path)?)
             }
@@ -3816,6 +3826,9 @@ impl Executor {
             // ADVAL(0) gives the fire buttons, ADVAL(n) with n > 0 gives an
             // analogue channel, and ADVAL(n) with n < 0 gives the state of a
             // buffer. This build has no analogue hardware, so each one gives 0.
+            // ADVAL(-5) to ADVAL(-8) give the free bytes in the queues of sound
+            // channels 0 to 3 (issue #208). BASIC 2 gives the low byte to
+            // OSBYTE 128, which reads buffers 4 to 7 for X = &FB to &F8.
             "ADVAL" => {
                 if args.len() != 1 {
                     return Err(BBCBasicError::SyntaxError {
@@ -3823,8 +3836,11 @@ impl Executor {
                         line: None,
                     });
                 }
-                self.eval_integer(&args[0])?;
-                Ok(0)
+                let buffer = self.eval_integer(&args[0])? as u8;
+                Ok(match buffer {
+                    0xF8..=0xFB => self.sound_free_space(0xFB - buffer),
+                    _ => 0,
+                })
             }
             // GET waits for one key and gives its code. At the end of input it gives -1.
             "GET" if args.is_empty() => Ok(self.next_key()?.map_or(-1, |key| key as i32)),
