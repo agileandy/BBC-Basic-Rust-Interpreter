@@ -965,6 +965,11 @@ fn error_text_at(error: &BBCBasicError, at: &str) -> String {
 /// Set ERR, ERL and the text for REPORT to an error. `error_line` is the
 /// value of ERL (see `RunLines::erl`).
 fn record_error(executor: &mut Executor, error: &BBCBasicError, error_line: u16) {
+    // BASIC acknowledges an Escape, and the MOS then flushes the sound
+    // queues (issue #208)
+    if *error == BBCBasicError::Escape {
+        executor.flush_sound();
+    }
     executor.set_last_error(
         error_number(error),
         error_line,
