@@ -1631,15 +1631,16 @@ fn parse_next_statement(tokens: &[Token], line_number: Option<u16>) -> Result<St
 
 /// Parse the control variable of a FOR or a NEXT at `pos`: a variable, an
 /// array element such as `A(I%)`, or a structure member such as `p.x`
-/// (issue #198). Give the target and the position after it. `None` is a
-/// token at `pos` that does not start a target.
+/// (issue #198) or `t{(1)}.x` (issue #193). Give the target and the
+/// position after it. `None` is a token at `pos` that does not start a
+/// target.
 fn parse_loop_target(
     tokens: &[Token],
     pos: usize,
     line_number: Option<u16>,
 ) -> Result<Option<(InputItem, usize)>> {
     match tokens.get(pos) {
-        Some(Token::Member(..)) => {
+        Some(_) if structures::starts_member_path(tokens, pos) => {
             let (path, last) = structures::parse_member_path(tokens, pos, line_number)?;
             Ok(Some((InputItem::Member(path), last + 1)))
         }

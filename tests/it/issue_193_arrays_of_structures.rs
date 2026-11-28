@@ -485,3 +485,18 @@ fn test_the_real_binary_runs_an_array_of_structures() {
     ));
     assert!(output.contains("10 20\n"), "output: {output}");
 }
+
+// A member of an element as the FOR variable (issue #198)
+
+#[test]
+fn test_a_member_of_an_element_is_a_for_variable() {
+    let (result, output) = run(&[
+        "10 DIM t{(2) x, n%, a(1)}",
+        "20 FOR t{(1)}.x = 1 TO 3 : PRINT ;t{(1)}.x; : NEXT",
+        "30 I% = 2 : FOR t{(I%)}.n% = 5 TO 6 : NEXT t{(I%)}.n%",
+        "40 FOR t{(0)}.a(1) = 1 TO 2 STEP 0.5 : NEXT",
+        "50 PRINT \" \";t{(1)}.x;\" \";t{(2)}.n%;\" \";t{(0)}.a(1);\" \";t{(0)}.x",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "123 4 7 2.5 0\n");
+}
