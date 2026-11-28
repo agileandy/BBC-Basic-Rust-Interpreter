@@ -66,7 +66,7 @@ fn status_row(buffer: &Buffer) -> String {
 fn pane_rows(app: &App) -> Vec<String> {
     let buffer = draw(app, 80, 24);
     let mut rows: Vec<String> = (1..buffer.area.height - 1)
-        .map(|row| row_text(&buffer, row).trim_matches([' ', '│']).to_string())
+        .map(|row| row_text(&buffer, row).trim_matches(' ').to_string())
         .collect();
     while rows.last().is_some_and(String::is_empty) {
         rows.pop();
@@ -196,10 +196,9 @@ fn mode_7_gives_a_40_column_screen_in_the_centre() {
     assert_eq!(x, 20, "{}", screen_text(&buffer));
     // The text wraps at 40 columns: Z is at column 6 of the next row
     assert_eq!(find_char(&buffer, 'Z'), (20 + 5, y + 1));
-    // A dim border at each side of the screen
-    assert_eq!(buffer[(19, y)].symbol(), "│");
-    assert_eq!(buffer[(60, y)].symbol(), "│");
-    assert_eq!(buffer[(19, y)].fg, Color::DarkGray);
+    // No border at the sides of the screen (issue #203)
+    assert_eq!(buffer[(19, y)].symbol(), " ");
+    assert_eq!(buffer[(60, y)].symbol(), " ");
 }
 
 #[test]

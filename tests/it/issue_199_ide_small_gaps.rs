@@ -67,7 +67,7 @@ fn status_row(app: &App) -> String {
 fn pane_rows(app: &App) -> Vec<String> {
     let buffer = draw(app, 80, 24);
     let mut rows: Vec<String> = (1..buffer.area.height - 1)
-        .map(|row| row_text(&buffer, row).trim_matches([' ', '│']).to_string())
+        .map(|row| row_text(&buffer, row).trim_matches(' ').to_string())
         .collect();
     if rows.starts_with(&BANNER.map(String::from)) {
         rows.drain(..BANNER.len());

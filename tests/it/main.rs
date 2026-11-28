@@ -188,3 +188,4 @@ mod issue_198_for_target_variable;
 mod issue_200_text_cursor_rows;
 mod issue_186_library_data_and_search;
 mod issue_193_arrays_of_structures;
+mod issue_203_ide_no_line_characters;
