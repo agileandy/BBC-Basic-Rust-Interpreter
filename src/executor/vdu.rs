@@ -121,9 +121,42 @@ impl Executor {
         if !console.move_cursor(movement) {
             return false;
         }
-        if let Some((column, _)) = console.cursor() {
+        self.follow_console_column();
+        true
+    }
+
+    /// If the console has a text screen with rows, set the print column to
+    /// the column of the console, and give true. Else give false.
+    fn follow_console_column(&mut self) -> bool {
+        let cursor = self.console.0.as_mut().and_then(|console| console.cursor());
+        if let Some((column, _)) = cursor {
             self.column = column;
         }
+        cursor.is_some()
+    }
+
+    /// Print text to a console that has a text screen with rows (issue
+    /// #205), and give true. Each control character (0 to 31 and 127), and
+    /// each byte that a VDU command waits for, goes through the VDU path, as
+    /// for VDU. The print column is then the column of the console. With no
+    /// such console, do nothing and give false.
+    pub(super) fn print_to_screen(&mut self, text: &str) -> bool {
+        if !self.follow_console_column() {
+            return false;
+        }
+        let mut start = 0;
+        for (index, ch) in text.char_indices() {
+            let code = u32::from(ch);
+            if code < 32 || code == 127 || !self.vdu_queue.is_empty() {
+                self.write_text(&text[start..index]);
+                // A command of bytes from a string cannot give an error: each
+                // parameter is in its range
+                let _ = self.send_vdu_byte(code as u8);
+                start = index + ch.len_utf8();
+            }
+        }
+        self.write_text(&text[start..]);
+        self.follow_console_column();
         true
     }
 

@@ -1417,8 +1417,11 @@ impl Executor {
 
     /// Print output (to buffer in test mode, to stdout in production).
     /// A line feed (code 10) keeps the column. A carriage return (code 13)
-    /// sets it to 0.
+    /// sets it to 0. A console with a text cursor gets the text as VDU codes.
     fn print_output(&mut self, text: &str) {
+        if self.print_to_screen(text) {
+            return;
+        }
         for ch in text.chars() {
             match ch {
                 '\n' => {}
@@ -1497,7 +1500,8 @@ impl Executor {
 
     /// Print a new line (BBC codes 13 and 10) and set the column to 0
     fn print_new_line(&mut self) {
-        self.print_output("\n");
+        // Not the VDU path: in a console, code 10 does not go to column 0
+        self.write_text("\n");
         self.column = 0;
     }
 

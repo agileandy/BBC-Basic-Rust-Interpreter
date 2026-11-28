@@ -191,3 +191,4 @@ mod issue_193_arrays_of_structures;
 mod issue_203_ide_no_line_characters;
 mod issue_206_for_each_array_name;
 mod issue_204_compound_assignment;
+mod issue_205_string_control_codes;
