@@ -12,12 +12,18 @@
 use super::Executor;
 use crate::error::{BBCBasicError, Result};
 use crate::parser::Expression;
-use crate::sound::{lock, ClockOutput, OutputFactory, SharedEngine, SoundEngine, SoundOutput};
+use crate::sound::{
+    lock, ClockOutput, OutputFactory, SharedEngine, SoundEngine, SoundOutput, WavRecorder,
+};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The time between two tries of a SOUND to a full queue.
 const WAIT_STEP: Duration = Duration::from_millis(2);
+
+/// The wait for the end of the sound stops if the output takes no samples
+/// for this time (issue #211).
+const STALL_LIMIT: Duration = Duration::from_secs(1);
 
 /// The free bytes of an empty queue, for ADVAL before the first SOUND.
 const EMPTY_QUEUE: i32 = 15;
@@ -29,6 +35,8 @@ pub(super) struct SoundSlot {
     engine: Option<SharedEngine>,
     output: Option<Box<dyn SoundOutput>>,
     factory: Option<OutputFactory>,
+    /// The recording to a WAV file, for each engine (issue #211)
+    recorder: Option<WavRecorder>,
 }
 
 impl std::fmt::Debug for SoundSlot {
@@ -36,6 +44,7 @@ impl std::fmt::Debug for SoundSlot {
         f.debug_struct("SoundSlot")
             .field("started", &self.engine.is_some())
             .field("factory", &self.factory.is_some())
+            .field("recorder", &self.recorder.is_some())
             .finish()
     }
 }
@@ -60,6 +69,46 @@ impl Executor {
         self.sound.engine = None;
     }
 
+    /// Record each sample of the sound to `recorder` (issue #211). The
+    /// recording takes the samples that the output takes, so its timing is
+    /// the timing of the output.
+    pub fn record_sound(&mut self, recorder: WavRecorder) {
+        if let Some(engine) = &self.sound.engine {
+            lock(engine).record_samples(recorder.clone());
+        }
+        self.sound.recorder = Some(recorder);
+    }
+
+    /// Wait until no sound will change (`SoundEngine::is_idle`), for a
+    /// maximum of `limit`. Before the first SOUND, there is no wait. If the
+    /// output takes no samples for `STALL_LIMIT`, the sound cannot end, so
+    /// the wait stops.
+    pub fn wait_for_sound(&mut self, limit: Duration) {
+        let Some(engine) = self.sound.engine.clone() else {
+            return;
+        };
+        let now = std::time::Instant::now;
+        let deadline = now() + limit;
+        let mut clock = lock(&engine).clock();
+        let mut last_change = now();
+        loop {
+            {
+                let engine = lock(&engine);
+                if engine.is_idle() {
+                    return;
+                }
+                if engine.clock() != clock {
+                    clock = engine.clock();
+                    last_change = now();
+                }
+            }
+            if now() >= deadline || last_change.elapsed() >= STALL_LIMIT {
+                return;
+            }
+            std::thread::sleep(WAIT_STEP);
+        }
+    }
+
     /// Empty all sound queues and silence all channels (Escape).
     pub fn flush_sound(&mut self) {
         if let Some(engine) = &self.sound.engine {
@@ -78,7 +127,11 @@ impl Executor {
         if let Some(engine) = &self.sound.engine {
             return Arc::clone(engine);
         }
-        let engine: SharedEngine = Arc::new(Mutex::new(SoundEngine::default()));
+        let mut new_engine = SoundEngine::default();
+        if let Some(recorder) = &self.sound.recorder {
+            new_engine.record_samples(recorder.clone());
+        }
+        let engine: SharedEngine = Arc::new(Mutex::new(new_engine));
         let output = match self.sound.factory.take() {
             Some(factory) => factory(Arc::clone(&engine)),
             None => Box::new(ClockOutput::start(Arc::clone(&engine))),
@@ -129,6 +182,27 @@ impl Executor {
         let [envelope, shape @ ..] = numbers;
         lock(&self.sound_engine()).set_envelope(envelope, shape);
         Ok(())
+    }
+
+    /// Tell if `name(...)` is a call of NOTE (issue #211). An array named NOTE
+    /// has priority, so that old programs do not change.
+    pub(super) fn is_note_call(&self, name: &str) -> bool {
+        name == "NOTE" && !self.variables.has_array(name)
+    }
+
+    /// NOTE(name$): the pitch value of SOUND for a note name such as "C4" or
+    /// "F#3" (an extension, issue #211).
+    pub(super) fn eval_note(&mut self, args: &[Expression]) -> Result<i32> {
+        let [name] = args else {
+            return Err(BBCBasicError::SyntaxError {
+                message: "NOTE requires 1 argument".to_string(),
+                line: None,
+            });
+        };
+        let name = self.eval_string(name)?;
+        crate::sound::map::note_pitch(&name)
+            .map(i32::from)
+            .map_err(BBCBasicError::BadNote)
     }
 
     /// ADVAL of a sound queue: the free bytes in the queue of `channel`.

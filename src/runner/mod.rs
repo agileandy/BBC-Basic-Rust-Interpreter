@@ -1749,6 +1749,8 @@ fn error_number(error: &BBCBasicError) -> i32 {
         // Bad library is an extension error. The manual names no error for
         // INSTALL, and BBC BASIC does not use ERR 158 (issue #185).
         BBCBasicError::BadLibrary(_) => 158,
+        // Bad note is an extension error. BBC BASIC does not use ERR 159 (issue #211).
+        BBCBasicError::BadNote(_) => 159,
         // The number that the statement ERROR gives (issue #201)
         BBCBasicError::UserError { number, .. } => i32::from(*number),
         _ => 255,

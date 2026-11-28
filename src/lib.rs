@@ -133,6 +133,9 @@ pub mod error {
         SingularMatrix,
         // A library file of INSTALL with a fault, with its place (issue #185)
         BadLibrary(String),
+        // NOTE(name$) of a name that is not a note, or of a note out of the
+        // range of SOUND, with the name (issue #211)
+        BadNote(String),
         // The Escape key stopped the program. ERR 17 (issue #171).
         Escape,
 
@@ -195,6 +198,7 @@ pub mod error {
                 BBCBasicError::MissingNext => write!(f, "FOR EACH without matching NEXT"),
                 BBCBasicError::SingularMatrix => write!(f, "Singular matrix"),
                 BBCBasicError::BadLibrary(detail) => write!(f, "Bad library: {}", detail),
+                BBCBasicError::BadNote(name) => write!(f, "Bad note: {}", name),
                 BBCBasicError::Escape => write!(f, "Escape"),
                 BBCBasicError::BadCall => write!(f, "Bad call"),
                 BBCBasicError::UserError { message, .. } => write!(f, "{}", message),
