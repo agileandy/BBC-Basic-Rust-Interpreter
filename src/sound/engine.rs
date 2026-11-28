@@ -18,6 +18,7 @@
 use super::chip::{Chip, DEFAULT_SAMPLE_RATE};
 use super::envelope::{envelope_index, note_volume, Envelope, Shape, ENVELOPES};
 use super::pitch::divider;
+use super::wav::WavRecorder;
 use std::collections::VecDeque;
 
 /// The ticks of the sound interrupt each second.
@@ -125,6 +126,8 @@ pub struct SoundEngine {
     record: Option<Vec<StartedNote>>,
     /// A SOUND statement waits for a place in a queue
     waiting: bool,
+    /// The recording of each sample that `fill` gives (issue #211)
+    recorder: Option<WavRecorder>,
 }
 
 impl Default for SoundEngine {
@@ -147,6 +150,7 @@ impl SoundEngine {
             tick_base: 0,
             record: None,
             waiting: false,
+            recorder: None,
         }
     }
 
@@ -188,6 +192,9 @@ impl SoundEngine {
             }
             let count = ((next_tick - self.clock) as usize).min(buffer.len() - done);
             self.chip.render(&mut buffer[done..done + count]);
+            if let Some(recorder) = &self.recorder {
+                recorder.write(&buffer[done..done + count], self.chip.sample_rate());
+            }
             done += count;
             self.clock += count as u64;
         }
@@ -276,6 +283,19 @@ impl SoundEngine {
     /// started a record.
     pub fn take_notes(&mut self) -> Vec<StartedNote> {
         self.record.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// True if no sound will change: each channel ended, or plays a note of
+    /// duration 255, which only a flush stops.
+    pub fn is_idle(&self) -> bool {
+        self.channels
+            .iter()
+            .all(|channel| !channel.active || channel.duration == ENDLESS)
+    }
+
+    /// Give each sample that `fill` makes to `recorder` (issue #211).
+    pub fn record_samples(&mut self, recorder: WavRecorder) {
+        self.recorder = Some(recorder);
     }
 
     /// MOS `clearSoundChannelBuffer` and `flushSoundBufferX`.
@@ -778,6 +798,27 @@ mod tests {
 
         assert!(run(&mut engine, 2).iter().all(|s| *s == 0.0));
         assert!((0..4).all(|channel| engine.free_space(channel) == 15));
+    }
+
+    #[test]
+    fn the_engine_is_idle_when_each_sound_ended_or_has_no_end() {
+        let mut engine = recording();
+        assert!(engine.is_idle(), "a new engine");
+        assert!(engine.try_sound(1, -15, 89, 2));
+        assert!(!engine.is_idle(), "a queued note");
+        run(&mut engine, 5);
+        assert!(!engine.is_idle(), "a note that plays");
+        run(&mut engine, 10);
+        assert!(engine.is_idle(), "the note ended");
+
+        assert!(engine.try_sound(2, -15, 89, 255));
+        run(&mut engine, 1);
+        assert!(engine.is_idle(), "a note with no end and an empty queue");
+        assert!(engine.try_sound(2, -15, 89, 1));
+        assert!(
+            engine.is_idle(),
+            "a note after a note with no end never plays"
+        );
     }
 
     #[test]

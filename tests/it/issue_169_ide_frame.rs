@@ -291,9 +291,10 @@ fn unknown_argument_gives_the_usage_line_and_code_2() {
     for args in [&["--foo"][..], &["--ide", "a.bbas", "b.bbas"][..]] {
         let (code, stdout, stderr) = run_binary_with_args(args, "EXIT\n");
         assert_eq!(code, Some(2), "{args:?}");
-        assert_eq!(
-            stderr,
-            "Usage: bbc-basic-interpreter [--no-sound] [--ide [file]]\n"
+        // The lines of the sound flags (issue #211) come after this line
+        assert!(
+            stderr.starts_with("Usage: bbc-basic-interpreter [--no-sound] [--ide [file]]\n"),
+            "{stderr}"
         );
         assert_eq!(stdout, "", "{args:?}");
     }
