@@ -16,6 +16,10 @@ const SOUND_USAGE: &str =
 /// notes of the longest duration in each queue take about 64 seconds.
 const RECORDING_TAIL_LIMIT: Duration = Duration::from_secs(80);
 
+/// The longest wait at the end for the queued notes to end, with no
+/// recording (issue #212). An interrupt ends the process at once.
+const DRAIN_LIMIT: Duration = Duration::from_secs(60);
+
 /// A request of the sound mapping tool (issue #211).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MapRequest {
@@ -178,9 +182,9 @@ fn run_on_thread(stack_size: usize, run: impl FnOnce() + Send + 'static) -> io::
     Ok(())
 }
 
-/// Read and run lines until EXIT, QUIT or the end of input. With a
-/// recorder, record the sound, and at the end wait for the sound to end and
-/// close the file.
+/// Read and run lines until EXIT, QUIT or the end of input, then wait for
+/// the queued notes to end. With a recorder, record the sound, and at the
+/// end close the file.
 fn run_interpreter(recorder: Option<WavRecorder>) {
     println!("BBC BASIC Interpreter v0.1.0");
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
@@ -223,8 +227,13 @@ fn run_interpreter(recorder: Option<WavRecorder>) {
         }
     }
 
+    // EXIT, QUIT and the end of input: let the queued notes end (issue #212)
+    executor.wait_for_sound(if recorder.is_some() {
+        RECORDING_TAIL_LIMIT
+    } else {
+        DRAIN_LIMIT
+    });
     if let Some(recorder) = recorder {
-        executor.wait_for_sound(RECORDING_TAIL_LIMIT);
         executor.stop_sound();
         if let Err(error) = recorder.finish() {
             eprintln!("Error: the sound recording failed: {error}");
