@@ -1,6 +1,8 @@
-//! The SOUND statement and the sound queues of ADVAL (issue #208).
+//! The SOUND statement and the sound queues of ADVAL (issue #208), and the
+//! ENVELOPE statement (issue #209).
 //!
-//! The executor makes the sound engine and its output at the first SOUND.
+//! The executor makes the sound engine and its output at the first SOUND or
+//! ENVELOPE, because the engine keeps the envelopes.
 //! The output comes from the factory of a front end, or is a `ClockOutput`
 //! with no device. The notes continue after the program ends, as on a BBC
 //! Micro: RUN, NEW and END do not flush the queues (BASIC 2 has no call to
@@ -115,6 +117,18 @@ impl Executor {
             }
             std::thread::sleep(WAIT_STEP);
         }
+    }
+
+    /// ENVELOPE N, T, PI1, PI2, PI3, PN1, PN2, PN3, AA, AD, AS, AR, ALA,
+    /// ALD: keep envelope N in the engine, as OSWORD 8 does.
+    pub(super) fn execute_envelope(&mut self, values: &[Expression; 14]) -> Result<()> {
+        let mut numbers = [0i32; 14];
+        for (number, value) in numbers.iter_mut().zip(values) {
+            *number = self.eval_integer(value)?;
+        }
+        let [envelope, shape @ ..] = numbers;
+        lock(&self.sound_engine()).set_envelope(envelope, shape);
+        Ok(())
     }
 
     /// ADVAL of a sound queue: the free bytes in the queue of `channel`.

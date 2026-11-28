@@ -476,6 +476,10 @@ pub enum Statement {
         pitch: Expression,
         duration: Expression,
     },
+    /// ENVELOPE N, T, PI1, PI2, PI3, PN1, PN2, PN3, AA, AD, AS, AR, ALA,
+    /// ALD - define the shape of the pitch and the amplitude of a note
+    /// (issue #209)
+    Envelope { values: Box<[Expression; 14]> },
     /// INSTALL file$ - load a library file of procedures and functions
     /// (issue #185). The run loop executes it.
     Install { file: Expression },
@@ -1174,6 +1178,9 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
 
         // SOUND statement (issue #208)
         Token::Keyword(0xD4) => parse_sound_statement(&tokens[1..], line.line_number),
+
+        // ENVELOPE statement (issue #209)
+        Token::Keyword(0xE2) => parse_envelope_statement(&tokens[1..], line.line_number),
 
         // VDU statement
         Token::Keyword(0xEF) => parse_vdu_statement(&tokens[1..], line.line_number),
@@ -2637,6 +2644,30 @@ fn parse_sound_statement(tokens: &[Token], line_number: Option<u16>) -> Result<S
         Err(args) => Err(BBCBasicError::SyntaxError {
             message: format!(
                 "SOUND requires 4 parameters (channel, amplitude, pitch, duration), got {}",
+                args.len()
+            ),
+            line: line_number,
+        }),
+    }
+}
+
+/// Parse ENVELOPE with its 14 values (issue #209). BASIC 2 reads 14
+/// integer values with commas between them (BASIC 2 ROM at &B472).
+fn parse_envelope_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
+    let args = if tokens.is_empty() {
+        Vec::new()
+    } else {
+        parse_comma_separated_expressions(tokens, line_number)?
+    };
+
+    match <[Expression; 14]>::try_from(args) {
+        Ok(values) => Ok(Statement::Envelope {
+            values: Box::new(values),
+        }),
+        Err(args) => Err(BBCBasicError::SyntaxError {
+            message: format!(
+                "ENVELOPE requires 14 parameters (N, T, PI1, PI2, PI3, PN1, PN2, PN3, \
+                 AA, AD, AS, AR, ALA, ALD), got {}",
                 args.len()
             ),
             line: line_number,

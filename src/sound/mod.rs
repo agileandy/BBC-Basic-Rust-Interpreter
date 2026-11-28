@@ -18,6 +18,7 @@
 mod chip;
 mod device;
 mod engine;
+mod envelope;
 mod output;
 mod pitch;
 
