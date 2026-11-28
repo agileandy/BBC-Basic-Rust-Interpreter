@@ -570,6 +570,15 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (_, Token::Separator('}')) => false,
                 // The = of a copy or a prototype: b{} = a{} (issue #193)
                 (Token::Separator('}'), Token::Operator('=')) => true,
+                // A keyword after a closing brace: THEN b{} = a{} ELSE
+                (Token::Separator('}'), Token::Keyword(_)) => true,
+                // The first member after the dimensions of an array of
+                // structures: DIM t{(2) x,y} (issue #193)
+                (Token::Separator(')'), Token::Identifier(_))
+                    if closes_structure_dimensions(&tokenized_line.tokens[..i]) =>
+                {
+                    true
+                }
                 (Token::Keyword(FN | PROC), Token::Identifier(_)) => false,
                 // A keyword after a closing bracket: IF (A) THEN
                 (Token::Separator(')'), Token::Keyword(_)) => true,
@@ -1007,6 +1016,25 @@ fn is_structure_name(
         && !keyword_map.contains_key(word)
         && !extended_map.contains_key(word)
         && split_proc_or_fn(word).is_none()
+}
+
+/// True if the last token is a `)` whose `(` follows a `{`: the end of the
+/// dimensions of an array of structures, as in `t{(2) x}` (issue #193)
+fn closes_structure_dimensions(tokens: &[Token]) -> bool {
+    let mut depth = 0;
+    for (index, token) in tokens.iter().enumerate().rev() {
+        match token {
+            Token::Separator(')') => depth += 1,
+            Token::Separator('(') => {
+                depth -= 1;
+                if depth == 0 {
+                    return index > 0 && tokens[index - 1] == Token::Separator('{');
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// True if the character can start a member name: a letter or `_`, as at

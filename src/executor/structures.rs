@@ -8,7 +8,10 @@
 use super::{format_number, format_real, real_to_integer, Executor};
 use crate::error::{BBCBasicError, Result};
 use crate::parser::{Expression, InputItem, MemberDecl, MemberPath};
-use crate::variables::{zero_members, MemberValue, Members, StructureId, Variable, VariableStore};
+use crate::variables::{
+    check_dim_space, element_bytes, zero_members, MemberValue, Members, StructureId, Variable,
+    VariableStore,
+};
 use std::collections::HashMap;
 
 /// The index values of a member path: the element of an array of
@@ -123,6 +126,23 @@ impl Executor {
     ) -> Result<()> {
         let sizes = self.eval_dimensions(dimensions)?;
         let members = self.make_members(members)?;
+        self.dim_structure_array(name, sizes, members)
+    }
+
+    /// Declare an array of structures. The manual, section "LOCAL and
+    /// PRIVATE structures", permits a LOCAL array of structures, but this
+    /// interpreter has no LOCAL form for one: `LOCAL t{}` declares a
+    /// structure. So an array DIM of a LOCAL structure gives Bad DIM, and
+    /// makes no global array.
+    fn dim_structure_array(
+        &mut self,
+        name: &str,
+        sizes: Vec<usize>,
+        members: Members,
+    ) -> Result<()> {
+        if self.variables.is_local_structure_without_dim(name) {
+            return Err(BBCBasicError::BadDim);
+        }
         self.variables.dim_structure_array(name, sizes, members)
     }
 
@@ -141,7 +161,7 @@ impl Executor {
         }
         let sizes = self.eval_dimensions(dimensions)?;
         let members = self.prototype_members(prototype)?;
-        self.variables.dim_structure_array(name, sizes, members)
+        self.dim_structure_array(name, sizes, members)
     }
 
     /// The members of a prototype, with each value at 0 or an empty string.
@@ -220,6 +240,7 @@ impl Executor {
                 MemberDecl::Scalar(name) => MemberValue::scalar(name),
                 MemberDecl::Array { name, dimensions } => {
                     let sizes = self.eval_dimensions(dimensions)?;
+                    check_dim_space(&sizes, element_bytes(name))?;
                     MemberValue::array(name, sizes)
                 }
                 MemberDecl::Structure { members, .. } => {

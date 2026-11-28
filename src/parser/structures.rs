@@ -104,17 +104,25 @@ fn syntax_error(message: &str, line_number: Option<u16>) -> BBCBasicError {
 }
 
 /// A `{` in a statement that is not a DIM is a reference to a whole
-/// structure or to an element. An element `name{(` can be in each statement
-/// (issue #193): the parse checks the rest. A statement with PROC, FN, DEF
-/// or LOCAL can have `name{}` (issue #194), and so can a copy `b{} = a{}`.
-/// Each other reference gives a syntax error.
+/// structure or to an element. These references are valid, and each other
+/// reference gives a syntax error:
+/// - a member of an element, such as `t{(1)}.x` (issue #193)
+/// - the 2 sides of a copy `b{} = a{}` that starts a statement (issue #193)
+/// - `name{}` in a statement with PROC, FN, DEF or LOCAL (issue #194)
+/// - an element with no member, `t{(1)}`, as a whole argument of a PROC or
+///   FN (issue #193)
 pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16>) -> Result<()> {
-    let has_dim = tokens.contains(&Token::Keyword(0xDE));
+    if tokens.contains(&Token::Keyword(0xDE)) {
+        return Ok(());
+    }
     let routine = has_routine_keyword(tokens);
+    let copies = copy_braces(tokens);
     let valid = tokens.iter().enumerate().all(|(index, token)| {
-        *token != Token::Separator('{') || is_valid_reference(tokens, index, routine)
+        *token != Token::Separator('{')
+            || copies.contains(&index)
+            || is_valid_reference(tokens, index, routine)
     });
-    if !has_dim && !valid {
+    if !valid {
         return Err(syntax_error(
             "A reference to a whole structure is not supported",
             line_number,
@@ -123,24 +131,75 @@ pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16
     Ok(())
 }
 
-/// True if the `{` at `index` is after a name and starts an element
-/// `name{(`, or is a `name{}` in a statement with a PROC, FN, DEF or LOCAL
-/// (`routine`) or at a side of the `=` of a copy
+/// The position of the `}` of the reference whose `{` is at `index`:
+/// `name{}` or `name{(indices)}`. `None` is a reference that is not
+/// complete: the parse gives its error.
+fn reference_end(tokens: &[Token], index: usize) -> Option<usize> {
+    match tokens.get(index + 1)? {
+        Token::Separator('}') => Some(index + 1),
+        Token::Separator('(') => {
+            let close = find_closing_bracket(tokens, index + 1)?;
+            (tokens.get(close + 1) == Some(&Token::Separator('}'))).then_some(close + 1)
+        }
+        _ => None,
+    }
+}
+
+/// The positions of the `{` of each copy `b{} = a{}` (issue #193): a
+/// reference that starts a statement and has `=` after it, and the
+/// reference after the `=`. A statement starts at the first token, after
+/// `:`, and after THEN or ELSE.
+fn copy_braces(tokens: &[Token]) -> Vec<usize> {
+    let mut braces = Vec::new();
+    for start in 0..tokens.len() {
+        let starts_statement = start == 0
+            || matches!(
+                tokens[start - 1],
+                Token::Separator(':') | Token::Keyword(0x8B | 0x8C)
+            );
+        if !starts_statement
+            || !matches!(tokens[start], Token::Identifier(_))
+            || tokens.get(start + 1) != Some(&Token::Separator('{'))
+        {
+            continue;
+        }
+        let Some(end) = reference_end(tokens, start + 1) else {
+            continue;
+        };
+        if tokens.get(end + 1) != Some(&Token::Operator('=')) {
+            continue;
+        }
+        braces.push(start + 1);
+        if matches!(tokens.get(end + 2), Some(Token::Identifier(_)))
+            && tokens.get(end + 3) == Some(&Token::Separator('{'))
+        {
+            braces.push(end + 3);
+        }
+    }
+    braces
+}
+
+/// True if the `{` at `index` is after a name and is a member of an
+/// element, a `name{}` in a statement with a PROC, FN, DEF or LOCAL
+/// (`routine`), or an element that is a whole argument in such a statement
 fn is_valid_reference(tokens: &[Token], index: usize, routine: bool) -> bool {
     if index == 0 || !matches!(tokens[index - 1], Token::Identifier(_)) {
         return false;
     }
-    match tokens.get(index + 1) {
-        Some(Token::Separator('(')) => true,
-        Some(Token::Separator('}')) => {
-            let target = tokens.get(index + 2) == Some(&Token::Operator('='));
-            let source = index >= 3
-                && tokens[index - 2] == Token::Operator('=')
-                && tokens[index - 3] == Token::Separator('}');
-            routine || target || source
-        }
-        _ => false,
+    let Some(end) = reference_end(tokens, index) else {
+        // An element that is not complete: the parse gives the error
+        return tokens.get(index + 1) == Some(&Token::Separator('('));
+    };
+    if end == index + 1 {
+        return routine;
     }
+    if matches!(tokens.get(end + 1), Some(Token::Member(structure, _)) if structure.is_empty()) {
+        return true;
+    }
+    routine
+        && index >= 2
+        && matches!(tokens[index - 2], Token::Separator('(' | ','))
+        && matches!(tokens.get(end + 1), Some(Token::Separator(')' | ',')))
 }
 
 /// True if the tokens have PROC, FN, DEF or LOCAL

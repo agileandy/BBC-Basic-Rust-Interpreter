@@ -67,7 +67,6 @@ fn test_a_wrong_use_of_an_index_is_bad_use_of_structure() {
         "20 PRINT p{(1)}.x",
         "20 t.x = 1",
         "20 PRINT t.x",
-        "20 PRINT t{(1)}",
         "20 PROCa(p{(0)})",
     ] {
         let (result, _) = run(&[
@@ -347,6 +346,82 @@ fn test_a_whole_structure_in_an_expression_is_still_a_syntax_error() {
     }
 }
 
+#[test]
+fn test_a_whole_structure_beside_an_equals_is_a_copy_only_at_the_start() {
+    let whole = "Syntax error at line 20: A reference to a whole structure is not supported";
+    for line in [
+        "20 PRINT a{} = b{}",
+        "20 IF a{} = b{} THEN PRINT 1",
+        "20 x = 1 + a{} = b{}",
+        "20 PRINT 1 : PRINT a{} = b{}",
+    ] {
+        let (result, _) = run(&["10 DIM a{x}, b{x}", line]);
+        assert_eq!(result, Err(whole.to_string()), "{line}");
+    }
+    let (result, output) = run(&[
+        "10 DIM a{x}, b{x} : a.x = 4",
+        "20 PRINT ;1; : b{} = a{} : IF 1 THEN PRINT ;b.x ELSE b{} = a{}",
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "14\n");
+}
+
+#[test]
+fn test_an_element_with_no_member_is_only_an_argument_or_a_copy() {
+    let whole = "Syntax error at line 20: A reference to a whole structure is not supported";
+    for line in [
+        "20 PRINT t{(1)}",
+        "20 x = t{(1)}",
+        "20 READ t{(1)}",
+        "20 SWAP t{(1)}, t{(2)}",
+        "20 INPUT t{(1)}",
+        "20 PRINT FNa(t{(1)} + 1)",
+        "20 IF t{(1)} = a{} THEN PRINT 1",
+    ] {
+        let (result, _) = run(&["10 DIM t{(2) x}, a{x}", line]);
+        assert_eq!(result, Err(whole.to_string()), "{line}");
+    }
+}
+
+// LOCAL and the DIM space
+
+#[test]
+fn test_an_array_of_structures_for_a_local_structure_is_bad_dim() {
+    // The manual names no LOCAL form for an array of structures in this
+    // interpreter: LOCAL t{} declares a structure, so its DIM must be a
+    // structure.
+    for dim in ["50 DIM t{(2) x}", "50 DIM t{(2)} = a{}"] {
+        let (result, _) = run(&[
+            "10 DIM a{x}",
+            "20 PROCa",
+            "30 END",
+            "40 DEF PROCa : LOCAL t{}",
+            dim,
+            "60 ENDPROC",
+        ]);
+        assert_eq!(result, Err("Bad DIM at line 50".to_string()), "{dim}");
+    }
+}
+
+#[test]
+fn test_a_dim_that_is_too_large_gives_no_room() {
+    for dim in [
+        "10 DIM t{(100000000) x, s$}",
+        "10 DIM t{(3) a(100000000)}",
+        "10 DIM s{a$(100000000)}",
+        "10 DIM a(100000000)",
+        "10 DIM a$(30000000)",
+        "10 DIM a%(100000, 100000, 100000)",
+        "10 DIM a{x} : DIM t{(100000000)} = a{}",
+    ] {
+        let (result, _) = run(&[dim]);
+        assert_eq!(result, Err("No room at line 10".to_string()), "{dim}");
+    }
+    let (result, output) = run(&["10 DIM a(1000000), t{(10000) x}", "20 PRINT ;a(1000000)"]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(output, "0\n");
+}
+
 // Tokens, LIST and LVAR
 
 #[test]
@@ -371,12 +446,15 @@ fn test_tokens_of_a_member_of_an_element() {
 #[test]
 fn test_list_shows_the_lines_as_typed() {
     for line in [
-        "10 DIM training{(1000)features(10),label%,name$}",
+        "10 DIM training{(1000) features(10),label%,name$}",
         "20 training{(I%)}.label% = 1",
         "30 PRINT g{(1,2)}.p.x;t{(1)}.a(2)",
         "40 DIM b{} = a{},c{(10)} = a{},n{name$,pos{} = a{}}",
         "50 b{} = a{}",
         "60 PROCmove(t{(3)},1)",
+        "70 IF 1 THEN b{} = a{} ELSE a{} = b{}",
+        "80 DIM t{(2) x,y},g{(N%,2) p{x}}",
+        "90 IF 1 THEN DIM p{x} ELSE PRINT a(1)",
     ] {
         let listed = detokenize(&tokenize(line).unwrap()).unwrap();
         assert_eq!(listed, line);

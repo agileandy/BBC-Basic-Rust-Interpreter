@@ -175,6 +175,63 @@ fn linear_index(dimensions: &[usize], indices: &[usize]) -> Result<usize> {
     Ok(position)
 }
 
+/// The most memory that one array, or one array of structures, can use
+/// (issue #193). A larger DIM gives No room (ERR 11): the manual of BBC
+/// BASIC for Windows gives ERR 11, "DIM space", when an array or a
+/// structure has no room (bbcwinc.html#dimspace).
+pub const DIM_SPACE_BYTES: usize = 512 * 1024 * 1024;
+
+/// The memory of one element of an array of structures, apart from its
+/// members. Measured on 2026-11-28 with the maximum resident size of the
+/// debug binary (macOS `/usr/bin/time -l`): `DIM t{(999999) x}` used about
+/// 203 MB, and each more member about 90 bytes for each element.
+const STRUCTURE_BYTES: usize = 120;
+
+/// The memory of one structure member, apart from the elements of an
+/// array member. See `STRUCTURE_BYTES`.
+const MEMBER_BYTES: usize = 96;
+
+/// The memory of one array element, by the suffix of the name: an integer,
+/// a string (its descriptor, with no text) or a real
+pub fn element_bytes(name: &str) -> usize {
+    if name.ends_with('%') {
+        std::mem::size_of::<i32>()
+    } else if name.ends_with('$') {
+        std::mem::size_of::<String>()
+    } else {
+        std::mem::size_of::<f64>()
+    }
+}
+
+/// The element count of a DIM with these dimensions, if the elements of
+/// `bytes_each` bytes fit in `DIM_SPACE_BYTES`. Too many give No room.
+pub fn check_dim_space(dimensions: &[usize], bytes_each: usize) -> Result<usize> {
+    let count = dimensions
+        .iter()
+        .try_fold(1usize, |count, &size| count.checked_mul(size))
+        .ok_or(BBCBasicError::NoRoom)?;
+    match count.checked_mul(bytes_each) {
+        Some(bytes) if bytes <= DIM_SPACE_BYTES => Ok(count),
+        _ => Err(BBCBasicError::NoRoom),
+    }
+}
+
+/// The memory of these members, with the elements of each array member
+fn members_bytes(members: &Members) -> usize {
+    members
+        .iter()
+        .map(|(name, value)| {
+            MEMBER_BYTES
+                + match value {
+                    MemberValue::Structure(inner) => members_bytes(inner),
+                    MemberValue::Variable(variable) => variable.dimensions().map_or(0, |sizes| {
+                        sizes.iter().product::<usize>() * element_bytes(name)
+                    }),
+                }
+        })
+        .sum()
+}
+
 /// The members with the names and the format of these members, with each
 /// value at 0 or an empty string: a structure from a prototype (issue #193)
 pub fn zero_members(members: &Members) -> Members {
@@ -363,10 +420,7 @@ impl VariableStore {
         if self.structure_arrays.contains_key(name) {
             return Err(BBCBasicError::BadDim);
         }
-        let count = dimensions
-            .iter()
-            .try_fold(1usize, |count, &size| count.checked_mul(size))
-            .ok_or(BBCBasicError::BadDim)?;
+        let count = check_dim_space(&dimensions, STRUCTURE_BYTES + members_bytes(&members))?;
         let first = self.next_structure_id;
         self.next_structure_id += count;
         let elements: Vec<StructureId> = (first..first + count).collect();
@@ -702,6 +756,12 @@ impl VariableStore {
                 line: None,
             });
         }
+        let element_bytes = match var_type {
+            VarType::Integer => element_bytes("%"),
+            VarType::Real => element_bytes(""),
+            VarType::String => element_bytes("$"),
+        };
+        check_dim_space(&dimensions, element_bytes)?;
 
         let variable = match var_type {
             VarType::Integer => Variable::new_integer_array(dimensions),
