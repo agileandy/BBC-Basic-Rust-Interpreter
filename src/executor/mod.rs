@@ -71,6 +71,20 @@ enum SwapPlace<'a> {
 /// The name of a SWAP target, which gives its type, and its place
 type SwapLocation<'a> = (&'a str, SwapPlace<'a>);
 
+/// The control variable of a FOR loop, with the index values that the FOR
+/// evaluated one time (issue #198). 2 loops with equal targets are the same
+/// loop, so `FOR A(1)` and `FOR A(2)` are 2 loops.
+#[derive(Debug, Clone, PartialEq)]
+enum ForTarget {
+    Variable(String),
+    Element(String, Vec<usize>),
+    Member {
+        structure: String,
+        members: Vec<String>,
+        indices: Vec<usize>,
+    },
+}
+
 /// Convert a value to the type of the variable `name`. A number and a
 /// string give "Type mismatch". A real that does not fit in an integer gives
 /// "Too big".
@@ -654,7 +668,7 @@ enum ForKind {
 /// One entry of the FOR stack
 #[derive(Debug, Clone, PartialEq)]
 struct ForLoop {
-    variable: String,
+    target: ForTarget,
     kind: ForKind,
     /// The FOR statement. The run loop sets it (set_for_loop_line).
     position: Position,
@@ -1531,14 +1545,16 @@ impl Executor {
     /// Execute FOR statement
     fn execute_for(
         &mut self,
-        variable: &str,
+        variable: &InputItem,
         start: &Expression,
         end: &Expression,
         step: Option<&Expression>,
     ) -> Result<()> {
-        // A `%` loop variable is an integer loop: the values are truncated.
+        // The indices of an element or a member are evaluated one time, here
+        let target = self.for_target(variable)?;
+        // An integer loop variable is an integer loop: the values are truncated.
         // Any other loop variable is a real loop: the values keep their fraction parts.
-        let integer_loop = variable.ends_with('%');
+        let integer_loop = self.for_target_is_integer(&target)?;
         let (start_val, end_val, step_val) = if integer_loop {
             let start_val = self.eval_integer(start)?;
             let end_val = self.eval_integer(end)?;
@@ -1562,18 +1578,18 @@ impl Executor {
         };
 
         // Make room first, so that a FOR that fails changes nothing
-        self.open_for_loop(variable)?;
-        if integer_loop {
+        self.open_for_loop(&target)?;
+        let start_value = if integer_loop {
             // The value came from an i32, so the conversion has no loss
-            self.variables
-                .set_integer_var(variable.to_string(), start_val as i32);
+            Variable::Integer(start_val as i32)
         } else {
-            self.variables.set_real_var(variable.to_string(), start_val);
-        }
+            Variable::Real(start_val)
+        };
+        self.store_for_value(&target, start_value)?;
 
         // The run loop sets the FOR position (set_for_loop_line)
         self.for_loops.push(ForLoop {
-            variable: variable.to_string(),
+            target,
             kind: ForKind::Count {
                 end: end_val,
                 step: step_val,
@@ -1591,11 +1607,12 @@ impl Executor {
     fn execute_for_each(&mut self, variable: &str, collection: &Expression) -> Result<()> {
         let handle = self.eval_integer(collection)?;
         // Make room first, as FOR does (issue 151)
-        self.open_for_loop(variable)?;
+        let target = ForTarget::Variable(variable.to_string());
+        self.open_for_loop(&target)?;
         self.set_each_variable(variable, handle, 0)?;
         // The run loop sets the FOR position (set_for_loop_line)
         self.for_loops.push(ForLoop {
-            variable: variable.to_string(),
+            target,
             kind: ForKind::Each { handle, index: 0 },
             position: Position::line_start(0),
         });
@@ -1651,7 +1668,10 @@ impl Executor {
         // to the element after this one. As for a FOR loop, an error does
         // not close the inner loops.
         self.for_loops[loop_index].kind = ForKind::Each { handle, index };
-        let variable = self.for_loops[loop_index].variable.clone();
+        // A FOR EACH loop has a plain variable (execute_for_each)
+        let ForTarget::Variable(variable) = self.for_loops[loop_index].target.clone() else {
+            return Err(BBCBasicError::TypeMismatch);
+        };
         let has_element = self.set_each_variable(&variable, handle, index)?;
         // A NEXT for an outer loop closes the loops inside it
         self.for_loops.truncate(loop_index + 1);
@@ -1687,17 +1707,19 @@ impl Executor {
     ///
     /// `NEXT a, b` handles each name in order. It stops at the first loop
     /// that continues. If each loop ends, the program continues after the NEXT.
-    fn execute_next(&mut self, variables: &[String]) -> Result<()> {
+    fn execute_next(&mut self, variables: &[InputItem]) -> Result<()> {
         // If no variables specified, use the most recent FOR loop
         if variables.is_empty() {
             let Some(newest) = self.for_loops.last() else {
                 return Err(BBCBasicError::NoFor);
             };
-            return self.next_loop(newest.variable.clone());
+            return self.next_loop(newest.target.clone());
         }
 
-        for var_name in variables {
-            self.next_loop(var_name.clone())?;
+        for variable in variables {
+            // The indices of a named element are evaluated now (issue #198)
+            let target = self.for_target(variable)?;
+            self.next_loop(target)?;
             if self.next_loop_line.is_some() {
                 break;
             }
@@ -1706,18 +1728,18 @@ impl Executor {
         Ok(())
     }
 
-    /// Step the FOR loop of one variable. Set the position to jump back to
+    /// Step the FOR loop of one target. Set the position to jump back to
     /// if the loop continues, or clear it if the loop ends.
-    fn next_loop(&mut self, var_name: String) -> Result<()> {
+    fn next_loop(&mut self, target: ForTarget) -> Result<()> {
         // Find the matching FOR loop. A loop of the variable EACH keeps the
         // old meaning of `NEXT EACH`. With no such loop, `NEXT EACH` matches
         // the newest FOR EACH loop (issue #141).
         let loop_index = self
             .for_loops
             .iter()
-            .rposition(|entry| entry.variable == var_name)
+            .rposition(|entry| entry.target == target)
             .or_else(|| {
-                (var_name == "EACH")
+                matches!(&target, ForTarget::Variable(name) if name == "EACH")
                     .then(|| {
                         self.for_loops
                             .iter()
@@ -1739,30 +1761,32 @@ impl Executor {
         };
 
         // Increment the loop variable
-        let next_val = if var_name.ends_with('%') {
-            let current_val = self
-                .variables
-                .get_integer_var(&var_name)
-                .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
-            // The step of an integer loop is an i32 value (see execute_for).
-            // If the next value overflows, it is past the end value. The loop
-            // ends and the variable keeps its last value.
-            match current_val.checked_add(step_val as i32) {
-                Some(next_val) => {
-                    self.variables.set_integer_var(var_name.clone(), next_val);
-                    f64::from(next_val)
+        let target = self.for_loops[loop_index].target.clone();
+        let current = self.for_value(&target)?;
+        let next_val = match current {
+            Variable::Integer(current_val) if self.for_target_is_integer(&target)? => {
+                // The step of an integer loop is an i32 value (see execute_for).
+                // If the next value overflows, it is past the end value. The loop
+                // ends and the variable keeps its last value.
+                match current_val.checked_add(step_val as i32) {
+                    Some(next_val) => {
+                        self.store_for_value(&target, Variable::Integer(next_val))?;
+                        f64::from(next_val)
+                    }
+                    None => f64::from(current_val) + step_val,
                 }
-                None => f64::from(current_val) + step_val,
             }
-        } else {
-            let current_val = self
-                .variables
-                .get_real_var(&var_name)
-                .or_else(|| self.variables.get_integer_var(&var_name).map(f64::from))
-                .ok_or_else(|| BBCBasicError::NoSuchVariable(var_name.clone()))?;
-            let next_val = current_val + step_val;
-            self.variables.set_real_var(var_name.clone(), next_val);
-            next_val
+            Variable::Integer(current_val) => {
+                let next_val = f64::from(current_val) + step_val;
+                self.store_for_value(&target, Variable::Real(next_val))?;
+                next_val
+            }
+            Variable::Real(current_val) => {
+                let next_val = current_val + step_val;
+                self.store_for_value(&target, Variable::Real(next_val))?;
+                next_val
+            }
+            _ => return Err(BBCBasicError::TypeMismatch),
         };
 
         // Check if loop is complete. A step of 0 uses the test for a positive step,
@@ -1786,6 +1810,71 @@ impl Executor {
         }
 
         Ok(())
+    }
+
+    /// The FOR target of a FOR or NEXT name, with its index values evaluated
+    /// now. The manual of BBC BASIC for Windows (bbcwin5.html, FOR): "Any
+    /// numeric assignable item may be used as the control variable".
+    fn for_target(&mut self, item: &InputItem) -> Result<ForTarget> {
+        let (name, place) = self.swap_location(item)?;
+        Ok(match place {
+            SwapPlace::Variable => ForTarget::Variable(name.to_string()),
+            SwapPlace::Element(indices) => ForTarget::Element(name.to_string(), indices),
+            SwapPlace::Member(path, indices) => ForTarget::Member {
+                structure: path.structure.clone(),
+                members: path.members.clone(),
+                indices,
+            },
+        })
+    }
+
+    /// Tell if a FOR target holds an integer. A variable has the type of its
+    /// name. An element or a member has the type of its value, so it must
+    /// exist. A string target gives Type mismatch.
+    fn for_target_is_integer(&self, target: &ForTarget) -> Result<bool> {
+        let value = match target {
+            ForTarget::Variable(name) if name.ends_with('$') => {
+                return Err(BBCBasicError::TypeMismatch)
+            }
+            ForTarget::Variable(name) => return Ok(name.ends_with('%')),
+            _ => self.for_value(target)?,
+        };
+        match value {
+            Variable::Integer(_) => Ok(true),
+            Variable::Real(_) => Ok(false),
+            _ => Err(BBCBasicError::TypeMismatch),
+        }
+    }
+
+    /// The value of a FOR target. A variable that does not exist gives
+    /// "No such variable".
+    fn for_value(&self, target: &ForTarget) -> Result<Variable> {
+        match target {
+            ForTarget::Variable(name) => self.swap_value(&(name, SwapPlace::Variable)),
+            ForTarget::Element(name, indices) => self.variables.get_array_element(name, indices),
+            ForTarget::Member {
+                structure,
+                members,
+                indices,
+            } => self.variables.get_member(structure, members, indices),
+        }
+    }
+
+    /// Store a value of the type of the target in a FOR target
+    fn store_for_value(&mut self, target: &ForTarget, value: Variable) -> Result<()> {
+        match target {
+            ForTarget::Variable(name) => self.store_input_value(name, None, value),
+            ForTarget::Element(name, indices) => {
+                self.variables.set_array_element(name, indices, value)
+            }
+            ForTarget::Member {
+                structure,
+                members,
+                indices,
+            } => self
+                .variables
+                .set_member(structure, members, indices, value),
+        }
     }
 
     /// Execute INPUT statement. A prompt text shows as it is. A variable that
@@ -4394,14 +4483,14 @@ impl Executor {
         }
     }
 
-    /// Make room for a new FOR loop of `variable`. As in BBC BASIC, an open
-    /// loop of the same variable in the current call closes, with each loop
+    /// Make room for a new FOR loop of `target`. As in BBC BASIC, an open
+    /// loop of the same target in the current call closes, with each loop
     /// above it. Otherwise give No room at the stack limit.
-    fn open_for_loop(&mut self, variable: &str) -> Result<()> {
+    fn open_for_loop(&mut self, target: &ForTarget) -> Result<()> {
         let floor = self.loop_floor().for_depth.min(self.for_loops.len());
         if let Some(index) = self.for_loops[floor..]
             .iter()
-            .rposition(|open| open.variable == variable)
+            .rposition(|open| open.target == *target)
         {
             self.for_loops.truncate(floor + index);
         }
@@ -5723,7 +5812,7 @@ mod tests {
         // RED: Test FOR I% = 1 TO 10
         let mut executor = Executor::new();
         let stmt = Statement::For {
-            variable: "I%".to_string(),
+            variable: InputItem::Variable("I%".to_string()),
             start: Expression::Integer(1),
             end: Expression::Integer(10),
             step: None,
@@ -5736,7 +5825,10 @@ mod tests {
 
         // Loop should be on the stack
         assert_eq!(executor.for_loops.len(), 1);
-        assert_eq!(executor.for_loops[0].variable, "I%");
+        assert_eq!(
+            executor.for_loops[0].target,
+            ForTarget::Variable("I%".to_string())
+        );
         assert_eq!(
             executor.for_loops[0].kind,
             ForKind::Count {
@@ -5762,7 +5854,7 @@ mod tests {
             }
         }
         let next = Statement::Next {
-            variables: vec!["N".to_string()],
+            variables: vec![InputItem::Variable("N".to_string())],
         };
 
         assert_eq!(
@@ -5784,7 +5876,7 @@ mod tests {
         // RED: Test FOR I% = 10 TO 1 STEP -1
         let mut executor = Executor::new();
         let stmt = Statement::For {
-            variable: "I%".to_string(),
+            variable: InputItem::Variable("I%".to_string()),
             start: Expression::Integer(10),
             end: Expression::Integer(1),
             step: Some(Expression::Integer(-1)),
@@ -5813,7 +5905,7 @@ mod tests {
 
         // FOR I% = 1 TO 3
         let for_stmt = Statement::For {
-            variable: "I%".to_string(),
+            variable: InputItem::Variable("I%".to_string()),
             start: Expression::Integer(1),
             end: Expression::Integer(3),
             step: None,
@@ -5823,7 +5915,7 @@ mod tests {
 
         // NEXT I%
         let next_stmt = Statement::Next {
-            variables: vec!["I%".to_string()],
+            variables: vec![InputItem::Variable("I%".to_string())],
         };
 
         // First NEXT: I% should become 2
@@ -5847,7 +5939,7 @@ mod tests {
         // RED: Test NEXT without FOR should error
         let mut executor = Executor::new();
         let stmt = Statement::Next {
-            variables: vec!["I%".to_string()],
+            variables: vec![InputItem::Variable("I%".to_string())],
         };
 
         let result = executor.execute_statement(&stmt);
@@ -5861,7 +5953,7 @@ mod tests {
         let mut executor = Executor::new();
 
         let for_stmt = Statement::For {
-            variable: "I%".to_string(),
+            variable: InputItem::Variable("I%".to_string()),
             start: Expression::Integer(5),
             end: Expression::Integer(1),
             step: Some(Expression::Integer(-1)),
@@ -5870,7 +5962,7 @@ mod tests {
         assert_eq!(executor.get_variable_int("I%").unwrap(), 5);
 
         let next_stmt = Statement::Next {
-            variables: vec!["I%".to_string()],
+            variables: vec![InputItem::Variable("I%".to_string())],
         };
 
         // Countdown: 5, 4, 3, 2, 1

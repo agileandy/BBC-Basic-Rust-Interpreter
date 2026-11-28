@@ -235,9 +235,10 @@ pub enum Statement {
     Input { items: Vec<InputItem> },
     /// INPUT LINE statement: each variable gets one full reply line
     InputLine { items: Vec<InputItem> },
-    /// FOR loop
+    /// FOR loop. The control variable is a variable, an array element or
+    /// a structure member (issue #198), never a prompt text or a new line.
     For {
-        variable: String,
+        variable: InputItem,
         start: Expression,
         end: Expression,
         step: Option<Expression>,
@@ -248,8 +249,8 @@ pub enum Statement {
         variable: String,
         collection: Expression,
     },
-    /// NEXT statement
-    Next { variables: Vec<String> },
+    /// NEXT statement. Each name has the form of a FOR control variable.
+    Next { variables: Vec<InputItem> },
     /// IF statement
     If {
         condition: Expression,
@@ -967,7 +968,7 @@ pub fn parse_statement(line: &TokenizedLine) -> Result<Statement> {
         Token::Keyword(0xE3) => parse_for_statement(&tokens[1..], line.line_number),
 
         // NEXT statement
-        Token::Keyword(0xED) => parse_next_statement(&tokens[1..]),
+        Token::Keyword(0xED) => parse_next_statement(&tokens[1..], line.line_number),
 
         // GOTO statement
         Token::Keyword(0xE5) => parse_goto_statement(&tokens[1..], line.line_number),
@@ -1493,8 +1494,6 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         return parse_for_each_statement(&tokens[1..], line_number);
     }
 
-    structures::check_for_variable(tokens, line_number)?;
-
     // FOR variable = start TO end [STEP step]
     if tokens.len() < 5 {
         return Err(BBCBasicError::SyntaxError {
@@ -1503,17 +1502,14 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
         });
     }
 
-    let variable = match &tokens[0] {
-        Token::Identifier(name) => name.clone(),
-        _ => {
-            return Err(BBCBasicError::SyntaxError {
-                message: "Expected variable name after FOR".to_string(),
-                line: line_number,
-            })
-        }
+    let Some((variable, equals)) = parse_loop_target(tokens, 0, line_number)? else {
+        return Err(BBCBasicError::SyntaxError {
+            message: "Expected variable name after FOR".to_string(),
+            line: line_number,
+        });
     };
 
-    if !matches!(tokens[1], Token::Operator('=')) {
+    if !matches!(tokens.get(equals), Some(Token::Operator('='))) {
         return Err(BBCBasicError::SyntaxError {
             message: "Expected '=' in FOR statement".to_string(),
             line: line_number,
@@ -1529,7 +1525,7 @@ fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Sta
             line: line_number,
         })?;
 
-    let start = parse_expression(&tokens[2..to_pos])?;
+    let start = parse_expression(&tokens[equals + 1..to_pos])?;
 
     // Check for STEP keyword
     let step_pos = tokens
@@ -1560,6 +1556,13 @@ fn parse_for_each_statement(tokens: &[Token], line_number: Option<u16>) -> Resul
         message: message.to_string(),
         line: line_number,
     };
+    // Only a count loop accepts an element or a member (issue #198)
+    let is_element = matches!(tokens, [Token::Identifier(_), Token::Separator('('), ..]);
+    if is_element || matches!(tokens.first(), Some(Token::Member(..))) {
+        return Err(syntax_error(
+            "FOR EACH needs a variable name, not an array element or a member",
+        ));
+    }
     let Some(Token::Identifier(variable)) = tokens.first() else {
         return Err(syntax_error("Expected variable name after FOR EACH"));
     };
@@ -1576,7 +1579,7 @@ fn parse_for_each_statement(tokens: &[Token], line_number: Option<u16>) -> Resul
 }
 
 /// Parse NEXT statement
-fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
+fn parse_next_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
     let mut variables = Vec::new();
 
     if tokens.is_empty() {
@@ -1586,21 +1589,47 @@ fn parse_next_statement(tokens: &[Token]) -> Result<Statement> {
 
     // Parse variable list (comma-separated)
     let mut pos = 0;
-    while pos < tokens.len() {
-        match &tokens[pos] {
-            Token::Identifier(name) => {
-                variables.push(name.clone());
-                pos += 1;
-
-                if pos < tokens.len() && matches!(tokens[pos], Token::Separator(',')) {
-                    pos += 1; // skip comma
-                }
-            }
-            _ => break,
+    while let Some((target, after)) = parse_loop_target(tokens, pos, line_number)? {
+        variables.push(target);
+        pos = after;
+        if matches!(tokens.get(pos), Some(Token::Separator(','))) {
+            pos += 1; // skip comma
         }
     }
 
     Ok(Statement::Next { variables })
+}
+
+/// Parse the control variable of a FOR or a NEXT at `pos`: a variable, an
+/// array element such as `A(I%)`, or a structure member such as `p.x`
+/// (issue #198). Give the target and the position after it. `None` is a
+/// token at `pos` that does not start a target.
+fn parse_loop_target(
+    tokens: &[Token],
+    pos: usize,
+    line_number: Option<u16>,
+) -> Result<Option<(InputItem, usize)>> {
+    match tokens.get(pos) {
+        Some(Token::Member(..)) => {
+            let (path, last) = structures::parse_member_path(tokens, pos, line_number)?;
+            Ok(Some((InputItem::Member(path), last + 1)))
+        }
+        Some(Token::Identifier(name))
+            if matches!(tokens.get(pos + 1), Some(Token::Separator('('))) =>
+        {
+            let Some(close) = find_closing_bracket(tokens, pos + 1) else {
+                return Ok(None);
+            };
+            let indices = parse_comma_separated_expressions(&tokens[pos + 2..close], line_number)?;
+            let element = InputItem::ArrayElement {
+                name: name.clone(),
+                indices,
+            };
+            Ok(Some((element, close + 1)))
+        }
+        Some(Token::Identifier(name)) => Ok(Some((InputItem::Variable(name.clone()), pos + 1))),
+        _ => Ok(None),
+    }
 }
 
 /// The target of a GOTO or a GOSUB
@@ -4026,7 +4055,7 @@ mod tests {
         assert!(end_stmt.is_terminating());
 
         let for_stmt = Statement::For {
-            variable: "I".to_string(),
+            variable: InputItem::Variable("I".to_string()),
             start: Expression::Integer(1),
             end: Expression::Integer(10),
             step: None,
@@ -4839,7 +4868,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::For {
-                variable: "I%".to_string(),
+                variable: InputItem::Variable("I%".to_string()),
                 start: Expression::Integer(1),
                 end: Expression::Integer(10),
                 step: None,
@@ -4857,7 +4886,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::For {
-                variable: "I%".to_string(),
+                variable: InputItem::Variable("I%".to_string()),
                 start: Expression::Integer(10),
                 end: Expression::Integer(1),
                 step: Some(Expression::Integer(-1)),
@@ -4875,8 +4904,52 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Next {
-                variables: vec!["I%".to_string()],
+                variables: vec![InputItem::Variable("I%".to_string())],
             }
+        );
+    }
+
+    /// The member `p.x` as a FOR or NEXT target (issue #198)
+    fn member_x() -> InputItem {
+        InputItem::Member(MemberPath {
+            structure: "p".to_string(),
+            members: vec!["x".to_string()],
+            indices: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn test_parse_for_with_an_array_element_and_a_member() {
+        use crate::tokenizer::tokenize;
+        let element = parse_statement(&tokenize("FOR A(I%) = 1 TO 3").unwrap());
+        let member = parse_statement(&tokenize("FOR p.x = 1 TO 3").unwrap());
+        let for_of = |variable| Statement::For {
+            variable,
+            start: Expression::Integer(1),
+            end: Expression::Integer(3),
+            step: None,
+        };
+        let a_of_i = InputItem::ArrayElement {
+            name: "A".to_string(),
+            indices: vec![Expression::Variable("I%".to_string())],
+        };
+        assert_eq!(element, Ok(for_of(a_of_i)));
+        assert_eq!(member, Ok(for_of(member_x())));
+    }
+
+    #[test]
+    fn test_parse_next_with_an_array_element_and_a_member() {
+        use crate::tokenizer::tokenize;
+        let stmt = parse_statement(&tokenize("NEXT A(2), p.x").unwrap());
+        let a_of_2 = InputItem::ArrayElement {
+            name: "A".to_string(),
+            indices: vec![Expression::Integer(2)],
+        };
+        assert_eq!(
+            stmt,
+            Ok(Statement::Next {
+                variables: vec![a_of_2, member_x()],
+            })
         );
     }
 
@@ -6920,7 +6993,7 @@ mod tests {
     fn test_parse_for_each_named_variable_is_a_normal_for() {
         assert!(matches!(
             line_statements("10 FOR EACH = 1 TO 3").as_deref(),
-            Ok([Statement::For { variable, .. }]) if variable == "EACH"
+            Ok([Statement::For { variable, .. }]) if *variable == InputItem::Variable("EACH".to_string())
         ));
     }
 
@@ -6929,7 +7002,7 @@ mod tests {
         assert_eq!(
             line_statements("10 NEXT EACH"),
             Ok(vec![Statement::Next {
-                variables: vec!["EACH".to_string()],
+                variables: vec![InputItem::Variable("EACH".to_string())],
             }])
         );
     }
