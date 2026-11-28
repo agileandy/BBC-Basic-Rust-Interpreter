@@ -242,9 +242,10 @@ impl Link {
         self.send(FromWorker::Screen(fit));
     }
 
-    /// Start a new line if the cursor is not at the start of a line.
+    /// Start a new line if the cursor is not at the start of an empty
+    /// line, so that the prompt does not write over text.
     fn new_line(&mut self) {
-        if self.screen.col > 0 {
+        if !self.screen.at_free_line() {
             self.write("\n");
         }
     }
@@ -407,8 +408,9 @@ impl Console for WorkerConsole {
             .change(ScreenChange::Colours(foreground, background));
     }
 
-    fn move_cursor(&mut self, movement: CursorMove) {
+    fn move_cursor(&mut self, movement: CursorMove) -> bool {
         self.0.borrow_mut().change(ScreenChange::Move(movement));
+        true
     }
 
     fn cursor(&mut self) -> Option<(usize, usize)> {

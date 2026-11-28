@@ -3627,13 +3627,19 @@ impl Executor {
             }
             // RND with no bracket: a random integer over the full 32-bit range
             "RND" if args.is_empty() => Ok(self.rng.borrow_mut().gen::<i32>()),
-            // POS gives the print column. COUNT gives the characters printed
-            // since the last new line. This build has one column counter, so
-            // the two values are the same number.
-            "POS" | "COUNT" if args.is_empty() => Ok(self.column as i32),
-            // VPOS gives the print row: the row of the console text screen
-            // (issue #200). With no console there is no screen model, so it
-            // gives 0.
+            // POS and VPOS give the column and the row of the text cursor of
+            // the console, after a wrap at the last column also (issue #200).
+            // With no console there is no screen model: POS gives the print
+            // column, and VPOS gives 0. COUNT gives the characters printed
+            // since the last new line: the print column.
+            "POS" if args.is_empty() => Ok(self
+                .console
+                .0
+                .as_mut()
+                .and_then(|console| console.cursor())
+                .map_or(self.column, |(column, _)| column)
+                as i32),
+            "COUNT" if args.is_empty() => Ok(self.column as i32),
             "VPOS" if args.is_empty() => Ok(self
                 .console
                 .0

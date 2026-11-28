@@ -172,6 +172,8 @@ impl Screen {
                 }
                 c if c.is_control() => {}
                 c => {
+                    // The cursor is in the grid after each change, but keep
+                    // the print in the grid also if it is not
                     if self.col >= self.width {
                         self.next_row(true);
                     }
@@ -191,7 +193,12 @@ impl Screen {
                         glyphs.resize(col, blank);
                         glyphs.push(glyph);
                     }
+                    // A print in the last column wraps at once, as on a BBC
+                    // Micro: at the last row, the grid scrolls
                     self.col += 1;
+                    if self.col >= self.width {
+                        self.next_row(true);
+                    }
                 }
             }
         }
@@ -219,10 +226,22 @@ impl Screen {
         }
     }
 
+    /// Go one row up, in the same column. At the top row, scroll the grid
+    /// down one row, as on a BBC Micro: the bottom row goes off the grid.
+    fn line_up(&mut self) {
+        if self.row > 0 {
+            self.row -= 1;
+            return;
+        }
+        self.grid.pop();
+        self.grid.insert(0, Row::default());
+    }
+
     /// Move the cursor for VDU 31, TAB(x, y) and the cursor codes. A move
     /// to a place outside the grid does nothing, as on a BBC Micro. Left at
     /// column 0 goes to the last column of the row above, and right at the
-    /// last column goes to the start of the next row.
+    /// last column goes to the start of the next row. Each of them scrolls
+    /// at the edge of the grid.
     fn move_cursor(&mut self, movement: CursorMove) {
         match movement {
             CursorMove::To(x, y) => {
@@ -232,19 +251,18 @@ impl Screen {
                     self.row = y;
                 }
             }
-            CursorMove::Left if self.col > 0 => self.col = self.col.min(self.width) - 1,
-            CursorMove::Left if self.row > 0 => {
-                self.row -= 1;
+            CursorMove::Left if self.col > 0 => self.col -= 1,
+            CursorMove::Left => {
+                self.line_up();
                 self.col = self.width - 1;
             }
-            CursorMove::Left => {}
             CursorMove::Right if self.col + 1 < self.width => self.col += 1,
             CursorMove::Right => {
                 self.line_feed();
                 self.col = 0;
             }
             CursorMove::Down => self.line_feed(),
-            CursorMove::Up => self.row = self.row.saturating_sub(1),
+            CursorMove::Up => self.line_up(),
             CursorMove::Home => {
                 self.row = 0;
                 self.col = 0;
@@ -278,28 +296,39 @@ impl Screen {
         self.style = theme::screen(foreground, background, colours);
     }
 
-    /// A new executor starts in mode 0 with the default colours.
-    fn reset_mode(&mut self) {
+    /// A new executor starts in mode 0 with the default colours. The grid
+    /// of the last mode then gets the size of the pane, `width` by `height`.
+    fn reset_mode(&mut self, width: usize, height: usize) {
         self.mode = None;
         self.style = Style::default();
+        self.fit_pane(width, height);
     }
 
-    /// Before the first MODE, the grid has the size of the pane. A smaller
-    /// pane removes the empty rows below the cursor first, then moves the
-    /// top rows to the history. A larger pane takes rows back from the
-    /// history.
+    /// Before the first MODE, the grid has the size of the pane. Thus the
+    /// rows that TAB(x, y) can address then depend on the terminal: in a
+    /// small terminal TAB(0, 25) is outside the grid and does nothing.
+    ///
+    /// A smaller pane removes the empty rows below the cursor, and moves the
+    /// top rows to the history while the cursor is at the last row. A row
+    /// with text below the cursor stays: the grid then has more rows than
+    /// the pane, and the pane shows the rows to the cursor. A larger pane
+    /// takes rows back from the history.
     fn fit_pane(&mut self, width: usize, height: usize) {
         if self.mode.is_some() || width == 0 || height == 0 {
             return;
         }
         self.width = width;
+        self.col = self.col.min(width - 1);
         while self.grid.len() > height {
-            if self.row + 1 < self.grid.len() {
-                self.grid.pop();
-            } else {
+            let last = self.grid.len() - 1;
+            if self.row == last {
                 let top = self.grid.remove(0);
                 self.history.push_back(top);
                 self.row -= 1;
+            } else if self.grid[last].glyphs.is_empty() {
+                self.grid.pop();
+            } else {
+                break;
             }
         }
         while self.history.len() > HISTORY {
@@ -327,6 +356,16 @@ impl Screen {
             return total.saturating_sub(height);
         }
         self.history.len() + (self.row + 1).saturating_sub(height)
+    }
+
+    /// True if the cursor is at column 0 of a row with no text: a prompt
+    /// there does not write over text.
+    fn at_free_line(&self) -> bool {
+        self.col == 0
+            && self.grid[self.row]
+                .glyphs
+                .iter()
+                .all(|glyph| glyph.c == ' ')
     }
 
     /// The row at an index in the history and the grid.
@@ -449,7 +488,9 @@ impl RunPane {
         flags.text.store(self.text_flag(), Ordering::Relaxed);
         // A new executor starts in mode 0 with the default colours. The
         // worker starts with a copy of the screen of the pane.
-        self.screen.reset_mode();
+        let (width, height) = self.pane_size.get();
+        self.screen
+            .reset_mode(usize::from(width), usize::from(height));
         let link = Link::new(
             worker_input,
             worker_output,
@@ -732,7 +773,7 @@ impl RunPane {
             .unwrap_or("no detail");
         ctx.message = format!("The interpreter stopped: {}", detail);
         self.reset_run();
-        if self.screen.col > 0 {
+        if !self.screen.at_free_line() {
             self.screen.write("\n");
         }
         self.changed = true;
@@ -982,6 +1023,35 @@ mod tests {
         screen.set_mode(ScreenMode::from_number(7).expect("mode 7"));
         screen.fit_pane(80, 6);
         assert_eq!((screen.width, screen.grid.len()), (40, 25));
+    }
+
+    #[test]
+    fn a_smaller_pane_keeps_the_text_below_the_cursor() {
+        // 30 lines in a pane of 38 rows, then VDU 30: the cursor is at the
+        // top, with text below it
+        let mut screen = Screen::new(80, 38);
+        for n in 0..30 {
+            screen.write(&format!("{n}\n"));
+        }
+        screen.move_cursor(CursorMove::Home);
+        screen.fit_pane(80, 10);
+        screen.fit_pane(80, 38);
+        let lines: Vec<String> = (0..30).map(|n| n.to_string()).collect();
+        assert_eq!(text(&screen), lines);
+        assert_eq!((screen.row, screen.col), (0, 0));
+    }
+
+    #[test]
+    fn a_new_worker_fits_the_grid_of_the_last_mode_to_the_pane() {
+        let mut ctx = context("10 END");
+        let mut pane = RunPane::default();
+        pane.screen
+            .set_mode(ScreenMode::from_number(1).expect("mode 1"));
+        pane.see_pane(Rect::new(0, 1, 80, 22));
+        assert!(pane.start_worker(&mut ctx));
+        assert_eq!(pane.screen.mode, None);
+        assert_eq!((pane.screen.width, pane.screen.grid.len()), (80, 22));
+        assert!(pane.stop(LIMIT));
     }
 
     #[test]

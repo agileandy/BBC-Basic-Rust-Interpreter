@@ -64,9 +64,12 @@ pub trait Console {
     /// foreground and background colours. The default does nothing.
     fn text_colours(&mut self, _foreground: u8, _background: u8) {}
 
-    /// Move the text cursor. The default does nothing, as in the prompt
-    /// mode (issue #200).
-    fn move_cursor(&mut self, _movement: CursorMove) {}
+    /// Move the text cursor, and give true. A console that cannot move its
+    /// cursor gives false: the default (issue #200). The executor then
+    /// sends the codes of the prompt mode as text.
+    fn move_cursor(&mut self, _movement: CursorMove) -> bool {
+        false
+    }
 
     /// The text cursor: the column and the row, if the console has a text
     /// screen with rows. The default gives None.

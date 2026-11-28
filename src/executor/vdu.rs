@@ -112,12 +112,15 @@ impl Executor {
     /// Give a cursor move to the console, if there is one (issue #200). If
     /// the console has a text screen with rows, the print column is then
     /// the column of the console: a move can wrap to another row, or have
-    /// no effect at the edge. Give false if there is no console.
+    /// no effect at the edge. Give false if there is no console, or if the
+    /// console cannot move its cursor.
     fn move_console_cursor(&mut self, movement: CursorMove) -> bool {
         let Some(console) = self.console.0.as_mut() else {
             return false;
         };
-        console.move_cursor(movement);
+        if !console.move_cursor(movement) {
+            return false;
+        }
         if let Some((column, _)) = console.cursor() {
             self.column = column;
         }

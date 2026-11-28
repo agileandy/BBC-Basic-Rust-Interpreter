@@ -4,11 +4,17 @@
 //! change.
 
 use crate::common::run_lines;
+use bbc_basic_interpreter::executor::{Console, Executor, Interrupt};
+use bbc_basic_interpreter::program::ProgramStore;
+use bbc_basic_interpreter::runner::run_program;
+use bbc_basic_interpreter::tokenizer::tokenize;
 use bbc_basic_interpreter::ui::App;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 /// The time limit for a run that must end.
@@ -197,4 +203,110 @@ fn before_the_first_mode_the_text_screen_is_the_pane() {
     assert_eq!(buffer[(4, 21)].symbol(), "Z");
     assert_eq!(buffer[(0, 3)].symbol(), "2");
     assert_eq!(buffer[(1, 3)].symbol(), "0");
+}
+
+// The corrections of the code review
+
+/// The rows of the mode 7 text screen (40 by 25) at 120 by 40: columns 40
+/// to 79, rows 1 to 25.
+fn mode_7_rows(buffer: &Buffer) -> Vec<String> {
+    (1..=25)
+        .map(|y| {
+            (40..80)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn a_print_in_the_last_column_wraps_at_once() {
+    // A BBC Micro gives VPOS 1 and POS 0 after 40 characters in mode 7
+    let buffer = run("10 MODE 7\n\
+         20 PRINT STRING$(40, \"x\");\n\
+         30 V% = VPOS : P% = POS\n\
+         40 VDU 11\n\
+         50 PRINT \"Z\";\n\
+         60 PRINT TAB(0, 3);V%;\",\";P%");
+    let rows = mode_7_rows(&buffer);
+    // VDU 11 goes up from column 0 of row 1 to column 0 of row 0
+    assert_eq!(rows[0], format!("Z{}", "x".repeat(39)), "{rows:?}");
+    assert_eq!(rows[3], "1,0");
+}
+
+#[test]
+fn a_print_in_the_last_column_of_the_last_row_scrolls_at_once() {
+    let buffer = run("10 MODE 7\n\
+         20 PRINT TAB(0, 24);STRING$(40, \"y\");\n\
+         30 V% = VPOS\n\
+         40 PRINT TAB(0, 0);V%");
+    let rows = mode_7_rows(&buffer);
+    assert_eq!(rows[23], "y".repeat(40), "{rows:?}");
+    assert_eq!(rows[0], "24");
+}
+
+#[test]
+fn vdu_11_at_the_top_row_scrolls_the_screen_down() {
+    let buffer =
+        run("10 MODE 0\n20 PRINT \"A\";\n30 VDU 30, 11\n40 PRINT \"B\";\n50 PRINT TAB(0, 5);");
+    let rows = mode_0_rows(&buffer);
+    assert_eq!(rows[..2], ["B", "A"], "{rows:?}");
+}
+
+#[test]
+fn vdu_8_at_the_top_left_scrolls_down_and_goes_to_the_last_column() {
+    let buffer = run("10 MODE 0\n\
+         20 PRINT \"A\";\n\
+         30 VDU 30, 8\n\
+         40 V% = VPOS : P% = POS\n\
+         50 PRINT TAB(0, 5);V%;\",\";P%");
+    let rows = mode_0_rows(&buffer);
+    assert_eq!(rows[1], "A", "{rows:?}");
+    assert_eq!(rows[5], "0,79");
+}
+
+#[test]
+fn the_prompt_does_not_write_over_text_after_a_carriage_return() {
+    let buffer = run("10 MODE 0\n20 PRINT \"RESULT\";CHR$(13);");
+    let rows = mode_0_rows(&buffer);
+    assert_eq!(rows[..2], ["RESULT", ">"], "{rows:?}");
+}
+
+#[test]
+fn the_prompt_does_not_write_over_text_after_a_move_to_the_top() {
+    let buffer = run("10 MODE 0\n20 PRINT \"ABC\" : VDU 31, 0, 0");
+    let rows = mode_0_rows(&buffer);
+    assert_eq!(rows[..2], ["ABC", ">"], "{rows:?}");
+}
+
+/// A console with no cursor moves: it keeps the text that it gets.
+struct TextOnly(Rc<RefCell<String>>);
+
+impl Console for TextOnly {
+    fn write(&mut self, text: &str) {
+        self.0.borrow_mut().push_str(text);
+    }
+    fn clear(&mut self) {}
+    fn read_line(&mut self) -> Option<String> {
+        None
+    }
+    fn read_key(&mut self, _limit: Option<Duration>) -> Option<char> {
+        None
+    }
+    fn interrupt(&mut self) -> Option<Interrupt> {
+        None
+    }
+}
+
+#[test]
+fn a_console_with_no_cursor_moves_gets_vdu_8_and_vdu_10_as_text() {
+    let text = Rc::new(RefCell::new(String::new()));
+    let mut executor = Executor::new();
+    executor.set_console(Box::new(TextOnly(Rc::clone(&text))));
+    let mut program = ProgramStore::new();
+    program.store_line(tokenize("10 VDU 65, 8, 66, 10, 67").expect("line tokenizes"));
+    assert_eq!(run_program(&mut executor, &mut program), Ok(()));
+    assert_eq!(*text.borrow(), "A\x08B\nC");
 }
