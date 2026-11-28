@@ -29,6 +29,7 @@
 //! parameter. A whole array of structures, `t{()}`, and an array of
 //! structures as a member give a syntax error.
 
+use super::whole_array::compound_operator;
 use super::{
     find_closing_bracket, missing_value_at_a_comma, parse_comma_separated_expressions,
     parse_expression, tokens_text, DimItem, Expression, InputItem, Statement,
@@ -534,6 +535,16 @@ pub(super) fn parse_member_assignment(
     line_number: Option<u16>,
 ) -> Result<Statement> {
     let (target, last) = parse_member_path(tokens, 0, line_number)?;
+    // A compound assignment to a member: p.x *= 2 (issue #204)
+    if let Some(operator) = compound_operator(tokens, last + 1) {
+        if !target.members.is_empty() {
+            return Ok(Statement::CompoundAssignment {
+                target: InputItem::Member(target),
+                operator,
+                expression: parse_expression(&tokens[last + 3..])?,
+            });
+        }
+    }
     if tokens.get(last + 1) != Some(&Token::Operator('=')) {
         return Err(syntax_error("Expected '='", line_number));
     }

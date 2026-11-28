@@ -22,7 +22,8 @@ use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::library::LibraryStore;
 use crate::memory::MemoryManager;
 use crate::parser::{
-    DataValue, DimItem, Expression, Indirection, InputItem, MemberPath, Statement, TraceMode,
+    BinaryOperator, DataValue, DimItem, Expression, Indirection, InputItem, MemberPath, Statement,
+    TraceMode,
 };
 use crate::program::{Position, TYPED_LINE};
 use crate::variables::{
@@ -842,6 +843,11 @@ impl Executor {
             Statement::Assignment { target, expression } => {
                 self.execute_assignment(target, expression)
             }
+            Statement::CompoundAssignment {
+                target,
+                operator,
+                expression,
+            } => self.execute_compound_assignment(target, operator, expression),
             Statement::ArrayAssignment {
                 name,
                 indices,
@@ -2433,6 +2439,47 @@ impl Executor {
             SwapPlace::Member(path, indices) => indices.set(&mut self.variables, path, value),
             SwapPlace::Variable => self.store_input_value(name, None, value),
         }
+    }
+
+    /// Execute a compound assignment such as `S% += 2` (issue #204). The
+    /// target has the form of a SWAP target, so its indices are evaluated
+    /// one time. `A += B` is `A = A + (B)`, with the conversion of a normal
+    /// assignment. A variable that does not exist starts at 0 or "", as the
+    /// manual, page bbcwin2.html, "Creation of variables", shows with
+    /// `Value += 1`.
+    fn execute_compound_assignment(
+        &mut self,
+        target: &InputItem,
+        operator: &BinaryOperator,
+        expression: &Expression,
+    ) -> Result<()> {
+        let location = self.swap_location(target)?;
+        let old = match self.swap_value(&location) {
+            Err(BBCBasicError::NoSuchVariable(_)) if matches!(location.1, SwapPlace::Variable) => {
+                Self::zero_value(location.0)
+            }
+            value => value?,
+        };
+        let old = match old {
+            Variable::Integer(value) => Expression::Integer(value),
+            Variable::Real(value) => Expression::Real(value),
+            Variable::String(value) => Expression::String(value),
+            _ => return Err(BBCBasicError::TypeMismatch),
+        };
+        let combined = Expression::BinaryOp {
+            op: operator.clone(),
+            left: Box::new(old),
+            right: Box::new(expression.clone()),
+        };
+        let name = location.0;
+        let value = if name.ends_with('%') {
+            Variable::Integer(self.eval_integer(&combined)?)
+        } else if name.ends_with('$') {
+            Variable::String(self.eval_string(&combined)?)
+        } else {
+            Variable::Real(self.eval_real(&combined)?)
+        };
+        self.store_swap_value(&location, value)
     }
 
     /// Execute RESTORE statement - resets data pointer

@@ -602,6 +602,12 @@ pub fn detokenize(tokenized_line: &TokenizedLine) -> Result<String> {
                 (Token::Operator('<'), Token::Operator('=')) => false,
                 (Token::Operator('>'), Token::Operator('=')) => false,
                 (Token::Operator('<'), Token::Operator('>')) => false,
+                // A compound assignment lists as typed: S% += 2, S% MOD= 3
+                // (issue #204). The keywords are AND, DIV, EOR, MOD and OR.
+                (
+                    Token::Operator('+' | '-' | '*' | '/' | '^') | Token::Keyword(0x80..=0x84),
+                    Token::Operator('='),
+                ) => false,
                 // The DATA text holds its own spaces
                 (_, Token::DataText(_) | Token::RemText(_)) => false,
                 // The hex forms ~X and STR$~(X) list as typed
