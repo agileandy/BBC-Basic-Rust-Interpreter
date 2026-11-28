@@ -23,6 +23,12 @@ pub type SharedEngine = Arc<Mutex<SoundEngine>>;
 pub trait SoundOutput: Send {
     /// Stop taking samples. The default does nothing.
     fn stop(&mut self) {}
+
+    /// True after an error stopped the output (issue #212). The default is
+    /// false.
+    fn has_failed(&self) -> bool {
+        false
+    }
 }
 
 /// Makes the output for an engine. The executor calls it at the first SOUND.

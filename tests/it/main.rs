@@ -197,3 +197,4 @@ mod issue_208_sound_statement;
 mod issue_210_sound_output_device;
 mod issue_209_envelope;
 mod issue_211_sound_mapping_tool;
+mod issue_212_sound_drain_at_exit;
