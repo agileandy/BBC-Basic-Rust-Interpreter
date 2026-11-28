@@ -1011,6 +1011,7 @@ impl Executor {
                 pitch,
                 duration,
             } => self.execute_sound(channel, amplitude, pitch, duration),
+            Statement::Envelope { values } => self.execute_envelope(values),
             Statement::MakeDirectory { path } => {
                 crate::filesystem::make_directory(&self.eval_string(path)?)
             }

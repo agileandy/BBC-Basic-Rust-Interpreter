@@ -16,6 +16,7 @@
 //! 30, Sound.
 
 use super::chip::{Chip, DEFAULT_SAMPLE_RATE};
+use super::envelope::{envelope_index, note_volume, Envelope, Shape, ENVELOPES};
 use super::pitch::divider;
 use std::collections::VecDeque;
 
@@ -34,15 +35,6 @@ const TICKS_PER_STEP: u8 = 5;
 /// A duration of 255 does not end. Only a flush stops it.
 const ENDLESS: u8 = 255;
 
-/// The level of a note with an envelope (amplitude 1 to 4). Issue #209 gives
-/// the envelopes. Until then such a note plays at this fixed middle level.
-const ENVELOPE_LEVEL: u8 = 8;
-
-/// The phase of a channel after its sound ended (MOS: release complete).
-const PHASE_ENDED: u8 = 4;
-/// The phase of a channel at the end of a note (MOS: release in progress).
-const PHASE_RELEASE: u8 = 3;
-
 /// No sync is pending (MOS `soundSyncCount` = $FF).
 const NO_SYNC: u8 = 0xFF;
 
@@ -51,7 +43,8 @@ const NO_SYNC: u8 = 0xFF;
 pub struct StartedNote {
     /// The channel, 0 to 3
     pub channel: u8,
-    /// The chip level, 0 (silence) to 15 (the loudest)
+    /// The chip level, 0 (silence) to 15 (the loudest). For a note with an
+    /// envelope, this is the level before the first step of the envelope.
     pub level: u8,
     /// The pitch, 0 to 255
     pub pitch: u8,
@@ -80,7 +73,13 @@ struct Channel {
     countdown: u8,
     /// The channel waits for the other channels of a sync
     sync_waiting: bool,
-    phase: u8,
+    /// The volume, the ADSR phase and the pitch sections (issue #209)
+    shape: Shape,
+    /// The place of the envelope of the note, or none (MOS: offset $FF)
+    envelope: Option<usize>,
+    /// The ticks left until the next step of the envelope
+    step_left: u8,
+    /// The last level that went to the chip
     level: u8,
     /// The last pitch that went to the chip
     pitch: u8,
@@ -97,7 +96,9 @@ impl Default for Channel {
             // thus has the same length as after a note.
             countdown: TICKS_PER_STEP,
             sync_waiting: false,
-            phase: PHASE_ENDED,
+            shape: Shape::default(),
+            envelope: None,
+            step_left: 0,
             level: 0,
             pitch: 0,
         }
@@ -110,6 +111,8 @@ impl Default for Channel {
 pub struct SoundEngine {
     chip: Chip,
     channels: [Channel; 4],
+    /// The envelopes of the ENVELOPE statement (MOS OSWORD 8)
+    envelopes: [Envelope; ENVELOPES],
     /// The other channels that a sync still needs (MOS `soundSyncCount`)
     sync_count: u8,
     /// The count of samples that `fill` gave
@@ -137,6 +140,7 @@ impl SoundEngine {
         Self {
             chip: Chip::new(sample_rate),
             channels: Default::default(),
+            envelopes: [Envelope::default(); ENVELOPES],
             sync_count: NO_SYNC,
             clock: 0,
             ticks: 0,
@@ -227,6 +231,23 @@ impl SoundEngine {
         QUEUE_BYTES - notes * NOTE_BYTES
     }
 
+    /// Keep an envelope: `ENVELOPE number, values`, with the 13 values after
+    /// the number. Each value uses its low byte, as OSWORD 8 does. A note
+    /// that plays with this envelope uses the new values from its next step.
+    pub fn set_envelope(&mut self, number: i32, values: [i32; 13]) {
+        self.envelopes[envelope_index(number)] = Envelope::new(values);
+    }
+
+    /// The level of `channel` (0 to 3) on the chip, 0 (silence) to 15.
+    pub fn level(&self, channel: u8) -> u8 {
+        self.channels[usize::from(channel & 3)].level
+    }
+
+    /// The last pitch of `channel` (0 to 3) that went to the chip.
+    pub fn pitch(&self, channel: u8) -> u8 {
+        self.channels[usize::from(channel & 3)].pitch
+    }
+
     /// Empty all queues and silence all channels, as the MOS does when it
     /// acknowledges an Escape.
     pub fn flush(&mut self) {
@@ -303,6 +324,34 @@ impl SoundEngine {
                     }
                 }
             }
+            self.envelope_step(channel);
+        }
+    }
+
+    /// MOS `notAtEndOfCurrentSoundDuration` to `skipToNextChannel`: count
+    /// the ticks of a step, and do a step of the envelope of the note.
+    fn envelope_step(&mut self, channel: u8) {
+        let state = &mut self.channels[usize::from(channel)];
+        if state.step_left != 0 {
+            state.step_left -= 1;
+            if state.step_left != 0 {
+                return;
+            }
+        }
+        let Some(index) = state.envelope else {
+            return;
+        };
+        let envelope = self.envelopes[index];
+        state.step_left = envelope.step_ticks();
+        let pitch = state.shape.step(&envelope);
+        let level = state.shape.level();
+        if level != state.level {
+            self.set_level(channel, level);
+        }
+        if let Some(pitch) = pitch {
+            if pitch != self.channels[usize::from(channel)].pitch {
+                self.send_pitch(channel, pitch);
+            }
         }
     }
 
@@ -310,9 +359,7 @@ impl SoundEngine {
     /// channel ended, so start the next note if it can start.
     fn next_sound(&mut self, channel: u8, release_sync: bool) {
         let state = &mut self.channels[usize::from(channel)];
-        if state.phase != PHASE_ENDED {
-            state.phase = PHASE_RELEASE;
-        }
+        state.shape.release();
         if state.flushed {
             state.flushed = false;
             state.duration = 0;
@@ -327,16 +374,17 @@ impl SoundEngine {
                 state.sync_waiting = false;
                 self.read_note(channel);
             } else {
-                self.silence(channel);
+                self.silence_without_envelope(channel);
             }
             return;
         }
         let Some(&[first, ..]) = state.queue.front() else {
-            // MOS `syncSoundBufferEmpty`
-            if state.phase == PHASE_ENDED {
+            // MOS `syncSoundBufferEmpty`. A note with an envelope continues
+            // its release until the release ends.
+            if state.shape.ended() {
                 state.active = false;
             }
-            self.silence(channel);
+            self.silence_without_envelope(channel);
             return;
         };
         let sync = first & 3;
@@ -352,7 +400,7 @@ impl SoundEngine {
                 self.sync_count - 1
             };
         }
-        self.silence(channel);
+        self.silence_without_envelope(channel);
     }
 
     /// MOS `readNextSoundFromBufferAndProcess`: take the next note out of the
@@ -363,22 +411,31 @@ impl SoundEngine {
             return;
         };
         if first & 4 != 0 {
-            // A hold note: with no envelope, a silence for its duration
-            self.silence(channel);
+            // A hold note: with no envelope, a silence for its duration.
+            // With an envelope, the last note continues its envelope.
+            self.silence_without_envelope(channel);
             self.channels[usize::from(channel)].duration = duration;
             return;
         }
-        let level = if first & 0x80 != 0 {
-            15 - ((first >> 3) & 15)
+        let state = &mut self.channels[usize::from(channel)];
+        if first & 0x80 != 0 {
+            state.shape.set_volume(note_volume(first));
+            state.envelope = None;
+            let level = state.shape.level();
+            self.set_level(channel, level);
         } else {
-            ENVELOPE_LEVEL
-        };
+            // Bits 3 to 6 are the envelope number - 1. The attack starts
+            // from the volume that the channel has.
+            state.envelope = Some(usize::from((first >> 3) & 15));
+        }
         let state = &mut self.channels[usize::from(channel)];
         state.countdown = TICKS_PER_STEP;
-        state.phase = 0;
+        // The first step of the envelope is in this tick
+        state.step_left = 1;
+        state.shape.start(pitch);
         state.duration = duration;
-        self.set_level(channel, level);
-        if pitch != self.channels[usize::from(channel)].pitch {
+        let level = state.level;
+        if pitch != state.pitch {
             self.send_pitch(channel, pitch);
         }
         let start = self.clock;
@@ -395,8 +452,16 @@ impl SoundEngine {
 
     /// MOS `silenceChannelX`
     fn silence(&mut self, channel: u8) {
-        self.channels[usize::from(channel)].phase = PHASE_ENDED;
+        self.channels[usize::from(channel)].shape.silence();
         self.set_level(channel, 0);
+    }
+
+    /// MOS `silenceNonEnvelopeSound`: silence the channel if its note has no
+    /// envelope.
+    fn silence_without_envelope(&mut self, channel: u8) {
+        if self.channels[usize::from(channel)].envelope.is_none() {
+            self.silence(channel);
+        }
     }
 
     fn set_level(&mut self, channel: u8, level: u8) {
@@ -591,8 +656,101 @@ mod tests {
             .iter()
             .map(|note| (note.channel, note.level))
             .collect();
-        // Envelope 1 has a fixed middle level until issue #209
-        assert_eq!(levels, vec![(3, 0), (2, 8), (1, 15), (0, 8)]);
+        // Envelope 1 has no values, so the note starts silent (issue #209)
+        assert_eq!(levels, vec![(3, 0), (2, 8), (1, 15), (0, 0)]);
+    }
+
+    /// The (level, pitch) of `channel` after each of `ticks` ticks.
+    fn shape(engine: &mut SoundEngine, channel: u8, ticks: usize) -> Vec<(u8, u8)> {
+        (0..ticks)
+            .map(|_| {
+                run(engine, 1);
+                (engine.level(channel), engine.pitch(channel))
+            })
+            .collect()
+    }
+
+    /// An attack of 16 to ALA = 126, no decay, a release of -8, and a pitch
+    /// change of 1 at each step
+    const RISE: [i32; 13] = [1, 1, 0, 0, 255, 0, 0, 16, 0, 0, -8, 126, 126];
+
+    #[test]
+    fn a_note_with_an_envelope_changes_its_level_and_its_pitch_at_each_step() {
+        let mut engine = recording();
+        engine.set_envelope(1, RISE);
+        assert!(engine.try_sound(1, 1, 100, 2));
+
+        let found = shape(&mut engine, 1, 10);
+
+        // The tick that reads the note does the first step. The duration
+        // ends at tick 9, and the release starts in the same tick.
+        assert_eq!(
+            found,
+            vec![
+                (2, 101),
+                (4, 102),
+                (6, 103),
+                (8, 104),
+                (10, 105),
+                (12, 106),
+                (14, 107),
+                (15, 108),
+                (15, 109),
+                (14, 110)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_release_after_the_duration_goes_to_silence_and_the_channel_stops() {
+        let mut engine = recording();
+        engine.set_envelope(2, RISE);
+        assert!(engine.try_sound(3, 2, 100, 2));
+        run(&mut engine, 9);
+
+        let levels: Vec<u8> = shape(&mut engine, 3, 17).iter().map(|s| s.0).collect();
+
+        // 63 - 8 at each step to -63: 16 steps
+        assert_eq!(
+            levels,
+            vec![14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0]
+        );
+        assert!(!engine.channels[3].active, "the channel stopped");
+    }
+
+    #[test]
+    fn a_note_in_the_queue_cuts_the_release() {
+        let mut engine = recording();
+        engine.set_envelope(1, RISE);
+        assert!(engine.try_sound(1, 1, 100, 2));
+        assert!(engine.try_sound(1, -5, 120, 2));
+
+        run(&mut engine, 10);
+
+        assert_eq!((engine.level(1), engine.pitch(1)), (5, 120));
+        assert_eq!(starts(&mut engine), vec![(1, 0), (1, 9)]);
+    }
+
+    #[test]
+    fn the_step_length_is_t_ticks() {
+        let mut engine = recording();
+        engine.set_envelope(4, [3, 2, 0, 0, 255, 0, 0, 0, 0, 0, 0, 126, 126]);
+        assert!(engine.try_sound(2, 4, 100, 10));
+
+        let pitches: Vec<u8> = shape(&mut engine, 2, 7).iter().map(|s| s.1).collect();
+
+        assert_eq!(pitches, vec![102, 102, 102, 104, 104, 104, 106]);
+    }
+
+    #[test]
+    fn envelope_16_and_envelope_0_are_the_same_place() {
+        let mut engine = recording();
+        engine.set_envelope(0, RISE);
+        assert!(engine.try_sound(1, 16, 100, 2));
+
+        run(&mut engine, 1);
+
+        assert_eq!((engine.level(1), engine.pitch(1)), (2, 101));
     }
 
     #[test]
