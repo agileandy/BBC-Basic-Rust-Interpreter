@@ -16,11 +16,13 @@
 //! ```
 
 mod chip;
+mod device;
 mod engine;
 mod output;
 mod pitch;
 
 pub use chip::{Chip, CHIP_TICK_HZ, DEFAULT_SAMPLE_RATE};
+pub use device::{factory, factory_with, open_default_device, use_device, DeviceOutput, Opener};
 pub use engine::{SoundEngine, StartedNote};
 pub use output::{lock, ClockOutput, OutputFactory, SharedEngine, SoundOutput};
 pub use pitch::{divider, frequency, CHIP_CLOCK_HZ};

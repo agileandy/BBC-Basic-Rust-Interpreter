@@ -23,6 +23,7 @@ use crate::commands::{run_command, CommandOutcome};
 use crate::executor::{Console, CursorMove, Executor, Interrupt};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::program::ProgramStore;
+use crate::sound;
 use crate::tokenizer::expand_short_form;
 use crate::ui::canvas::Picture;
 use std::cell::RefCell;
@@ -474,6 +475,10 @@ pub(super) fn run_worker(link: Link) {
     let link = Rc::new(RefCell::new(link));
     let mut executor = Executor::new();
     executor.set_console(Box::new(WorkerConsole(Rc::clone(&link))));
+    // The worker owns the sound. The first SOUND opens the audio device. A
+    // note to stderr writes over the screen, so no note in the IDE. The drop
+    // of the executor at the end of the worker stops the device.
+    executor.set_sound_output(sound::factory(Box::new(std::io::sink())));
     let mut program = ProgramStore::new();
     link.borrow_mut().write(BANNER);
     link.borrow_mut().write(PROMPT);

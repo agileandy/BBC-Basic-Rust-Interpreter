@@ -2,7 +2,7 @@ use bbc_basic_interpreter::{
     commands::{run_command, CommandOutcome},
     executor::Executor,
     program::ProgramStore,
-    ui,
+    sound, ui,
 };
 use std::io::{self, Write};
 
@@ -32,13 +32,17 @@ fn main() {
     install_closed_output_hook();
 
     // `--ide [file]` starts the IDE. No argument starts the command prompt.
-    match ui::parse_args(std::env::args().skip(1)) {
-        Ok(ui::Start::Prompt) => {}
-        Ok(ui::Start::Ide(file_name)) => std::process::exit(ui::main(file_name)),
+    // `--no-sound` opens no audio device.
+    let options = match ui::parse_options(std::env::args().skip(1)) {
+        Ok(options) => options,
         Err(usage) => {
             eprintln!("{}", usage);
             std::process::exit(2);
         }
+    };
+    sound::use_device(!options.no_sound);
+    if let ui::Start::Ide(file_name) = options.start {
+        std::process::exit(ui::main(file_name));
     }
 
     if let Err(error) = run_on_thread(INTERPRETER_STACK_SIZE, run_interpreter) {
@@ -69,6 +73,8 @@ fn run_interpreter() {
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
 
     let mut executor = Executor::new();
+    // The first SOUND opens the audio device, or writes a note to stderr
+    executor.set_sound_output(sound::factory(Box::new(io::stderr())));
     let mut program = ProgramStore::new();
     let stdin = io::stdin();
     let mut line_buffer = String::new();
