@@ -133,11 +133,16 @@ impl Executor {
         Ok(values)
     }
 
-    /// Store a value in a member, or in an element of an array member
-    pub(super) fn store_member(&mut self, path: &MemberPath, value: Variable) -> Result<()> {
-        let indices = self.member_indices(path)?;
+    /// Store a value in a member, or in an element of an array member. The
+    /// indices are the values that `member_indices` gave.
+    pub(super) fn store_member(
+        &mut self,
+        path: &MemberPath,
+        indices: &[usize],
+        value: Variable,
+    ) -> Result<()> {
         self.variables
-            .set_member(&path.structure, &path.members, &indices, value)
+            .set_member(&path.structure, &path.members, indices, value)
     }
 
     /// Execute `structure.member = expression`. The value gets the type of
@@ -198,24 +203,32 @@ impl Executor {
     }
 
     /// The PRINT text of a member
-    /// and a flag that is true for a number, as `format_expression` gives
+    /// and a flag that is true for a number, as `format_expression` gives.
+    /// A number uses the format that a variable uses: the format of `@%` for
+    /// PRINT and the text that reads back for PRINT# (issue 202).
     pub(super) fn format_member(&mut self, path: &MemberPath) -> Result<(String, bool)> {
         Ok(match self.member_value(path)? {
-            Variable::Integer(value) => (value.to_string(), true),
-            Variable::Real(value) => (format_real(value, self.exact_reals), true),
+            Variable::Integer(value) if self.exact_reals => (value.to_string(), true),
+            Variable::Integer(value) => (self.number_format().format_integer(value), true),
+            Variable::Real(value) if self.exact_reals => (format_real(value, true), true),
+            Variable::Real(value) => (self.number_format().format_real(value), true),
             Variable::String(value) => (value, false),
             _ => return Err(BBCBasicError::TypeMismatch),
         })
     }
 
     /// Check that a member target of INPUT, READ or INPUT# exists, before
-    /// the statement takes a reply, a DATA value or a record. Another target
-    /// needs no check here.
-    pub(super) fn check_member_target(&mut self, target: &InputItem) -> Result<()> {
-        if let InputItem::Member(path) = target {
-            self.member_value(path)?;
-        }
-        Ok(())
+    /// the statement takes a reply, a DATA value or a record. Give the index
+    /// values of the member, for the store: the indices are evaluated one
+    /// time (issue 202). Another target needs no check and gives no indices.
+    pub(super) fn check_member_target(&mut self, target: &InputItem) -> Result<Vec<usize>> {
+        let InputItem::Member(path) = target else {
+            return Ok(Vec::new());
+        };
+        let indices = self.member_indices(path)?;
+        self.variables
+            .get_member(&path.structure, &path.members, &indices)?;
+        Ok(indices)
     }
 
     /// The LVAR lines of the structures, in name order and in member order.

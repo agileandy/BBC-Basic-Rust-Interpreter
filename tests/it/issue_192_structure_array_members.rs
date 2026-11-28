@@ -194,7 +194,8 @@ fn test_a_bad_member_in_a_dim() {
 #[test]
 fn test_a_negative_size_of_an_array_member() {
     let (result, _) = run(&["10 DIM s{a(-1)}"]);
-    assert_eq!(result, Err("Subscript at line 10".to_string()));
+    // Issue 202: a negative size gives Bad DIM, as BBC BASIC does
+    assert_eq!(result, Err("Bad DIM at line 10".to_string()));
 }
 
 #[test]

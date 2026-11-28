@@ -1815,7 +1815,7 @@ impl Executor {
                 InputItem::ArrayElement { name, .. } => name,
                 InputItem::Member(path) => path.member(),
             };
-            self.check_member_target(item)?;
+            let member_indices = self.check_member_target(item)?;
             if values.is_empty() {
                 let reply = self.read_input_reply(question_mark)?;
                 values = split_input_reply(&reply);
@@ -1831,20 +1831,27 @@ impl Executor {
             } else {
                 Variable::Real(parse_leading_number(&reply))
             };
-            self.store_target(item, value)?;
+            self.store_target(item, &member_indices, value)?;
         }
         Ok(())
     }
 
     /// Store a value in the target of INPUT, READ or INPUT#: a variable, an
-    /// array element or a structure member (issue #191)
-    fn store_target(&mut self, target: &InputItem, value: Variable) -> Result<()> {
+    /// array element or a structure member (issue #191). A member uses the
+    /// indices that `check_member_target` gave, so that each index is
+    /// evaluated one time (issue 202).
+    fn store_target(
+        &mut self,
+        target: &InputItem,
+        member_indices: &[usize],
+        value: Variable,
+    ) -> Result<()> {
         match target {
             InputItem::Variable(name) => self.store_input_value(name, None, value),
             InputItem::ArrayElement { name, indices } => {
                 self.store_input_value(name, Some(indices), value)
             }
-            InputItem::Member(path) => self.store_member(path, value),
+            InputItem::Member(path) => self.store_member(path, member_indices, value),
             // A prompt text and a new line store no value
             InputItem::Prompt { .. } | InputItem::NewLine => Ok(()),
         }
@@ -1902,14 +1909,14 @@ impl Executor {
                 InputItem::ArrayElement { name, .. } => name,
                 InputItem::Member(path) => path.member(),
             };
-            self.check_member_target(item)?;
+            let member_indices = self.check_member_target(item)?;
             if !var.ends_with('$') {
                 return Err(BBCBasicError::TypeMismatch);
             }
             let reply = self.read_input_reply(question_mark)?;
             question_mark = true;
             let reply = without_line_end(&reply);
-            self.store_target(item, Variable::String(reply.to_string()))?;
+            self.store_target(item, &member_indices, Variable::String(reply.to_string()))?;
         }
         Ok(())
     }
@@ -1996,13 +2003,13 @@ impl Executor {
 
     /// The element counts of the dimensions of a DIM, an array or an array
     /// member. DIM A(N) gives the elements 0 to N, so N + 1 elements. A
-    /// negative size gives Subscript out of range.
+    /// negative size gives Bad DIM, as BBC BASIC does (issue 202).
     fn eval_dimensions(&mut self, dimensions: &[Expression]) -> Result<Vec<usize>> {
         let mut dim_sizes = Vec::with_capacity(dimensions.len());
         for dim_expr in dimensions {
             let size = self.eval_integer(dim_expr)?;
             if size < 0 {
-                return Err(BBCBasicError::SubscriptOutOfRange);
+                return Err(BBCBasicError::BadDim);
             }
             dim_sizes.push(size as usize + 1);
         }
@@ -2112,7 +2119,7 @@ impl Executor {
                     })
                 }
             };
-            self.check_member_target(target)?;
+            let member_indices = self.check_member_target(target)?;
             // Check if we've run out of data
             if self.data_pointer >= self.data_values.len() {
                 return Err(BBCBasicError::OutOfData);
@@ -2142,7 +2149,7 @@ impl Executor {
                     DataValue::String(s) => parse_leading_number(s),
                 })
             };
-            self.store_target(target, value)?;
+            self.store_target(target, &member_indices, value)?;
         }
         Ok(())
     }
@@ -5135,7 +5142,7 @@ impl Executor {
                 // The parser gives no prompt text and no ' in INPUT#
                 InputItem::Prompt { .. } | InputItem::NewLine => continue,
             };
-            self.check_member_target(target)?;
+            let member_indices = self.check_member_target(target)?;
             let record = self.read_file_record(handle)?;
 
             // The value type comes from the name of the target. A string gets
@@ -5148,7 +5155,7 @@ impl Executor {
                 Variable::Real(record.trim().parse::<f64>().unwrap_or(0.0))
             };
             // The indices of an element are evaluated now (issue #154)
-            self.store_target(target, value)?;
+            self.store_target(target, &member_indices, value)?;
         }
 
         Ok(())
