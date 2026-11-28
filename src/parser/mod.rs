@@ -1515,10 +1515,13 @@ fn parse_memory_assignment(tokens: &[Token], line_number: Option<u16>) -> Result
 
 /// Parse FOR statement
 fn parse_for_statement(tokens: &[Token], line_number: Option<u16>) -> Result<Statement> {
-    // FOR EACH variable IN collection. EACH with `=` after it is the name
-    // of the variable of a normal FOR.
+    // FOR EACH variable IN collection. EACH with `=` or `(` after it is the
+    // name of the variable or the array of a normal FOR (issue #206).
     if matches!(tokens.first(), Some(Token::Identifier(word)) if word == "EACH")
-        && !matches!(tokens.get(1), Some(Token::Operator('=')))
+        && !matches!(
+            tokens.get(1),
+            Some(Token::Operator('=') | Token::Separator('('))
+        )
     {
         return parse_for_each_statement(&tokens[1..], line_number);
     }
