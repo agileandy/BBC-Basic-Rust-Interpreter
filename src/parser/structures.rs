@@ -21,9 +21,13 @@
 //! LOCAL structure, `LOCAL s{}`. The manual section is "Passing structures
 //! to procedures and functions" on the same page.
 //!
-//! The forms of the later child issues give a syntax error: an array of
-//! structures, a structure from a prototype, and a reference to a whole
-//! structure, such as `b{} = a{}`.
+//! Issue #193 adds the forms of the sections "Arrays of structures",
+//! "Structure prototypes" and "Copying a structure" on the same page:
+//! `DIM t{(10) one, two%}` with the member `t{(5)}.two%`, `DIM b{} = a{}`,
+//! `DIM c{(1, 2)} = a{}`, `DIM n{name$, pos{} = a{}}`, and the copy
+//! `b{} = a{}`. An element `t{(5)}` is also an argument for a structure
+//! parameter. A whole array of structures, `t{()}`, and an array of
+//! structures as a member give a syntax error.
 
 use super::{
     find_closing_bracket, missing_value_at_a_comma, parse_comma_separated_expressions,
@@ -34,12 +38,17 @@ use crate::tokenizer::{is_short_form, Token};
 
 /// A member path, such as `shape.pos.x` or `net.layer.weights(I%, J%)`
 /// (issue #192). Only the last member can have indices: it is an array
-/// member. A member before it is a sub-structure, and arrays of structures
-/// are a later issue.
+/// member. A member before it is a sub-structure. The structure can be an
+/// element of an array of structures, such as `t{(I%)}.x` (issue #193).
+/// A path with no members is a whole structure or element, such as `a{}`
+/// or `t{(1)}`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberPath {
     /// The name of the structure
     pub structure: String,
+    /// The indices of an element of an array of structures. An empty list
+    /// is a structure that is not an array.
+    pub element: Vec<Expression>,
     /// The member names, one for each full stop
     pub members: Vec<String>,
     /// The indices of an array member. An empty list is a member that is
@@ -70,6 +79,8 @@ pub enum MemberDecl {
         name: String,
         members: Vec<MemberDecl>,
     },
+    /// A sub-structure from a prototype, such as `pos{} = a{}` (issue #193)
+    Prototype { name: String, prototype: MemberPath },
 }
 
 impl MemberDecl {
@@ -78,7 +89,8 @@ impl MemberDecl {
         match self {
             MemberDecl::Scalar(name)
             | MemberDecl::Array { name, .. }
-            | MemberDecl::Structure { name, .. } => name,
+            | MemberDecl::Structure { name, .. }
+            | MemberDecl::Prototype { name, .. } => name,
         }
     }
 }
@@ -92,13 +104,25 @@ fn syntax_error(message: &str, line_number: Option<u16>) -> BBCBasicError {
 }
 
 /// A `{` in a statement that is not a DIM is a reference to a whole
-/// structure. A statement with PROC, FN, DEF or LOCAL can have `name{}`
-/// (issue #194): the parse of the statement checks where it is. Each other
-/// reference is a form of a later issue: give its syntax error.
+/// structure or to an element. These references are valid, and each other
+/// reference gives a syntax error:
+/// - a member of an element, such as `t{(1)}.x` (issue #193)
+/// - the 2 sides of a copy `b{} = a{}` that starts a statement (issue #193)
+/// - `name{}` in a statement with PROC, FN, DEF or LOCAL (issue #194)
+/// - an element with no member, `t{(1)}`, as a whole argument of a PROC or
+///   FN (issue #193)
 pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16>) -> Result<()> {
-    let has_brace = tokens.contains(&Token::Separator('{'));
-    let has_dim = tokens.contains(&Token::Keyword(0xDE));
-    if has_brace && !has_dim && !(has_routine_keyword(tokens) && only_empty_braces(tokens)) {
+    if tokens.contains(&Token::Keyword(0xDE)) {
+        return Ok(());
+    }
+    let routine = has_routine_keyword(tokens);
+    let copies = copy_braces(tokens);
+    let valid = tokens.iter().enumerate().all(|(index, token)| {
+        *token != Token::Separator('{')
+            || copies.contains(&index)
+            || is_valid_reference(tokens, index, routine)
+    });
+    if !valid {
         return Err(syntax_error(
             "A reference to a whole structure is not supported",
             line_number,
@@ -107,21 +131,82 @@ pub(super) fn check_no_whole_structure(tokens: &[Token], line_number: Option<u16
     Ok(())
 }
 
+/// The position of the `}` of the reference whose `{` is at `index`:
+/// `name{}` or `name{(indices)}`. `None` is a reference that is not
+/// complete: the parse gives its error.
+fn reference_end(tokens: &[Token], index: usize) -> Option<usize> {
+    match tokens.get(index + 1)? {
+        Token::Separator('}') => Some(index + 1),
+        Token::Separator('(') => {
+            let close = find_closing_bracket(tokens, index + 1)?;
+            (tokens.get(close + 1) == Some(&Token::Separator('}'))).then_some(close + 1)
+        }
+        _ => None,
+    }
+}
+
+/// The positions of the `{` of each copy `b{} = a{}` (issue #193): a
+/// reference that starts a statement and has `=` after it, and the
+/// reference after the `=`. A statement starts at the first token, after
+/// `:`, and after THEN or ELSE.
+fn copy_braces(tokens: &[Token]) -> Vec<usize> {
+    let mut braces = Vec::new();
+    for start in 0..tokens.len() {
+        let starts_statement = start == 0
+            || matches!(
+                tokens[start - 1],
+                Token::Separator(':') | Token::Keyword(0x8B | 0x8C)
+            );
+        if !starts_statement
+            || !matches!(tokens[start], Token::Identifier(_))
+            || tokens.get(start + 1) != Some(&Token::Separator('{'))
+        {
+            continue;
+        }
+        let Some(end) = reference_end(tokens, start + 1) else {
+            continue;
+        };
+        if tokens.get(end + 1) != Some(&Token::Operator('=')) {
+            continue;
+        }
+        braces.push(start + 1);
+        if matches!(tokens.get(end + 2), Some(Token::Identifier(_)))
+            && tokens.get(end + 3) == Some(&Token::Separator('{'))
+        {
+            braces.push(end + 3);
+        }
+    }
+    braces
+}
+
+/// True if the `{` at `index` is after a name and is a member of an
+/// element, a `name{}` in a statement with a PROC, FN, DEF or LOCAL
+/// (`routine`), or an element that is a whole argument in such a statement
+fn is_valid_reference(tokens: &[Token], index: usize, routine: bool) -> bool {
+    if index == 0 || !matches!(tokens[index - 1], Token::Identifier(_)) {
+        return false;
+    }
+    let Some(end) = reference_end(tokens, index) else {
+        // An element that is not complete: the parse gives the error
+        return tokens.get(index + 1) == Some(&Token::Separator('('));
+    };
+    if end == index + 1 {
+        return routine;
+    }
+    if matches!(tokens.get(end + 1), Some(Token::Member(structure, _)) if structure.is_empty()) {
+        return true;
+    }
+    routine
+        && index >= 2
+        && matches!(tokens[index - 2], Token::Separator('(' | ','))
+        && matches!(tokens.get(end + 1), Some(Token::Separator(')' | ',')))
+}
+
 /// True if the tokens have PROC, FN, DEF or LOCAL
 fn has_routine_keyword(tokens: &[Token]) -> bool {
     tokens
         .iter()
         .any(|token| matches!(token, Token::Keyword(0xF2 | 0xA4 | 0xDD | 0xEA)))
-}
-
-/// True if each `{` of the tokens is a `name{}`
-fn only_empty_braces(tokens: &[Token]) -> bool {
-    tokens.iter().enumerate().all(|(index, token)| {
-        *token != Token::Separator('{')
-            || (index > 0
-                && matches!(tokens[index - 1], Token::Identifier(_))
-                && tokens.get(index + 1) == Some(&Token::Separator('}')))
-    })
 }
 
 /// Check that a name can be a structure name. A keyword short form cannot,
@@ -185,31 +270,94 @@ pub(super) fn parse_dim_structure(
     line_number: Option<u16>,
 ) -> Result<(DimItem, usize)> {
     check_structure_name(&name, line_number)?;
-    let (members, close) = parse_members(tokens, line_number)?;
-    Ok((DimItem::Structure { name, members }, close + 1))
+    // An array of structures has its top indices in brackets after the `{`
+    // (issue #193)
+    let (dimensions, start) = match tokens.get(1) {
+        Some(Token::Separator('(')) => {
+            let close = find_closing_bracket(tokens, 1)
+                .ok_or_else(|| syntax_error("Expected ')' in DIM", line_number))?;
+            let dimensions = parse_comma_separated_expressions(&tokens[2..close], line_number)?;
+            (dimensions, close + 1)
+        }
+        _ => (Vec::new(), 1),
+    };
+    if let Some((prototype, last)) = parse_prototype(tokens, start, line_number)? {
+        let item = DimItem::StructurePrototype {
+            name,
+            dimensions,
+            prototype,
+        };
+        return Ok((item, last + 1));
+    }
+    let (members, close) = parse_member_list(tokens, start, line_number)?;
+    let item = if dimensions.is_empty() {
+        DimItem::Structure { name, members }
+    } else {
+        DimItem::StructureArray {
+            name,
+            dimensions,
+            members,
+        }
+    };
+    Ok((item, close + 1))
 }
 
-/// Parse the members of a structure or a sub-structure. The tokens start at
-/// the `{`. Give the members and the position of the `}`.
-fn parse_members(tokens: &[Token], line_number: Option<u16>) -> Result<(Vec<MemberDecl>, usize)> {
-    match tokens.get(1..3) {
+/// If the tokens at `start` are `} = a{}`, give the prototype path and the
+/// position of its last token (issue #193). The prototype is a structure or
+/// an element of an array of structures.
+fn parse_prototype(
+    tokens: &[Token],
+    start: usize,
+    line_number: Option<u16>,
+) -> Result<Option<(MemberPath, usize)>> {
+    match tokens.get(start..start + 2) {
         Some([Token::Separator('}'), Token::Operator('=')]) => {
-            return Err(syntax_error(
-                "A structure from a prototype is not supported",
-                line_number,
-            ))
+            parse_structure(tokens, start + 2, line_number).map(Some)
         }
-        Some([Token::Separator('('), _]) => {
-            return Err(syntax_error(
-                "Arrays of structures are not supported",
-                line_number,
-            ))
-        }
-        _ => {}
+        _ => Ok(None),
     }
+}
 
+/// Parse a whole structure or element at `pos`, such as `a{}` or `t{(1)}`.
+/// Give the path, which has no members, and the position of its last token.
+/// Other tokens give a syntax error.
+fn parse_structure(
+    tokens: &[Token],
+    pos: usize,
+    line_number: Option<u16>,
+) -> Result<(MemberPath, usize)> {
+    let expected = || syntax_error("Expected a structure after '='", line_number);
+    if !starts_member_path(tokens, pos) || matches!(tokens[pos], Token::Member(..)) {
+        return Err(expected());
+    }
+    let (path, last) = parse_member_path(tokens, pos, line_number)?;
+    if !path.members.is_empty() {
+        return Err(expected());
+    }
+    Ok((path, last))
+}
+
+/// Parse the members of a sub-structure. The tokens start at the `{`. Give
+/// the members and the position of the `}`.
+fn parse_members(tokens: &[Token], line_number: Option<u16>) -> Result<(Vec<MemberDecl>, usize)> {
+    if let Some(Token::Separator('(')) = tokens.get(1) {
+        return Err(syntax_error(
+            "Arrays of structures are not supported",
+            line_number,
+        ));
+    }
+    parse_member_list(tokens, 1, line_number)
+}
+
+/// Parse the member list that starts at `start`, to the `}`. Give the
+/// members and the position of the `}`.
+fn parse_member_list(
+    tokens: &[Token],
+    start: usize,
+    line_number: Option<u16>,
+) -> Result<(Vec<MemberDecl>, usize)> {
     let mut members: Vec<MemberDecl> = Vec::new();
-    let mut pos = 1;
+    let mut pos = start;
     loop {
         let (member, last) = parse_member_decl(tokens, pos, line_number)?;
         if members.iter().any(|other| other.name() == member.name()) {
@@ -248,6 +396,9 @@ fn parse_member_decl(
         }
         Some(Token::Separator('{')) => {
             check_no_type_suffix(&name, line_number)?;
+            if let Some((prototype, last)) = parse_prototype(&tokens[pos + 1..], 1, line_number)? {
+                return Ok((MemberDecl::Prototype { name, prototype }, pos + 1 + last));
+            }
             let (members, close) = parse_members(&tokens[pos + 1..], line_number)?;
             Ok((MemberDecl::Structure { name, members }, pos + 1 + close))
         }
@@ -283,18 +434,42 @@ pub(super) fn next_dim_item(
 /// brackets after it, if any. Give the path and the position of its last
 /// token. Empty brackets, such as `s.a()`, are a syntax error: the manual
 /// does not permit a whole array member.
+///
+/// The path can also start at a name with `{}` or with an element index,
+/// such as `a{}`, `t{(1)}` or `t{(1)}.x` (issue #193). Use
+/// `starts_member_path` first.
 pub(super) fn parse_member_path(
     tokens: &[Token],
     pos: usize,
     line_number: Option<u16>,
 ) -> Result<(MemberPath, usize)> {
-    let Some(Token::Member(structure, members)) = tokens.get(pos) else {
-        return Err(syntax_error("Expected variable name", line_number));
-    };
-    let mut path = MemberPath {
-        structure: structure.clone(),
-        members: members.clone(),
-        indices: Vec::new(),
+    let (mut path, pos) = match tokens.get(pos) {
+        Some(Token::Member(structure, members)) if !structure.is_empty() => {
+            let path = MemberPath {
+                structure: structure.clone(),
+                element: Vec::new(),
+                members: members.clone(),
+                indices: Vec::new(),
+            };
+            (path, pos)
+        }
+        Some(Token::Identifier(name)) if starts_member_path(tokens, pos) => {
+            let (element, close) = parse_element(tokens, pos, line_number)?;
+            let mut path = MemberPath {
+                structure: name.clone(),
+                element,
+                members: Vec::new(),
+                indices: Vec::new(),
+            };
+            match tokens.get(close + 1) {
+                Some(Token::Member(structure, members)) if structure.is_empty() => {
+                    path.members = members.clone();
+                    (path, close + 1)
+                }
+                _ => return Ok((path, close)),
+            }
+        }
+        _ => return Err(syntax_error("Expected variable name", line_number)),
     };
     if !matches!(tokens.get(pos + 1), Some(Token::Separator('('))) {
         return Ok((path, pos));
@@ -311,20 +486,68 @@ pub(super) fn parse_member_path(
     Ok((path, close))
 }
 
-/// Parse `point.x = expr` or `s.a(1) = expr` (issues #191 and #192). The
-/// tokens start at the member.
+/// True if a member path starts at `pos`: a member token with a structure
+/// name, or a name with `{}` or `{(` (issue #193)
+pub(super) fn starts_member_path(tokens: &[Token], pos: usize) -> bool {
+    match tokens.get(pos) {
+        Some(Token::Member(structure, _)) => !structure.is_empty(),
+        Some(Token::Identifier(_)) => matches!(
+            tokens.get(pos + 1..pos + 3),
+            Some([Token::Separator('{'), Token::Separator('(' | '}')])
+        ),
+        _ => false,
+    }
+}
+
+/// Parse the part `name{}` or `name{(indices)}` at `pos`. Give the element
+/// indices, which are empty for `name{}`, and the position of the `}`.
+fn parse_element(
+    tokens: &[Token],
+    pos: usize,
+    line_number: Option<u16>,
+) -> Result<(Vec<Expression>, usize)> {
+    if tokens.get(pos + 2) == Some(&Token::Separator('}')) {
+        return Ok((Vec::new(), pos + 2));
+    }
+    let close = find_closing_bracket(tokens, pos + 2)
+        .ok_or_else(|| syntax_error("Expected ')' after the structure index", line_number))?;
+    if close == pos + 3 {
+        return Err(syntax_error(
+            "A whole array of structures is not supported",
+            line_number,
+        ));
+    }
+    if tokens.get(close + 1) != Some(&Token::Separator('}')) {
+        return Err(syntax_error(
+            "Expected '}' after the structure index",
+            line_number,
+        ));
+    }
+    let element = parse_comma_separated_expressions(&tokens[pos + 3..close], line_number)?;
+    Ok((element, close + 1))
+}
+
+/// Parse `point.x = expr` or `s.a(1) = expr` (issues #191 and #192), or
+/// the copy `b{} = a{}` (issue #193). The tokens start at the member.
 pub(super) fn parse_member_assignment(
     tokens: &[Token],
     line_number: Option<u16>,
 ) -> Result<Statement> {
     let (target, last) = parse_member_path(tokens, 0, line_number)?;
-    match tokens.get(last + 1) {
-        Some(Token::Operator('=')) => Ok(Statement::MemberAssignment {
+    if tokens.get(last + 1) != Some(&Token::Operator('=')) {
+        return Err(syntax_error("Expected '='", line_number));
+    }
+    if !target.members.is_empty() {
+        return Ok(Statement::MemberAssignment {
             target,
             expression: parse_expression(&tokens[last + 2..])?,
-        }),
-        _ => Err(syntax_error("Expected '='", line_number)),
+        });
     }
+    let (source, end) = parse_structure(tokens, last + 2, line_number)?;
+    if end + 1 != tokens.len() {
+        return Err(syntax_error("Expected a structure after '='", line_number));
+    }
+    Ok(Statement::StructureCopy { target, source })
 }
 
 /// The expression of the member path at `pos`. Move `pos` after it.
@@ -340,7 +563,7 @@ pub(super) fn member_target(
     tokens: &[Token],
     line_number: Option<u16>,
 ) -> Result<Option<InputItem>> {
-    if !matches!(tokens.first(), Some(Token::Member(..))) {
+    if !starts_member_path(tokens, 0) {
         return Ok(None);
     }
     let (path, last) = parse_member_path(tokens, 0, line_number)?;
@@ -360,8 +583,17 @@ mod tests {
     fn path(structure: &str, members: &[&str], indices: Vec<Expression>) -> MemberPath {
         MemberPath {
             structure: structure.to_string(),
+            element: Vec::new(),
             members: members.iter().map(|member| member.to_string()).collect(),
             indices,
+        }
+    }
+
+    /// The path of an element of an array of structures (issue #193)
+    fn element_path(structure: &str, element: Vec<Expression>, members: &[&str]) -> MemberPath {
+        MemberPath {
+            element,
+            ..path(structure, members, Vec::new())
         }
     }
 
@@ -538,12 +770,8 @@ mod tests {
 
     #[test]
     fn test_whole_structure_outside_dim_is_an_error() {
-        for text in [
-            "b{} = a{}",
-            "IF 1 THEN b{} = a{}",
-            "PROCa(a{x})",
-            "LOCAL a{x}",
-        ] {
+        // A copy, b{} = a{}, is valid since issue #193
+        for text in ["PRINT a{}", "x = a{}", "PROCa(a{x})", "LOCAL a{x}"] {
             assert!(
                 matches!(
                     parse(text),
@@ -554,6 +782,138 @@ mod tests {
             );
         }
         assert!(parse("IF 1 THEN DIM p{x}").is_ok());
+    }
+
+    #[test]
+    fn test_dim_of_an_array_of_structures() {
+        let statements = parse("DIM t{(10, N%) a(2), p{x}}").unwrap();
+        assert_eq!(
+            statements,
+            vec![Statement::Dim {
+                items: vec![DimItem::StructureArray {
+                    name: "t".to_string(),
+                    dimensions: vec![
+                        Expression::Integer(10),
+                        Expression::Variable("N%".to_string())
+                    ],
+                    members: vec![
+                        MemberDecl::Array {
+                            name: "a".to_string(),
+                            dimensions: vec![Expression::Integer(2)],
+                        },
+                        MemberDecl::Structure {
+                            name: "p".to_string(),
+                            members: vec![MemberDecl::Scalar("x".to_string())],
+                        },
+                    ],
+                }]
+            }]
+        );
+    }
+
+    #[test]
+    fn test_dim_of_structures_from_a_prototype() {
+        let whole = path("a", &[], Vec::new());
+        let statements = parse("DIM b{} = a{}, c{(3)} = t{(1)}, n{s$, p{} = a{}}").unwrap();
+        assert_eq!(
+            statements,
+            vec![Statement::Dim {
+                items: vec![
+                    DimItem::StructurePrototype {
+                        name: "b".to_string(),
+                        dimensions: Vec::new(),
+                        prototype: whole.clone(),
+                    },
+                    DimItem::StructurePrototype {
+                        name: "c".to_string(),
+                        dimensions: vec![Expression::Integer(3)],
+                        prototype: element_path("t", vec![Expression::Integer(1)], &[]),
+                    },
+                    DimItem::Structure {
+                        name: "n".to_string(),
+                        members: vec![
+                            MemberDecl::Scalar("s$".to_string()),
+                            MemberDecl::Prototype {
+                                name: "p".to_string(),
+                                prototype: whole,
+                            },
+                        ],
+                    },
+                ]
+            }]
+        );
+    }
+
+    #[test]
+    fn test_members_of_elements_and_the_copy() {
+        let element = element_path(
+            "t",
+            vec![Expression::Variable("I%".to_string())],
+            &["p", "x"],
+        );
+        assert_eq!(
+            parse("t{(I%)}.p.x = t{(1, 2)}.a(3)").unwrap(),
+            vec![Statement::MemberAssignment {
+                target: element.clone(),
+                expression: Expression::Member(Box::new(MemberPath {
+                    indices: vec![Expression::Integer(3)],
+                    ..element_path(
+                        "t",
+                        vec![Expression::Integer(1), Expression::Integer(2)],
+                        &["a"]
+                    )
+                })),
+            }]
+        );
+        assert_eq!(
+            parse("READ t{(I%)}.p.x").unwrap(),
+            vec![Statement::Read {
+                variables: vec![InputItem::Member(element)]
+            }]
+        );
+        assert_eq!(
+            parse("b{} = t{(1)}").unwrap(),
+            vec![Statement::StructureCopy {
+                target: path("b", &[], Vec::new()),
+                source: element_path("t", vec![Expression::Integer(1)], &[]),
+            }]
+        );
+        assert_eq!(
+            parse("PROCa(t{(1)})").unwrap(),
+            vec![Statement::ProcCall {
+                name: "a".to_string(),
+                args: vec![Expression::Member(Box::new(element_path(
+                    "t",
+                    vec![Expression::Integer(1)],
+                    &[]
+                )))],
+            }]
+        );
+    }
+
+    #[test]
+    fn test_bad_forms_of_an_element_and_a_copy() {
+        for (text, message) in [
+            ("PRINT t{(1).x", "Expected '}' after the structure index"),
+            ("PRINT t{(1}.x", "Expected ')' after the structure index"),
+            (
+                "t{()}.x = 1",
+                "A whole array of structures is not supported",
+            ),
+            ("b{} = 1", "Expected a structure after '='"),
+            ("b{} = a{} + 1", "Expected a structure after '='"),
+            ("b{} = a.p", "Expected a structure after '='"),
+            ("DIM b{} = a.p", "Expected a structure after '='"),
+        ] {
+            assert!(
+                matches!(
+                    parse(text),
+                    Err(BBCBasicError::SyntaxError { message: ref found, .. }) if found == message
+                ),
+                "{text}: {:?}",
+                parse(text)
+            );
+        }
     }
 
     #[test]

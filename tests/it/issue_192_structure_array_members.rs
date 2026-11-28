@@ -176,10 +176,7 @@ fn test_a_bad_member_in_a_dim() {
             "10 DIM s{p{(3)x}}",
             "Arrays of structures are not supported",
         ),
-        (
-            "10 DIM s{p{} = q{}}",
-            "A structure from a prototype is not supported",
-        ),
+        // A sub-structure from a prototype is valid since issue #193
     ];
     for (line, message) in cases {
         let (result, _) = run(&[line]);
