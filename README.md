@@ -183,7 +183,7 @@ src/
 
 ## Test Coverage
 
-- **2243 tests** covering all major components
+- **3010 tests** covering all major components
 - **Test-Driven Development (TDD)** methodology
 - Property-based testing for variable storage
 - Unit tests for all statement types
