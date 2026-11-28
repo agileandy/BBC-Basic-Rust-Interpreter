@@ -1,9 +1,13 @@
 //! Issue 210: play the sound on the default audio output of the computer.
 //! No test opens a device: the tests give a fake opener to the factory.
 
+use bbc_basic_interpreter::executor::Executor;
+use bbc_basic_interpreter::program::ProgramStore;
+use bbc_basic_interpreter::runner::run_program;
 use bbc_basic_interpreter::sound::{
     factory_with, lock, OutputFactory, SharedEngine, SoundEngine, SoundOutput,
 };
+use bbc_basic_interpreter::tokenizer::tokenize;
 use bbc_basic_interpreter::ui::{parse_options, Options, Start, USAGE};
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
@@ -191,4 +195,53 @@ fn the_prompt_runs_with_the_no_sound_flag() {
     assert!(stdout.contains("42\n"), "{stdout}");
     assert!(stdout.contains("Goodbye!"), "{stdout}");
     assert_eq!(stderr, "");
+}
+
+#[test]
+fn a_scale_plays_at_the_prompt_with_the_no_sound_flag_and_gives_no_note() {
+    let input =
+        "10 FOR P%=53 TO 81 STEP 4\n20 SOUND 1,-15,P%,1\n30 NEXT\n40 PRINT \"END\"\nRUN\nEXIT\n";
+    let (code, stdout, stderr) = run_binary(&["--no-sound"], input);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("END\n"), "{stdout}");
+    assert_eq!(stderr, "");
+}
+
+/// Run the program on an executor with the factory of the binary and an
+/// opener that counts its calls in `calls`. Give the count.
+fn device_opens(
+    source: &[&str],
+    open: fn(SharedEngine) -> Result<Box<dyn SoundOutput>, String>,
+    calls: &AtomicUsize,
+) -> usize {
+    let mut executor = Executor::new();
+    executor.set_sound_output(factory_with(false, open, Box::new(io::sink())));
+    let mut program = ProgramStore::new();
+    for line in source {
+        program.store_line(tokenize(line).expect("line tokenizes"));
+    }
+    assert_eq!(run_program(&mut executor, &mut program), Ok(()));
+    executor.stop_sound();
+    calls.load(Ordering::SeqCst)
+}
+
+#[test]
+fn a_program_with_no_sound_opens_no_device() {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    fn open(_: SharedEngine) -> Result<Box<dyn SoundOutput>, String> {
+        CALLS.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(FakeDevice))
+    }
+    assert_eq!(device_opens(&["10 PRINT 1"], open, &CALLS), 0);
+}
+
+#[test]
+fn the_first_sound_opens_the_device_one_time() {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    fn open(_: SharedEngine) -> Result<Box<dyn SoundOutput>, String> {
+        CALLS.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(FakeDevice))
+    }
+    let source = ["10 SOUND 1,-15,53,1", "20 SOUND 2,-15,89,1"];
+    assert_eq!(device_opens(&source, open, &CALLS), 1);
 }

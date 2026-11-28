@@ -73,6 +73,8 @@ fn run_interpreter() {
     println!("Type 'EXIT' to quit, 'HELP' for help\n");
 
     let mut executor = Executor::new();
+    // The first SOUND opens the audio device, or writes a note to stderr
+    executor.set_sound_output(sound::factory(Box::new(io::stderr())));
     let mut program = ProgramStore::new();
     let stdin = io::stdin();
     let mut line_buffer = String::new();
