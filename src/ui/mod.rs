@@ -405,6 +405,9 @@ impl App {
         ])
         .areas(area);
         frame::draw_tabs(frame, tabs, self.mode);
+        // The text screen before the first MODE has the size of the pane,
+        // also for a run that starts in another mode (issue #200)
+        self.run.see_pane(pane);
         let ctx = &self.context;
         // The help screen is in place of the pane, so that the cursor of
         // the pane does not show in it

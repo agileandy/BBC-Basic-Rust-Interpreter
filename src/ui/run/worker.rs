@@ -18,8 +18,9 @@
 //! only if the canvas, the mode or the size changed: during a run at most
 //! 30 times in one second, and at the end of each command.
 
+use super::{Screen, ScreenChange};
 use crate::commands::{run_command, CommandOutcome};
-use crate::executor::{Console, Executor, Interrupt};
+use crate::executor::{Console, CursorMove, Executor, Interrupt};
 use crate::graphics::{GraphicsSystem, ScreenMode};
 use crate::program::ProgramStore;
 use crate::tokenizer::expand_short_form;
@@ -63,14 +64,8 @@ pub(super) enum Answer {
 
 /// A message from the worker to the pane.
 pub(super) enum FromWorker {
-    /// Text for the screen
-    Text(String),
-    /// Clear the screen (CLS)
-    Clear,
-    /// MODE selected this screen mode. A Clear comes after it.
-    Mode(ScreenMode),
-    /// The logical text colours: the foreground and the background
-    Colours(u8, u8),
+    /// A change of the text screen. The worker applied it to its screen.
+    Screen(ScreenChange),
     /// A typed line, with no line end. The worker waits for the answer.
     Line(String),
     /// A command or a run starts
@@ -99,6 +94,9 @@ pub(super) struct Flags {
     /// The picture area in cells: the width in the high 16 bits and the
     /// height in the low 16 bits. The pane sets it with `pack_size`.
     pub size: AtomicU32,
+    /// The pane in cells, packed as `size`: the text screen has this size
+    /// before the first MODE. 0 before the first draw.
+    pub text: AtomicU32,
 }
 
 /// The value of the size flag for an area of `columns` by `rows` cells.
@@ -139,8 +137,10 @@ pub(super) struct Link {
     answer: Option<Answer>,
     /// True if the pane closed its end of a channel
     closed: bool,
-    /// True if the cursor is at the start of a line
-    at_line_start: bool,
+    /// A copy of the text screen of the pane, for VPOS and the prompt
+    screen: Screen,
+    /// The text size flag of the last fit of the screen
+    fitted: u32,
     /// What the last picture showed, and when the worker sent it
     shown: Option<Shown>,
     shown_at: Option<Instant>,
@@ -154,6 +154,7 @@ impl Link {
         input: Receiver<ToWorker>,
         output: SyncSender<FromWorker>,
         flags: Arc<Flags>,
+        screen: Screen,
     ) -> Self {
         Self {
             input,
@@ -163,7 +164,8 @@ impl Link {
             run: None,
             answer: None,
             closed: false,
-            at_line_start: true,
+            screen,
+            fitted: 0,
             shown: None,
             shown_at: None,
         }
@@ -213,15 +215,37 @@ impl Link {
     }
 
     fn write(&mut self, text: &str) {
-        if let Some(last) = text.chars().last() {
-            self.at_line_start = last == '\n';
-            self.send(FromWorker::Text(text.to_string()));
+        if !text.is_empty() {
+            self.change(ScreenChange::Text(text.to_string()));
         }
     }
 
-    /// Start a new line if the cursor is not at the start of a line.
+    /// Apply a change to the copy of the text screen, and send it to the
+    /// pane. If the pane has a new size, first fit the screen to it.
+    fn change(&mut self, change: ScreenChange) {
+        self.fit();
+        self.screen.apply(&change);
+        self.send(FromWorker::Screen(change));
+    }
+
+    /// If the size of the pane changed, fit the text screen to it. The fit
+    /// goes in the sequence of the changes, so that the 2 screens stay the
+    /// same.
+    fn fit(&mut self) {
+        let size = self.flags.text.load(Ordering::Relaxed);
+        if size == 0 || size == self.fitted {
+            return;
+        }
+        self.fitted = size;
+        let fit = ScreenChange::Fit((size >> 16) as usize, (size & 0xFFFF) as usize);
+        self.screen.apply(&fit);
+        self.send(FromWorker::Screen(fit));
+    }
+
+    /// Start a new line if the cursor is not at the start of an empty
+    /// line, so that the prompt does not write over text.
     fn new_line(&mut self) {
-        if !self.at_line_start {
+        if !self.screen.at_free_line() {
             self.write("\n");
         }
     }
@@ -252,8 +276,8 @@ impl Link {
     }
 
     /// Wait for the next key, for a maximum of `limit` if there is a limit.
-    /// With a view of the canvas, a new size of the pane gets a new picture
-    /// during the wait.
+    /// A new size of the pane fits the text screen during the wait. With a
+    /// view of the canvas, it also gets a new picture.
     fn next_key(&mut self, limit: Option<Duration>, at_prompt: bool, view: View) -> KeyWait {
         let deadline = limit.map(|limit| Instant::now() + limit);
         loop {
@@ -263,6 +287,7 @@ impl Link {
             if let Some(key) = self.keys.pop_front() {
                 return KeyWait::Key(key);
             }
+            self.fit();
             if let Some((graphics, mode)) = view {
                 self.picture(graphics, mode, true);
             }
@@ -346,9 +371,7 @@ impl Console for WorkerConsole {
     }
 
     fn clear(&mut self) {
-        let mut link = self.0.borrow_mut();
-        link.at_line_start = true;
-        link.send(FromWorker::Clear);
+        self.0.borrow_mut().change(ScreenChange::Clear);
     }
 
     fn read_line(&mut self) -> Option<String> {
@@ -376,13 +399,23 @@ impl Console for WorkerConsole {
     }
 
     fn screen_mode(&mut self, mode: ScreenMode) {
-        self.0.borrow_mut().send(FromWorker::Mode(mode));
+        self.0.borrow_mut().change(ScreenChange::Mode(mode));
     }
 
     fn text_colours(&mut self, foreground: u8, background: u8) {
         self.0
             .borrow_mut()
-            .send(FromWorker::Colours(foreground, background));
+            .change(ScreenChange::Colours(foreground, background));
+    }
+
+    fn move_cursor(&mut self, movement: CursorMove) -> bool {
+        self.0.borrow_mut().change(ScreenChange::Move(movement));
+        true
+    }
+
+    fn cursor(&mut self) -> Option<(usize, usize)> {
+        let screen = &self.0.borrow().screen;
+        Some((screen.col, screen.row))
     }
 
     fn see_graphics(&mut self, graphics: &GraphicsSystem, mode: ScreenMode) {
@@ -507,7 +540,11 @@ mod tests {
         let (worker_output, output) = mpsc::sync_channel(16);
         let flags = Arc::new(Flags::default());
         flags.size.store(pack_size(4, 2), Ordering::Relaxed);
-        (Link::new(worker_input, worker_output, flags), output, input)
+        (
+            Link::new(worker_input, worker_output, flags, Screen::default()),
+            output,
+            input,
+        )
     }
 
     fn pictures(output: &Receiver<FromWorker>) -> Vec<Option<Picture>> {
