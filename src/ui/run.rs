@@ -645,10 +645,10 @@ impl RunPane {
             ctx.message = mark.message.clone();
             return Answer::Skip;
         }
-        let same = self
-            .synced
-            .as_ref()
-            .is_some_and(|synced| synced.list() == program.list());
+        let same = self.synced.as_ref().is_some_and(|synced| {
+            // The file gives the first search place of INSTALL (issue #186)
+            synced.list() == program.list() && synced.file() == program.file()
+        });
         if same {
             return Answer::Run(None);
         }

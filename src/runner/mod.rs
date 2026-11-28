@@ -568,7 +568,9 @@ pub fn run_program_with_outcome(
     executor.clear_variables();
     // RUN starts with no ON ERROR handler. CLEAR keeps the handler.
     executor.clear_error_handler();
-    // RUN and CHAIN keep the libraries of INSTALL, as the manual says
+    // RUN and CHAIN keep the libraries of INSTALL, as the manual says.
+    // INSTALL searches the directory of the program file first (issue #186).
+    executor.libraries_mut().set_program_file(program.file());
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
@@ -652,6 +654,7 @@ pub fn run_typed_line(
     // that a changed or deleted DEF does not keep an old position
     executor.clear_procedures();
     executor.clear_multi_line_functions();
+    executor.libraries_mut().set_program_file(program.file());
     executor.set_program_size(program.size_in_bytes());
     executor.reset_column();
 
@@ -825,8 +828,7 @@ fn program_defines_function(executor: &Executor, name: &str) -> bool {
 
 /// Parse each line of a library as line set `set`. Each line has the key of
 /// its place in the file. A line with a fault gives Bad library with its
-/// place in the file, and no part of the library is used. The DATA of a
-/// library is not used (issue #186).
+/// place in the file, and no part of the library is used.
 fn parse_library(library: &Library, set: usize) -> Result<ProgramLines, BBCBasicError> {
     let mut items = HashMap::new();
     let mut keys = HashMap::new();
@@ -852,11 +854,20 @@ fn parse_library(library: &Library, set: usize) -> Result<ProgramLines, BBCBasic
     Ok(lines)
 }
 
-/// Define the routines of a library, in file order
-fn define_library_routines(executor: &mut Executor, lines: &ProgramLines) {
+/// Define the routines of a library, in file order, and give the executor
+/// the DATA of the library, for RESTORE +n in a library routine (issue #186)
+fn define_library_routines(executor: &mut Executor, set: usize, lines: &ProgramLines) {
+    let mut data = Vec::new();
     for &key in &lines.line_numbers {
-        define_routines(executor, key, &lines.items[&key], true);
+        let items = &lines.items[&key];
+        define_routines(executor, key, items, true);
+        for item in items {
+            if let Item::Statement(Statement::Data { values }) = item {
+                data.extend(values.iter().map(|value| (key, value.clone())));
+            }
+        }
     }
+    executor.use_library_data(set, data);
 }
 
 /// Add the installed libraries to the line sets of a run, after the
@@ -869,9 +880,10 @@ fn add_installed_libraries(executor: &mut Executor, lines: &RunLines) -> Result<
     let libraries = executor.libraries().libraries().to_vec();
     for library in &libraries {
         // INSTALL parsed each line before it kept the library
+        let set = lines.next_set();
         let library_lines =
-            parse_library(library, lines.next_set()).map_err(|error| error_text_at(&error, ""))?;
-        define_library_routines(executor, &library_lines);
+            parse_library(library, set).map_err(|error| error_text_at(&error, ""))?;
+        define_library_routines(executor, set, &library_lines);
         lines.add(library_lines);
     }
     Ok(())
@@ -890,9 +902,10 @@ fn install_library(
     if executor.libraries().is_installed(&name) {
         return Ok(());
     }
-    let library = read_library(&name)?;
-    let lines = parse_library(&library, all.next_set())?;
-    define_library_routines(executor, &lines);
+    let library = read_library(&name, executor.libraries())?;
+    let set = all.next_set();
+    let lines = parse_library(&library, set)?;
+    define_library_routines(executor, set, &lines);
     all.add(lines);
     executor.libraries_mut().add(library);
     Ok(())
@@ -1334,6 +1347,17 @@ fn step(
         }
         Statement::Install { file } => {
             install_library(executor, program.all, file)?;
+            return Ok(Flow::Next);
+        }
+        // RESTORE +n: the DATA of the line n lines after this line, in the
+        // line set of this line. It is the RESTORE of a library, which has
+        // no line numbers (bbcwin5.html#install, bbcwin7.html#restore).
+        Statement::RestoreRelative { offset } => {
+            let offset = executor.eval_integer(offset)?;
+            let offset = usize::try_from(offset).map_err(|_| BBCBasicError::NoSuchLine(offset))?;
+            let after = (Bound::Included(line_number), Bound::Unbounded);
+            let target = program.lines.line_numbers.range(after).nth(offset);
+            executor.restore_data_to(program.set, target.copied());
             return Ok(Flow::Next);
         }
         // INSTALL defined the functions of a library with the precedence of

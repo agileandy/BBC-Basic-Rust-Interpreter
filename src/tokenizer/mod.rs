@@ -427,9 +427,12 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
             // A keyword matches only in upper case, as in BBC BASIC.
             // A word in another letter case is a name.
             if let Some(&token_byte) = keyword_map.get(&word) {
+                // DATA after LOCAL or RESTORE is a part of LOCAL DATA or
+                // RESTORE DATA, and the line continues (issue #186)
+                let data_part = matches!(tokens.last(), Some(Token::Keyword(0xEA | 0xF7)));
                 tokens.push(Token::Keyword(token_byte));
                 // DATA uses the rest of the line. Keep that text as typed.
-                if token_byte == 0xDC {
+                if token_byte == 0xDC && !data_part {
                     let text: String = chars.by_ref().collect();
                     if !text.is_empty() {
                         tokens.push(Token::DataText(text));
@@ -502,10 +505,11 @@ fn tokenize_text(source_line: &str, line_numbers: bool) -> Result<TokenizedLine>
             _ => {
                 // A REM or DATA statement uses the rest of the line, so the
                 // tokenizer skips a character that it does not know there.
-                // In other text, the character is an error.
+                // In other text, the character is an error. The DATA of
+                // LOCAL DATA does not use the line, and has no DataText.
                 if !tokens
                     .iter()
-                    .any(|t| matches!(t, Token::Keyword(0xF4 | 0xDC)))
+                    .any(|t| matches!(t, Token::Keyword(0xF4) | Token::DataText(_)))
                 {
                     return Err(BBCBasicError::SyntaxError {
                         message: format!("Unknown character '{}'", ch),

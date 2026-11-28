@@ -67,6 +67,10 @@ impl Position {
 pub struct ProgramStore {
     /// Stored program lines (line_number -> TokenizedLine)
     lines: BTreeMap<u16, TokenizedLine>,
+    /// The file of the program: the last LOAD, CHAIN or SAVE at the prompt,
+    /// or the document file of the IDE. INSTALL searches its directory
+    /// first (issue #186). NEW keeps it.
+    file: Option<String>,
 }
 
 impl ProgramStore {
@@ -74,7 +78,18 @@ impl ProgramStore {
     pub fn new() -> Self {
         Self {
             lines: BTreeMap::new(),
+            file: None,
         }
+    }
+
+    /// The file of the program, if it has one
+    pub fn file(&self) -> Option<&str> {
+        self.file.as_deref()
+    }
+
+    /// Set the file of the program
+    pub fn set_file(&mut self, file: Option<String>) {
+        self.file = file;
     }
 
     /// Store a program line

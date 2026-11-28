@@ -170,6 +170,8 @@ impl Document {
     pub fn to_program_cached(&self, cache: &mut LineCache) -> (ProgramStore, Vec<LineMark>) {
         let mut old = std::mem::take(&mut cache.0);
         let mut program = ProgramStore::new();
+        // INSTALL searches the directory of the document file first (issue #186)
+        program.set_file(self.file_name.clone());
         let mut marks = Vec::new();
         let mut seen = HashSet::new();
         for (index, line) in self.lines.iter().enumerate() {

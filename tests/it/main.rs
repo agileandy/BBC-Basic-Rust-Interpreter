@@ -186,3 +186,4 @@ mod issue_199_ide_small_gaps;
 mod issue_202_input_and_member_defects;
 mod issue_198_for_target_variable;
 mod issue_200_text_cursor_rows;
+mod issue_186_library_data_and_search;
