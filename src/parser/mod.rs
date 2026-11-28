@@ -209,6 +209,14 @@ pub enum Statement {
         operator: Option<BinaryOperator>,
         value: ArrayExpression,
     },
+    /// A compound assignment (issue #204), such as `S% += 2`, `A(I%) -= 1`
+    /// or `p.x *= 2`. The target has the form of a SWAP target. `A += B` is
+    /// `A = A + (B)`, and the indices of the target are evaluated one time.
+    CompoundAssignment {
+        target: InputItem,
+        operator: BinaryOperator,
+        expression: Expression,
+    },
     /// A matrix statement such as `MATINVERSE dest(), src()` (extension,
     /// issue #190). The names have no bracket.
     Matrix {
@@ -1451,6 +1459,18 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
             return parse_memory_assignment(tokens, line_number);
         }
 
+        // A compound assignment to an element: A(I%) += 1 (issue #204)
+        if let Some(operator) = whole_array::compound_operator(tokens, close_paren_pos + 1) {
+            return Ok(Statement::CompoundAssignment {
+                target: InputItem::ArrayElement {
+                    name: target,
+                    indices,
+                },
+                operator,
+                expression: parse_expression(&tokens[close_paren_pos + 3..])?,
+            });
+        }
+
         // After closing paren, expect '='
         if close_paren_pos + 1 >= tokens.len()
             || !matches!(tokens[close_paren_pos + 1], Token::Operator('='))
@@ -1468,6 +1488,15 @@ fn parse_assignment(tokens: &[Token], line_number: Option<u16>) -> Result<Statem
             name: target,
             indices,
             expression,
+        });
+    }
+
+    // A compound assignment to a variable: S% += 2 (issue #204)
+    if let Some(operator) = whole_array::compound_operator(tokens, 1) {
+        return Ok(Statement::CompoundAssignment {
+            target: InputItem::Variable(target),
+            operator,
+            expression: parse_expression(&tokens[3..])?,
         });
     }
 

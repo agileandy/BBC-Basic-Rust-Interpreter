@@ -68,6 +68,16 @@ fn array_operator(token: &Token) -> Option<BinaryOperator> {
     }
 }
 
+/// The operator of a compound assignment, such as `+=` or `MOD=`, if the
+/// tokens at `pos` are one (issue #204). The operators are the same as for
+/// an array: the manual, page bbcwin2.html, "Compound assignment".
+pub(super) fn compound_operator(tokens: &[Token], pos: usize) -> Option<BinaryOperator> {
+    match tokens.get(pos + 1) {
+        Some(Token::Operator('=')) => array_operator(tokens.get(pos)?),
+        _ => None,
+    }
+}
+
 /// The lowest precedence that a scalar operand after `op` can contain. `None`
 /// is the first operand. These are the levels of `expra` in BBC BASIC for SDL.
 fn scalar_precedence(op: Option<&BinaryOperator>) -> u8 {
