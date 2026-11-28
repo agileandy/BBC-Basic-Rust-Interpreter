@@ -16,6 +16,9 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm_0
 serde_json = { version = "1.0", features = ["preserve_order"] }
 # For the maps of the collections extension: the keys stay in the order of the puts
 indexmap = "2"
+# For the SOUND statement: it plays the samples of the sound chip model on the
+# default audio output (CoreAudio on macOS, ALSA on Linux, WASAPI on Windows)
+cpal = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 # For poll and non-blocking stdin, so that INKEY waits for a key a maximum time

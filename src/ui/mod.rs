@@ -33,7 +33,29 @@ use std::io::{self, IsTerminal, Write};
 use std::time::Duration;
 
 /// The usage line for an argument that is not known.
-pub const USAGE: &str = "Usage: bbc-basic-interpreter [--ide [file]]";
+pub const USAGE: &str = "Usage: bbc-basic-interpreter [--no-sound] [--ide [file]]";
+
+/// The start mode and the sound flag, from the arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Options {
+    pub start: Start,
+    /// `--no-sound`: open no audio device
+    pub no_sound: bool,
+}
+
+/// Read the arguments after the binary name. `--no-sound` can be at any
+/// position, one time. The other arguments go to `parse_args`.
+pub fn parse_options(args: impl IntoIterator<Item = String>) -> Result<Options, &'static str> {
+    let (flags, rest): (Vec<String>, Vec<String>) =
+        args.into_iter().partition(|a| a == "--no-sound");
+    if flags.len() > 1 {
+        return Err(USAGE);
+    }
+    Ok(Options {
+        start: parse_args(rest)?,
+        no_sound: flags.len() == 1,
+    })
+}
 
 /// The smallest terminal that shows the frame.
 pub const MIN_WIDTH: u16 = 60;
@@ -538,6 +560,9 @@ fn run(mut app: App) -> io::Result<()> {
             changed = true;
         }
     }
+    // Ctrl-Q: the end of the worker stops the sound before the guard
+    // restores the terminal (issue 210)
+    app.stop_worker(Duration::from_secs(2));
     Ok(())
 }
 
